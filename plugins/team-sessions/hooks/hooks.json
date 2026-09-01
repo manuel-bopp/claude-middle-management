@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-role.sh\"",
+            "timeout": 10,
+            "statusMessage": "team-sessions: session role"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/protect-main-checkouts.sh\"",
+            "timeout": 10,
+            "statusMessage": "team-sessions: worktree rule"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/block-blanket-git-add.sh\"",
+            "timeout": 10,
+            "statusMessage": "team-sessions: staging scope"
+          }
+        ]
+      }
+    ]
+  }
+}

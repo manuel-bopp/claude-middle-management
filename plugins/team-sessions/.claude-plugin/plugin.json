@@ -1,0 +1,6 @@
+{
+  "name": "team-sessions",
+  "description": "Coordinator/worker roles, per-topic worktree discipline, and surgical git staging for many parallel Claude Code sessions on one machine.",
+  "version": "0.1.0",
+  "author": { "name": "Manu" }
+}
