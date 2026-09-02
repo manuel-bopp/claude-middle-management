@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# team-sessions plugin — UserPromptSubmit hook.
+# middle-management plugin — UserPromptSubmit hook.
 # Consumers: hooks/hooks.json (UserPromptSubmit registration). Reads the coordinator
 # marker written by scripts/orchestrator.sh; resolves every path through
 # scripts/config-check.sh.
@@ -13,14 +13,14 @@
 #      (started as `claude -n orchestrator`). The route for terminal sessions.
 # If neither finds a living coordinator, this hook stays SILENT — the regime is off and
 # every session works standalone. The role messages below ARE the behavioral contract;
-# the skill "team-sessions" is the extended reference.
+# the skill "middle-management" is the extended reference.
 set -u
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 CHECK="$PLUGIN_ROOT/scripts/config-check.sh"
 
 command -v jq >/dev/null 2>&1 || {
-  echo "team-sessions: jq not installed — plugin inactive (install jq)"; exit 0; }
+  echo "middle-management: jq not installed — plugin inactive (install jq)"; exit 0; }
 
 CFG_DIR="$(bash "$CHECK" dir)"
 CFG_FILE="$(bash "$CHECK" file)"
@@ -29,22 +29,22 @@ MARKER="$CFG_DIR/state/orchestrator"
 OVERRIDE="$CFG_DIR/state/allow-main-checkout-edits"
 
 [ -d "$REG" ] || {
-  echo "team-sessions: session registry not found — role detection inactive (requires a recent Claude Code)"
+  echo "middle-management: session registry not found — role detection inactive (requires a recent Claude Code)"
   exit 0; }
 
 # --- preconditions: warn loudly, then carry on with the role logic ---------------
 bash "$CHECK" validate; CFG_STATE=$?
 BOARD=""
 if [ "$CFG_STATE" -eq 1 ]; then
-  printf 'team-sessions: %s is invalid — worktree guard and wt are DISARMED and blanket-staging protection is forced ON until fixed (run /team-sessions-setup)\n' "$CFG_FILE"
+  printf 'middle-management: %s is invalid — worktree guard and wt are DISARMED and blanket-staging protection is forced ON until fixed (run /middle-management-setup)\n' "$CFG_FILE"
 elif [ "$CFG_STATE" -eq 0 ]; then
   BOARD=$(jq -r '.board // ""' "$CFG_FILE" 2>/dev/null)
   jq -r '.protectedCheckouts[]? | [.name, .root] | @tsv' "$CFG_FILE" 2>/dev/null \
     | while IFS=$'\t' read -r pc_name pc_root; do
-        [ -d "$pc_root" ] || printf 'team-sessions: protected checkout "%s" points at %s, which is not a directory — that entry is inert (run /team-sessions-setup)\n' "$pc_name" "$pc_root"
+        [ -d "$pc_root" ] || printf 'middle-management: protected checkout "%s" points at %s, which is not a directory — that entry is inert (run /middle-management-setup)\n' "$pc_name" "$pc_root"
       done
 fi
-[ -f "$OVERRIDE" ] && printf 'team-sessions: override marker active — main-checkout guard is OFF; delete %s when the exception is done\n' "$OVERRIDE"
+[ -f "$OVERRIDE" ] && printf 'middle-management: override marker active — main-checkout guard is OFF; delete %s when the exception is done\n' "$OVERRIDE"
 
 # --- role detection ---------------------------------------------------------------
 MY_ID=$(jq -r '.session_id // ""')
@@ -73,7 +73,7 @@ NAMED_COUNT=$(printf '%s' "$NAMED" | grep -c .)
 
 if [ -z "$ORCH" ]; then
   if [ "$NAMED_COUNT" -eq 0 ]; then
-    [ -n "$STALE" ] && printf 'team-sessions: a previous coordinator session ended; the role regime is off until someone claims. Only if your user wants THIS session to coordinate, run: bash %s/scripts/orchestrator.sh claim — otherwise ignore this.\n' "$PLUGIN_ROOT"
+    [ -n "$STALE" ] && printf 'middle-management: a previous coordinator session ended; the role regime is off until someone claims. Only if your user wants THIS session to coordinate, run: bash %s/scripts/orchestrator.sh claim — otherwise ignore this.\n' "$PLUGIN_ROOT"
     exit 0
   fi
   if [ "$NAMED_COUNT" -gt 1 ]; then

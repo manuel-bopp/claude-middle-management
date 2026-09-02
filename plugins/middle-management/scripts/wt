@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# team-sessions plugin — one-command git worktrees for the checkouts listed in
-# the plugin config (<config dir>/team-sessions.json, key protectedCheckouts).
+# middle-management plugin — one-command git worktrees for the checkouts listed in
+# the plugin config (<config dir>/middle-management.json, key protectedCheckouts).
 # Consumers: commands/wt.md (the /wt slash command), the deny message of
 #   hooks/protect-main-checkouts.sh, and users calling it directly.
 #
@@ -11,7 +11,7 @@
 #
 # One lane = one branch = one small pull request. <name>, root, base, install
 # command and worktree directory all come from the config; create or change it
-# with /team-sessions-setup. worktreeDir defaults to the sibling directory
+# with /middle-management-setup. worktreeDir defaults to the sibling directory
 # <parent of root>/.worktrees-<name>.
 set -euo pipefail
 
@@ -27,14 +27,14 @@ RC=0; bash "$CHECK" validate || RC=$?
 CFGFILE="$(bash "$CHECK" file)"
 case "$RC" in
   0) ;;
-  1) die "the team-sessions config $CFGFILE is invalid — fix it with /team-sessions-setup" ;;
-  2) die "no team-sessions config yet ($CFGFILE) — create one with /team-sessions-setup" ;;
+  1) die "the middle-management config $CFGFILE is invalid — fix it with /middle-management-setup" ;;
+  2) die "no middle-management config yet ($CFGFILE) — create one with /middle-management-setup" ;;
   3) die "jq is not installed — wt needs it to read $CFGFILE" ;;
   *) die "config check failed with status $RC" ;;
 esac
 
 ENTRY="$(jq -c --arg n "$NAME" 'first((.protectedCheckouts // [])[] | select(.name == $n)) // empty' "$CFGFILE")"
-[ -n "$ENTRY" ] || die "no checkout named '$NAME' in $CFGFILE (configured: $(jq -r '[(.protectedCheckouts // [])[].name] | join(", ")' "$CFGFILE")) — add it with /team-sessions-setup"
+[ -n "$ENTRY" ] || die "no checkout named '$NAME' in $CFGFILE (configured: $(jq -r '[(.protectedCheckouts // [])[].name] | join(", ")' "$CFGFILE")) — add it with /middle-management-setup"
 
 ROOT="$(printf '%s' "$ENTRY" | jq -r '.root')"; ROOT="${ROOT%/}"
 BASE="$(printf '%s' "$ENTRY" | jq -r '.base // ""')"
@@ -44,12 +44,12 @@ WTDIR="$(printf '%s' "$ENTRY" | jq -r '.worktreeDir // ""')"
 WTDIR="${WTDIR%/}"
 
 git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 \
-  || die "the root of checkout '$NAME' is not a git repository: $ROOT — fix it with /team-sessions-setup"
+  || die "the root of checkout '$NAME' is not a git repository: $ROOT — fix it with /middle-management-setup"
 
 check_base() {
-  [ -n "$BASE" ] || die "checkout '$NAME' has no base branch configured — set it with /team-sessions-setup"
+  [ -n "$BASE" ] || die "checkout '$NAME' has no base branch configured — set it with /middle-management-setup"
   git -C "$ROOT" rev-parse --verify --quiet "$BASE^{commit}" >/dev/null \
-    || die "base '$BASE' of checkout '$NAME' does not resolve to a commit in $ROOT — fix it with /team-sessions-setup"
+    || die "base '$BASE' of checkout '$NAME' does not resolve to a commit in $ROOT — fix it with /middle-management-setup"
 }
 
 case "$CMD" in

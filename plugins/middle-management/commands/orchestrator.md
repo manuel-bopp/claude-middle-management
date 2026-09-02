@@ -1,5 +1,5 @@
 ---
-description: Claim, release, or show the coordinator seat for parallel Claude Code sessions (team-sessions)
+description: Claim, release, or show the coordinator seat for parallel Claude Code sessions (middle-management)
 argument-hint: "[claim|release|status]"
 allowed-tools: ["Bash"]
 ---

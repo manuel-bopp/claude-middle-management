@@ -18,7 +18,7 @@ Then:
    already names the worktree path, the branch, the base and the follow-up
    command — repeat those instead of inventing your own summary.
 2. If the script exited non-zero, show its error line and stop. Errors about the
-   config are fixed by the user running `/team-sessions-setup`; do not edit the
+   config are fixed by the user running `/middle-management-setup`; do not edit the
    config file yourself here.
 3. After a successful `new`, continue the user's implementation work inside the
    printed worktree path, not in the checkout root. If this session cannot edit

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# team-sessions plugin — the coordinator seat: claim / release / status.
+# middle-management plugin — the coordinator seat: claim / release / status.
 # Consumers: commands/orchestrator.md (the /orchestrator slash command), the
 #   stale-marker hint printed by hooks/session-role.sh, tests/run.sh.
 #   The marker it writes is read by hooks/session-role.sh.

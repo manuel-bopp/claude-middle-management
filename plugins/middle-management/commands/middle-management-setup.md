@@ -1,9 +1,9 @@
 ---
-description: Show and edit the team-sessions config — protected checkouts, staging protection, board path
+description: Show and edit the middle-management config — protected checkouts, staging protection, board path
 allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 ---
 
-# team-sessions setup
+# middle-management setup
 
 Show the user their current configuration, interview them about the changes they
 want, then write the file back and validate it. The config is one JSON file that

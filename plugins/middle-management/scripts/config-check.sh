@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# team-sessions plugin — config path resolver + THE shape filter (single owner).
+# middle-management plugin — config path resolver + THE shape filter (single owner).
 # Consumers: hooks/session-role.sh, hooks/protect-main-checkouts.sh,
-#   hooks/block-blanket-git-add.sh, commands/team-sessions-setup.md (via Bash),
+#   hooks/block-blanket-git-add.sh, commands/middle-management-setup.md (via Bash),
 #   scripts/wt, tests/run.sh.
 #
 # Usage:
 #   config-check.sh dir        print the resolved Claude config dir
-#   config-check.sh file       print the resolved team-sessions config file path
+#   config-check.sh file       print the resolved middle-management config file path
 #   config-check.sh validate   validate the config file; exit codes:
 #                                0 = valid config
 #                                1 = invalid (unparseable JSON or wrong shape)
@@ -25,7 +25,7 @@ cfg_dir() {
   fi
 }
 
-cfg_file() { printf '%s/team-sessions.json' "$(cfg_dir)"; }
+cfg_file() { printf '%s/middle-management.json' "$(cfg_dir)"; }
 
 validate() {
   command -v jq >/dev/null 2>&1 || return 3

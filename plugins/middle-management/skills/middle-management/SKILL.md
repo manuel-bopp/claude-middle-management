@@ -1,6 +1,6 @@
 ---
-name: team-sessions
-description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, or the /orchestrator, /wt and /team-sessions-setup commands of the team-sessions plugin.
+name: middle-management
+description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
 version: 0.1.0
 ---
 
@@ -90,7 +90,7 @@ coordinator releases the seat, the new one claims it.
 - **"session registry not found"** — the running Claude Code build has no session
   registry, so role detection cannot work at all. Nothing to fix inside the plugin.
 - **Config warnings on every message** — the config file is unparseable or has the wrong
-  shape; run `/team-sessions-setup` to see the current state and repair it.
+  shape; run `/middle-management-setup` to see the current state and repair it.
 - **"override marker active"** — someone allowed a direct edit in a protected checkout
   and left the marker behind. Delete the file the warning names; the guard is off for the
   whole machine until then.
@@ -101,7 +101,7 @@ survives plugin updates and uninstalls.
 
 ## The other half of the plugin
 
-`/team-sessions-setup` shows and edits the configuration (board path, protected
+`/middle-management-setup` shows and edits the configuration (board path, protected
 checkouts, staging guard). `/wt <name> new|list|done` creates and cleans up per-topic
 worktrees, and a hook keeps edits out of the protected main checkouts. Roles work with no
 configuration at all; the worktree part needs one entry per repo.

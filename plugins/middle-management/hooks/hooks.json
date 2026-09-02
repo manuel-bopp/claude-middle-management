@@ -7,7 +7,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-role.sh\"",
             "timeout": 10,
-            "statusMessage": "team-sessions: session role"
+            "statusMessage": "middle-management: session role"
           }
         ]
       }
@@ -20,7 +20,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/protect-main-checkouts.sh\"",
             "timeout": 10,
-            "statusMessage": "team-sessions: worktree rule"
+            "statusMessage": "middle-management: worktree rule"
           }
         ]
       },
@@ -31,7 +31,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/block-blanket-git-add.sh\"",
             "timeout": 10,
-            "statusMessage": "team-sessions: staging scope"
+            "statusMessage": "middle-management: staging scope"
           }
         ]
       }

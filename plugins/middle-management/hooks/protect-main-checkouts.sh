@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# team-sessions plugin — PreToolUse guard, matcher Edit|Write|MultiEdit|NotebookEdit.
+# middle-management plugin — PreToolUse guard, matcher Edit|Write|MultiEdit|NotebookEdit.
 # Consumers: hooks/hooks.json.
 #
 # Keeps the configured main checkouts clean: implementation happens in a

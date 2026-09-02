@@ -1,11 +1,11 @@
 {
   "name": "bopp-plugins",
-  "description": "Manu's Claude Code plugins — currently team-sessions: coordination for many parallel sessions on one machine.",
+  "description": "Manu's Claude Code plugins — currently middle-management: coordination for many parallel sessions on one machine.",
   "owner": { "name": "Manu" },
   "plugins": [
     {
-      "name": "team-sessions",
-      "source": "./plugins/team-sessions",
+      "name": "middle-management",
+      "source": "./plugins/middle-management",
       "description": "Coordinator/worker roles, per-topic worktree discipline, and surgical git staging for many parallel Claude Code sessions on one machine."
     }
   ]

@@ -1,4 +1,6 @@
-# team-sessions — a Claude Code plugin for many parallel sessions on one machine
+# middle-management — a Claude Code plugin for many parallel sessions on one machine
+
+*It doesn't do the work. It makes sure the work gets done.*
 
 Run several Claude Code sessions side by side without them stepping on each other:
 exactly **one coordinator** session plans and routes, every other session works and
@@ -12,11 +14,11 @@ edits to your `settings.json` or `CLAUDE.md`**.
 
 ```
 /plugin marketplace add <owner>/<repo>
-/plugin install team-sessions@bopp-plugins
+/plugin install middle-management@bopp-plugins
 ```
 
 Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
-`/team-sessions-setup` once to configure the optional worktree part.
+`/middle-management-setup` once to configure the optional worktree part.
 
 ## What you get
 
@@ -27,10 +29,12 @@ Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
 | Worktree guard | PreToolUse hook | Denies direct edits inside configured main checkouts and points to the worktree workflow instead. Dormant until you configure repos. |
 | `/wt <name> new\|list\|done` | command | Creates/lists/removes per-topic worktrees with the branch based on your configured base branch, deps installed. |
 | Staging guard | PreToolUse hook | Blocks `git add -A` / `git add .` / `git commit -a` so parallel sessions stage only their own files. Off-switch for solo users: `surgicalStaging: false`. |
-| `/team-sessions-setup` | command | Shows the current config, then interviews you and writes/edits it — with validation. |
-| `team-sessions` skill | skill | Extended reference: appointment, handover between sessions, troubleshooting. |
+| `/middle-management-setup` | command | Shows the current config, then interviews you and writes/edits it — with validation. |
+| `middle-management` skill | skill | Extended reference: appointment, handover between sessions, troubleshooting. |
 
 ## How the roles work
+
+![The session-role flow: one orchestrator claims a marker, the human starts workers manually, work routes through the middle, workers wrap themselves, the seat is handed over or released](docs/flow.svg)
 
 1. Your user tells one session "you are the coordinator"; that session runs
    `/orchestrator claim`, which records its session id in
@@ -48,8 +52,8 @@ the worktree part if you like it, and ignore the roles.
 
 ## Configuration
 
-One user-global file, `<config-dir>/team-sessions.json` (config dir =
-`$CLAUDE_CONFIG_DIR` or `~/.claude`), written for you by `/team-sessions-setup`:
+One user-global file, `<config-dir>/middle-management.json` (config dir =
+`$CLAUDE_CONFIG_DIR` or `~/.claude`), written for you by `/middle-management-setup`:
 
 ```json
 {
@@ -91,8 +95,8 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   sessions. If a broken update worries you, disable auto-update for this marketplace.
 - Command names `/wt`, `/orchestrator` are short and generic; collision behavior with
   same-named commands from other plugins is untested.
-- Uninstall (`/plugin uninstall team-sessions`) removes the plugin but NOT your data:
-  `<config-dir>/team-sessions.json` and `<config-dir>/state/{orchestrator,allow-main-checkout-edits}`
+- Uninstall (`/plugin uninstall middle-management`) removes the plugin but NOT your data:
+  `<config-dir>/middle-management.json` and `<config-dir>/state/{orchestrator,allow-main-checkout-edits}`
   stay; delete them by hand if you want a clean slate.
 
 ## Requirements

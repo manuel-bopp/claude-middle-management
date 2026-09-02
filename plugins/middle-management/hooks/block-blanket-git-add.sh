@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# team-sessions plugin — PreToolUse guard, matcher Bash.
+# middle-management plugin — PreToolUse guard, matcher Bash.
 # Consumers: hooks/hooks.json.
 #
 # Blocks blanket git staging so parallel sessions cannot commit each other's
@@ -15,12 +15,12 @@ set -u
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 CHECK="$PLUGIN_ROOT/scripts/config-check.sh"
 
-REASON="team-sessions plugin: blanket git staging is blocked so parallel sessions cannot commit each other's work. Stage explicit paths: git add <file> ... — working solo? set surgicalStaging to false via /team-sessions-setup."
+REASON="middle-management plugin: blanket git staging is blocked so parallel sessions cannot commit each other's work. Stage explicit paths: git add <file> ... — working solo? set surgicalStaging to false via /middle-management-setup."
 
 RC=0; bash "$CHECK" validate || RC=$?
 case "$RC" in
   0) jq -e '.surgicalStaging == false' "$(bash "$CHECK" file)" >/dev/null 2>&1 && exit 0 ;;
-  1|3) REASON="team-sessions plugin: blanket git staging is blocked (your team-sessions config is invalid, so protection is forced ON — fix it with /team-sessions-setup). Stage explicit paths: git add <file> ..." ;;
+  1|3) REASON="middle-management plugin: blanket git staging is blocked (your middle-management config is invalid, so protection is forced ON — fix it with /middle-management-setup). Stage explicit paths: git add <file> ..." ;;
 esac
 
 INPUT="$(cat)"
