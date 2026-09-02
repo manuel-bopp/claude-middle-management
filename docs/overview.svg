@@ -1,6 +1,6 @@
 <!-- middle-management: the overview picture (end-user version).
      Created: 2026-09-02 19:36 · claude-fable-5-1 · direct
-     Last updated: 2026-09-02 19:36 · claude-fable-5-1
+     Last updated: 2026-09-02 19:54 · claude-fable-5-1 (text-clearance rule: label and badge moved off the lines)
      Hand-authored SVG: edit coordinates directly. Dark card baked in so it reads on light and dark GitHub themes.
      Wording: the picture says "middle manager"; the commands say "orchestrator" (same tab). -->
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="602" viewBox="0 0 900 602" role="img" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
@@ -90,7 +90,7 @@
   <line x1="317" y1="450" x2="333" y2="466" stroke="#e05f5f" stroke-width="2.2"/>
   <line x1="333" y1="450" x2="317" y2="466" stroke="#e05f5f" stroke-width="2.2"/>
   <text x="325" y="484" font-size="11" fill="#e08585" text-anchor="middle">never</text>
-  <circle cx="325" cy="436" r="10" fill="#e05252"/><text x="325" y="440" font-size="11" fill="#2a0a0a" text-anchor="middle" font-family="monospace" font-weight="bold">5</text>
+  <circle cx="325" cy="432" r="10" fill="#e05252"/><text x="325" y="436" font-size="11" fill="#2a0a0a" text-anchor="middle" font-family="monospace" font-weight="bold">5</text>
   <line x1="540" y1="458" x2="610" y2="458" stroke="#e05f5f" stroke-width="1.6"/>
   <line x1="567" y1="450" x2="583" y2="466" stroke="#e05f5f" stroke-width="2.2"/>
   <line x1="583" y1="450" x2="567" y2="466" stroke="#e05f5f" stroke-width="2.2"/>
@@ -98,8 +98,8 @@
 
   <!-- optional: the boss steps in directly (one way, dashed, around the manager) -->
   <path d="M570 58 L820 58 L820 458 L790 458" fill="none" stroke="#8b949c" stroke-width="1.3" stroke-dasharray="6 5" marker-end="url(#c-arm)"/>
-  <text x="695" y="34" font-size="12" fill="#8b949c" text-anchor="middle" font-style="italic">step in directly</text>
-  <text x="695" y="48" font-size="12" fill="#8b949c" text-anchor="middle" font-style="italic">whenever you like</text>
+  <text x="695" y="24" font-size="12" fill="#8b949c" text-anchor="middle" font-style="italic">step in directly</text>
+  <text x="695" y="38" font-size="12" fill="#8b949c" text-anchor="middle" font-style="italic">whenever you like</text>
 
   <!-- ⑥ ambient band -->
   <rect x="30" y="542" width="840" height="44" rx="8" fill="rgba(13,142,207,.05)" stroke="#3e7ea0" stroke-dasharray="3 4"/>
