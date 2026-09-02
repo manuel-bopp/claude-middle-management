@@ -31,6 +31,7 @@ Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
 | Staging guard | PreToolUse hook | Blocks `git add -A` / `git add .` / `git commit -a` so parallel sessions stage only their own files. Off-switch for solo users: `surgicalStaging: false`. |
 | `/middle-management-setup` | command | Shows the current config, then interviews you and writes/edits it — with validation. |
 | `middle-management` skill | skill | Extended reference: appointment, handover between sessions, troubleshooting. |
+| `morning-ritual` skill | skill | The coordinator’s day-opener: messages delta, repo state, wrap audit, board sweep, day plan. Coordinator sessions only; carries CUSTOMIZE markers for your team’s stack. |
 
 ## How the roles work
 
@@ -115,3 +116,7 @@ the human into a context courier, committing each other's files, and editing a s
 checkout underneath a running dev server. The fix that stuck: one coordinator session
 with the only pen for the board, per-topic worktrees with one branch and one small PR
 per lane, and surgical staging. This plugin is that setup, made portable.
+
+## License
+
+Public domain ([Unlicense](https://unlicense.org)) — do whatever you want with it.
