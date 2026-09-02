@@ -96,6 +96,17 @@ OUT="$(role "$H" "sess-alpha")"
 assert_empty "after release -> silent" "" "$OUT"
 kill "$PEER" 2>/dev/null
 
+say "== remote-control reminder on claim =="
+H2="$(new_home)"
+printf '{"remoteControlAtStartup":false}' > "$H2/.claude/settings.json"
+OUT="$(HOME="$H2" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "claim with RC-off setting still exits 0" 0 "$RC"
+assert_has "explicit RC-off -> reminder" "/remote-control" "$OUT"
+H3="$(new_home)"
+printf '{"unrelated":true}' > "$H3/.claude/settings.json"
+OUT="$(HOME="$H3" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"
+case "$OUT" in *"/remote-control"*) bad "absent key -> no reminder" "$OUT" ;; *) ok "absent key -> no reminder" ;; esac
+
 say "== worktree guard =="
 H="$(new_home)"
 mkdir -p "$H/code/app" "$H/code/.worktrees-app" "$H/code/app/.wt-inside"

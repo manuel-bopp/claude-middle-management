@@ -37,6 +37,10 @@ alive_name() {  # $1 = sessionId -> name, if its process is still running
         done; }
 }
 held_id() { [ -f "$MARKER" ] && head -1 "$MARKER" | tr -d '[:space:]'; }
+# True only when the user explicitly disabled Remote Control at startup. String-compared
+# on purpose: jq's // operator would swallow an explicit false, and an ABSENT key must
+# not trigger the reminder (RC-off is no default on other people's machines).
+rc_off() { [ "$(jq -r '.remoteControlAtStartup' "$CFG_DIR/settings.json" 2>/dev/null)" = "false" ]; }
 
 HID=$(held_id); HNAME=""; [ -n "$HID" ] && HNAME=$(alive_name "$HID")
 
@@ -53,6 +57,12 @@ case "${1:-status}" in
     # NB: an `[ … ] && echo` chain here would make a successful claim exit 1.
     if [ -n "$HID" ] && [ -z "$HNAME" ]; then
       echo "(The previous holder is no longer running — marker taken over.)"
+    fi
+    if rc_off; then
+      echo ""
+      echo "Remote Control is disabled at startup on this machine — coordinator sessions"
+      echo "usually want it ON so your user can follow along remotely. If so, type"
+      echo "/remote-control in THIS session (no script can do that for you)."
     fi
     ;;
   release)
