@@ -10,6 +10,14 @@ commit each other's work. The regime was extracted from a production multi-sessi
 setup; this plugin packages it so installing it is two commands and requires **no
 edits to your `settings.json` or `CLAUDE.md`**.
 
+## The picture
+
+![One boss, one middle manager, many workers: you appoint one tab and plan with it; it hands out one task sheet per job; workers do the job in their own copy of the code, report back, and never talk sideways; you can still step in on any worker directly; a hook reminds every tab of its role on every message](docs/overview.svg)
+
+The picture says *middle manager*; the commands say `orchestrator` (`/orchestrator claim`).
+Same tab. How the plugin knows who is who (marker file, session registry, hand-over) is
+drawn in detail under [How the roles work](#how-the-roles-work).
+
 ## Install
 
 ```

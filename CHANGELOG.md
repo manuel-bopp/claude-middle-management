@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+Added the end-user overview picture (`docs/overview.svg`: boss, middle manager, workers,
+the manager's duties) at the top of the README; the detailed flow diagram stays under
+"How the roles work".
+
 ## 0.2.0 — 2026-09-02
 
 Added the `morning-ritual` skill (coordinator day-opener with CUSTOMIZE markers),

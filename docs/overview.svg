@@ -1,0 +1,109 @@
+<!-- middle-management: the overview picture (end-user version).
+     Created: 2026-09-02 19:36 · claude-fable-5-1 · direct
+     Last updated: 2026-09-02 19:36 · claude-fable-5-1
+     Hand-authored SVG: edit coordinates directly. Dark card baked in so it reads on light and dark GitHub themes.
+     Wording: the picture says "middle manager"; the commands say "orchestrator" (same tab). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="602" viewBox="0 0 900 602" role="img" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+     aria-label="Org chart: the boss on top, one middle-manager tab in the middle listing its duties, three worker tabs below; light arrows down for task sheets, blue arrows up for reports, a dashed grey one-way line from the boss to a worker for stepping in directly; a red X between workers; a band at the bottom for the plugin's role reminder.">
+  <rect x="0" y="0" width="900" height="602" rx="16" fill="#14181d"/>
+  <defs>
+    <marker id="c-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#c9d2d9"/></marker>
+    <marker id="c-arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#7fb8d9"/></marker>
+    <marker id="c-arm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#8b949c"/></marker>
+  </defs>
+
+  <!-- THE BOSS -->
+  <rect x="330" y="28" width="240" height="60" rx="30" fill="rgba(255,255,255,.05)" stroke="#c9d2d9" stroke-width="1.5"/>
+  <text x="450" y="54" font-size="13" fill="#e6ebef" text-anchor="middle" font-family="monospace" letter-spacing="2">THE BOSS</text>
+  <text x="450" y="73" font-size="11.5" fill="#8b949c" text-anchor="middle">you · talk to one tab only</text>
+
+  <!-- MIDDLE MANAGER tab (172..308) -->
+  <rect x="140" y="172" width="620" height="136" rx="10" fill="rgba(13,142,207,.08)" stroke="#0d8ecf" stroke-width="1.5"/>
+  <path d="M140 196 H760 V182 A10 10 0 0 0 750 172 H150 A10 10 0 0 0 140 182 Z" fill="rgba(13,142,207,.22)"/>
+  <line x1="140" y1="196" x2="760" y2="196" stroke="#0d8ecf" stroke-width="1"/>
+  <text x="156" y="189" font-size="11" fill="#8fd0ef" font-family="monospace" letter-spacing="2">MIDDLE MANAGER</text>
+  <text x="744" y="189" font-size="10.5" fill="#8fd0ef" font-family="monospace" text-anchor="end">exactly one tab</text>
+  <text x="450" y="222" font-size="13" fill="#e6ebef" text-anchor="middle">plans with you · hands out the work · never builds anything itself</text>
+  <g fill="#c9d2d9" font-size="12">
+    <circle cx="172" cy="246" r="2.5" fill="#8fd0ef"/><text x="182" y="250">morning briefing: Slack, GitHub, loose ends</text>
+    <circle cx="172" cy="266" r="2.5" fill="#8fd0ef"/><text x="182" y="270">keeps an eye on every session</text>
+    <circle cx="172" cy="286" r="2.5" fill="#8fd0ef"/><text x="182" y="290">spots new sessions, asks what they're on</text>
+    <circle cx="458" cy="246" r="2.5" fill="#8fd0ef"/><text x="468" y="250">keeps the board up to date</text>
+    <circle cx="458" cy="266" r="2.5" fill="#8fd0ef"/><text x="468" y="270">makes sure every session wraps up cleanly</text>
+    <circle cx="458" cy="286" r="2.5" fill="#8fd0ef"/><text x="468" y="290">wraps itself up, hands over to a fresh tab</text>
+  </g>
+
+  <!-- WORKER tabs (404..512) -->
+  <g id="c-w1">
+    <rect x="110" y="404" width="180" height="108" rx="10" fill="rgba(255,255,255,.03)" stroke="#c9d2d9" stroke-width="1.2"/>
+    <path d="M110 428 H290 V414 A10 10 0 0 0 280 404 H120 A10 10 0 0 0 110 414 Z" fill="rgba(255,255,255,.08)"/>
+    <line x1="110" y1="428" x2="290" y2="428" stroke="#c9d2d9" stroke-width=".8"/>
+    <text x="126" y="421" font-size="11" fill="#e6ebef" font-family="monospace" letter-spacing="2">WORKER</text>
+    <text x="200" y="456" font-size="13" fill="#e6ebef" text-anchor="middle">does one job</text>
+    <rect x="125" y="468" width="150" height="26" rx="6" fill="rgba(255,255,255,.05)" stroke="#6b7379"/>
+    <text x="200" y="485" font-size="11" fill="#aab3ba" text-anchor="middle">own copy of the code</text>
+  </g>
+  <g id="c-w2">
+    <rect x="360" y="404" width="180" height="108" rx="10" fill="rgba(255,255,255,.03)" stroke="#c9d2d9" stroke-width="1.2"/>
+    <path d="M360 428 H540 V414 A10 10 0 0 0 530 404 H370 A10 10 0 0 0 360 414 Z" fill="rgba(255,255,255,.08)"/>
+    <line x1="360" y1="428" x2="540" y2="428" stroke="#c9d2d9" stroke-width=".8"/>
+    <text x="376" y="421" font-size="11" fill="#e6ebef" font-family="monospace" letter-spacing="2">WORKER</text>
+    <text x="450" y="456" font-size="13" fill="#e6ebef" text-anchor="middle">does one job</text>
+    <rect x="375" y="468" width="150" height="26" rx="6" fill="rgba(255,255,255,.05)" stroke="#6b7379"/>
+    <text x="450" y="485" font-size="11" fill="#aab3ba" text-anchor="middle">own copy of the code</text>
+  </g>
+  <g id="c-w3">
+    <rect x="610" y="404" width="180" height="108" rx="10" fill="rgba(255,255,255,.03)" stroke="#c9d2d9" stroke-width="1.2"/>
+    <path d="M610 428 H790 V414 A10 10 0 0 0 780 404 H620 A10 10 0 0 0 610 414 Z" fill="rgba(255,255,255,.08)"/>
+    <line x1="610" y1="428" x2="790" y2="428" stroke="#c9d2d9" stroke-width=".8"/>
+    <text x="626" y="421" font-size="11" fill="#e6ebef" font-family="monospace" letter-spacing="2">WORKER</text>
+    <text x="700" y="456" font-size="13" fill="#e6ebef" text-anchor="middle">does one job</text>
+    <rect x="625" y="468" width="150" height="26" rx="6" fill="rgba(255,255,255,.05)" stroke="#6b7379"/>
+    <text x="700" y="485" font-size="11" fill="#aab3ba" text-anchor="middle">own copy of the code</text>
+  </g>
+
+  <!-- ① appoint, ② plan (boss bottom: two edges -> 1/3 and 2/3 = 410, 490) -->
+  <line x1="410" y1="88" x2="410" y2="172" stroke="#c9d2d9" stroke-width="1.4" marker-end="url(#c-ar)"/>
+  <circle cx="410" cy="128" r="10" fill="#0d8ecf"/><text x="410" y="132" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">1</text>
+  <text x="392" y="132" font-size="12" fill="#c9d2d9" text-anchor="end" font-style="italic">“you're the middle manager”</text>
+  <line x1="490" y1="88" x2="490" y2="172" stroke="#c9d2d9" stroke-width="1.4" marker-end="url(#c-ar)" marker-start="url(#c-ar)"/>
+  <circle cx="490" cy="128" r="10" fill="#0d8ecf"/><text x="490" y="132" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">2</text>
+  <text x="508" y="132" font-size="12" fill="#c9d2d9">plan together</text>
+
+  <!-- ③ task sheets down (light), ④ reports up (blue); worker top: two edges -> 1/3 and 2/3 -->
+  <line x1="170" y1="308" x2="170" y2="404" stroke="#c9d2d9" stroke-width="1.4" marker-end="url(#c-ar)"/>
+  <line x1="230" y1="404" x2="230" y2="308" stroke="#7fb8d9" stroke-width="1.4" marker-end="url(#c-arb)"/>
+  <line x1="420" y1="308" x2="420" y2="404" stroke="#c9d2d9" stroke-width="1.4" marker-end="url(#c-ar)"/>
+  <line x1="480" y1="404" x2="480" y2="308" stroke="#7fb8d9" stroke-width="1.4" marker-end="url(#c-arb)"/>
+  <line x1="670" y1="308" x2="670" y2="404" stroke="#c9d2d9" stroke-width="1.4" marker-end="url(#c-ar)"/>
+  <line x1="730" y1="404" x2="730" y2="308" stroke="#7fb8d9" stroke-width="1.4" marker-end="url(#c-arb)"/>
+  <circle cx="420" cy="356" r="10" fill="#0d8ecf"/><text x="420" y="360" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">3</text>
+  <text x="402" y="360" font-size="12" fill="#c9d2d9" text-anchor="end">hands out the task sheet</text>
+  <circle cx="480" cy="356" r="10" fill="#0d8ecf"/><text x="480" y="360" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">4</text>
+  <text x="498" y="360" font-size="12" fill="#8fd0ef">reports done or stuck</text>
+
+  <!-- ⑤ never sideways (on the worker cards' vertical centre y=458) -->
+  <line x1="290" y1="458" x2="360" y2="458" stroke="#e05f5f" stroke-width="1.6"/>
+  <line x1="317" y1="450" x2="333" y2="466" stroke="#e05f5f" stroke-width="2.2"/>
+  <line x1="333" y1="450" x2="317" y2="466" stroke="#e05f5f" stroke-width="2.2"/>
+  <text x="325" y="484" font-size="11" fill="#e08585" text-anchor="middle">never</text>
+  <circle cx="325" cy="436" r="10" fill="#e05252"/><text x="325" y="440" font-size="11" fill="#2a0a0a" text-anchor="middle" font-family="monospace" font-weight="bold">5</text>
+  <line x1="540" y1="458" x2="610" y2="458" stroke="#e05f5f" stroke-width="1.6"/>
+  <line x1="567" y1="450" x2="583" y2="466" stroke="#e05f5f" stroke-width="2.2"/>
+  <line x1="583" y1="450" x2="567" y2="466" stroke="#e05f5f" stroke-width="2.2"/>
+  <text x="575" y="484" font-size="11" fill="#e08585" text-anchor="middle">never</text>
+
+  <!-- optional: the boss steps in directly (one way, dashed, around the manager) -->
+  <path d="M570 58 L820 58 L820 458 L790 458" fill="none" stroke="#8b949c" stroke-width="1.3" stroke-dasharray="6 5" marker-end="url(#c-arm)"/>
+  <text x="695" y="34" font-size="12" fill="#8b949c" text-anchor="middle" font-style="italic">step in directly</text>
+  <text x="695" y="48" font-size="12" fill="#8b949c" text-anchor="middle" font-style="italic">whenever you like</text>
+
+  <!-- ⑥ ambient band -->
+  <rect x="30" y="542" width="840" height="44" rx="8" fill="rgba(13,142,207,.05)" stroke="#3e7ea0" stroke-dasharray="3 4"/>
+  <circle cx="58" cy="564" r="10" fill="#0d8ecf"/><text x="58" y="568" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">6</text>
+  <text x="80" y="560" font-size="10.5" fill="#8fd0ef" font-family="monospace" letter-spacing="1.5">⟳ ON EVERY MESSAGE, IN EVERY TAB</text>
+  <text x="80" y="577" font-size="12" fill="#c9d2d9">the plugin tells the tab its role: middle manager or worker. No manager picked? Nothing changes.</text>
+</svg>
