@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 — 2026-09-02
+
+Added the `morning-ritual` skill (coordinator day-opener with CUSTOMIZE markers),
+the conditional Remote Control reminder after `claim`, and the session-role flow
+diagram (README + docs/flow.svg). License changed from MIT to the Unlicense
+(public domain).
+
 ## 0.1.0 — 2026-09-01
 
 Initial release: coordinator/worker session roles (UserPromptSubmit hook +
