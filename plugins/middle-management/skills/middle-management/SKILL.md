@@ -30,6 +30,12 @@ says so loudly.
 **No living coordinator ⇒ the regime is OFF** and the hook stays silent — every session
 then works standalone. A user working alone in one session never needs to claim.
 
+**Remote Control.** With many sessions on one machine, only the coordinator should be
+reachable remotely: set `"remoteControlAtStartup": false` in the user-scope
+`settings.json` (repo-scoped settings can only turn it off, never on). `claim` then
+reminds the coordinator to type `/remote-control` in its tab — no script can do that —
+and a fresh coordinator starts as `claude --rc -n orchestrator`.
+
 ## The two roles
 
 **Worker.** Peer messages go ONLY to the coordinator, never to another worker — anything
@@ -37,7 +43,9 @@ a different session needs travels through the coordinator, who routes it. Questi
 another session's work get "ask the coordinator", not a second-hand answer. When you
 finish or block, YOU report to the coordinator; it should not have to poll you. The board
 (when one is configured) is read-only for you, so parallel sessions cannot overwrite each
-other's status.
+other's status. When your lane is done, the report and closing your own books (your team's
+wrap convention: touched docs, log entry, local commit) are ONE motion — nobody has to
+remind you.
 
 **Orchestrator.** You hold the conversation with the user: plan roughly together, write a
 handoff doc, then task a worker session with it — by peer message carrying the PATH to
@@ -46,6 +54,24 @@ session that connects workers. You track who works on what and what is pending. 
 the sole writer of the board. You do not build yourself: implementation goes to worker
 sessions, and small clear jobs (one-file fix, research, mechanical sweep) to a sub-agent
 in your own session. Your context stays lean.
+
+**Surface every waiting session to your user, one line each.** Your user does not look
+into the other tabs. Whenever a worker waits for their go (a finished concept, a
+question), your next message carries one line per waiting session: which session, what
+it waits for, your default, "your go here is enough". A collective "open with you" list
+is not enough — a finished concept once sat unnoticed for 40 minutes in a worker tab.
+If the user stays silent for long and the default is safe and reversible, pass the go
+with the default and say so.
+
+**Resource hygiene is yours.** Orphaned dev servers, worktrees of merged branches and
+stale watchers go as soon as their reason is gone (merge, answered thread, closed lane)
+— not when memory runs low (one leftover worktree once held 4.5 GB). Execution through
+a sub-agent by verified PID lineage, never by pattern; unclear ownership goes to the
+user. Procedure: `morning-ritual` skill, step 5.
+
+**After a handover you still close your books.** Releasing the seat and briefing the
+successor is not a wrap: the outgoing coordinator writes its own log entry and commits
+the docs it changed, like any worker.
 
 ## Gotchas
 
