@@ -1,11 +1,11 @@
 ---
 name: morning-ritual
-description: The coordinator's morning ritual — messages delta, repo state, wrap audit of yesterday's sessions, open-items sweep into the board, day plan for your user. Use when the user says "morning ritual" / "Morgenroutine" / "start my day", opens the day with a status ask, or a fresh coordinator session starts its first morning. Coordinator sessions only — run this ONLY when the middle-management role hook says ORCHESTRATOR; in a worker session, point the user at the coordinator instead.
+description: The coordinator's morning ritual — messages delta, repo state, wrap audit of yesterday's sessions, open-items sweep into the board, machine cleanup (stale dev servers, merged worktrees, dead watchers), day plan for your user. Use when the user says "morning ritual" / "Morgenroutine" / "start my day", opens the day with a status ask, or a fresh coordinator session starts its first morning. Coordinator sessions only — run this ONLY when the middle-management role hook says ORCHESTRATOR; in a worker session, point the user at the coordinator instead.
 ---
 
 # Coordinator morning ritual
 
-The first thing a coordinator session does each day. Run the five steps in order;
+The first thing a coordinator session does each day. Run the six steps in order;
 steps 1–3 are independent — run their commands in parallel. Everything here is
 coordinator work: read, reconcile, route. Product/repo work stays delegated to
 worker sessions.
@@ -78,7 +78,29 @@ the wrap-audit result, new sessions your user started this morning. Dated mornin
 block; if the board lives in a git repo, commit surgically — the board file plus
 coordinator-owned docs only.
 
-## 5. Day plan to your user
+## 5. Machine cleanup
+
+Free what yesterday left behind, before the day plan — so the plan reports what was
+freed. Gather in one read-only pass, then act through ONE sub-agent with explicit PIDs:
+
+- **Dev servers:** `ss -ltnp` over your dev-port range plus `pgrep -af` for your dev-server
+  commands — CUSTOMIZE both. A server whose worktree branch is merged or whose lane is
+  closed on the board is stale; the shared ones (the main checkout's server, shared
+  backends) always stay. Kill by verified PID lineage (parent first, cwd inside the
+  worktree), never by pattern.
+- **Worktrees:** `git -C <root> worktree list` for every protected checkout; per branch
+  `git merge-base --is-ancestor <branch> <base>` → merged AND clean → `/wt <name> done <topic>`.
+  Dirty or unmerged = keep and list; a dirty merged tree goes to your user (what is the
+  dirty file?), never discarded blind.
+- **Watchers:** long-running pollers your team runs (`pgrep -af <watcher>` — CUSTOMIZE)
+  whose thread is answered or whose ask is moot (PR merged, decision taken) are killed by
+  PID; the board names the live ones.
+- **Memory:** `free -m` before and after; both numbers go into the day plan.
+
+Done when no listening port, worktree or watcher on the machine lacks a live owner on the
+board. Ownership below 75% certain → leave it, list it under "unclear" in the day plan.
+
+## 6. Day plan to your user
 
 One message, in the language you talk to your user in, timestamped, links clickable,
 every topic spelled out (no bare codenames): (a) what moved overnight, (b) the TOP
