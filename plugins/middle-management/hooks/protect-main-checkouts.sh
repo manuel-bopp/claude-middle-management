@@ -39,7 +39,7 @@ while IFS=$'\t' read -r NAME ROOT WTDIR; do
   ROOT="${ROOT%/}"
   [ -n "$ROOT" ] || continue
   case "$FILE" in "$ROOT"/*)
-    REASON="Direct edits in the protected checkout '$NAME' ($ROOT) are blocked: implementation happens in a per-topic worktree, so parallel sessions cannot mix changes in the shared checkout. Create one and edit there: bash \"$PLUGIN_ROOT/scripts/wt\" $NAME new <topic> — it prints the worktree path, branches off the configured base and installs dependencies. If this session cannot edit outside its working directory, add the worktree with /add-dir or start a session there. ONLY if your user explicitly allowed a direct edit in this session: mkdir -p \"$CFG_DIR/state\" && touch \"$CFG_DIR/state/allow-main-checkout-edits\", redo the edit, then delete the marker."
+    REASON="Direct edits in the protected checkout '$NAME' ($ROOT) are blocked: implementation happens in a per-topic worktree, so parallel sessions cannot mix changes in the shared checkout. Create one and edit there: bash \"$PLUGIN_ROOT/scripts/wt\" $NAME new <topic> — it prints the worktree path, branches off the configured base and installs dependencies. One lane = one branch = one pull request. If this session cannot edit outside its working directory, add the worktree with /add-dir or start a session there. ONLY if your user explicitly allowed a direct edit in this session: mkdir -p \"$CFG_DIR/state\" && touch \"$CFG_DIR/state/allow-main-checkout-edits\", redo the edit, then delete the marker."
     jq -nc --arg r "$REASON" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
     exit 0
     ;;
