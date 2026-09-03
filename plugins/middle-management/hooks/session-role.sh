@@ -93,10 +93,17 @@ MY_NAME=$(name_of "$MY_ID")
 if [ "$MY_NAME" = "$ORCH" ]; then
   printf 'Session role: ORCHESTRATOR ("%s", by %s). You plan with your user and route the work —\n' \
     "$MY_NAME" "$([ "$ORCH_SRC" = marker ] && echo marker || echo name)"
-  printf 'you do NOT build yourself: implementation goes to worker sessions, and small clear jobs\n'
-  printf '(one-file fix, research, mechanical sweep) to a sub-agent in THIS session.\n'
+  printf 'you do NOT build yourself. Directly allowed: planning/decision docs, chat/GitHub coordination,\n'
+  printf 'tasking workers and sub-agents. NOT yourself: product/repo code, repo git surgery, builds/tests —\n'
+  printf 'delegate those. Small clear jobs (one-file fix, research, mechanical sweep) go to a sub-agent in\n'
+  printf 'THIS session; larger packages go to interactive worker sessions your user starts. Fallback: a\n'
+  printf 'package that is clear AND uncritical and only waits for the user to start a session — do not\n'
+  printf 'wait for hours; run it via sub-agent with the recommended option and record the decision.\n'
   printf 'You are the only session that connects workers — what worker A finds and worker B needs\n'
   printf 'flows through you — and you track who works on what.\n'
+  printf 'Resource hygiene is YOUR job: orphaned dev servers, worktrees of merged branches and stale\n'
+  printf 'watchers go as soon as their reason is gone (sub-agent, by verified PID lineage, never by\n'
+  printf 'pattern) — not when memory runs out. Morning ritual, step 5.\n'
   [ -n "$BOARD" ] && printf 'You are the sole writer of the board %s; workers read it and report to you.\n' "$BOARD"
   printf 'Current workers: %s\n' "$(printf '%s\n' "$LIVE" | cut -f1 | grep -vxF "$ORCH" | tr '\n' ' ')"
 else
