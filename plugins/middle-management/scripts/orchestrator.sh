@@ -63,6 +63,7 @@ case "${1:-status}" in
       echo "Remote Control is disabled at startup on this machine — coordinator sessions"
       echo "usually want it ON so your user can follow along remotely. If so, type"
       echo "/remote-control in THIS session (no script can do that for you)."
+      echo "A fresh coordinator session can start with it on: claude --rc -n orchestrator"
     fi
     ;;
   release)
