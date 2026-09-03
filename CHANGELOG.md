@@ -6,6 +6,16 @@ Added the end-user overview picture (`docs/overview.svg`: boss, middle manager, 
 the manager's duties) at the top of the README; the detailed flow diagram stays under
 "How the roles work".
 
+Synced from the master setup (2026-09-03): `wt done` names the real branch in its
+delete hint (the topic may be the directory name); the ORCHESTRATOR banner carries the
+explicit allowed/not-yourself split, the "user starts worker sessions" rule, the
+proceed-with-the-default fallback and resource hygiene; `morning-ritual` gained step 5
+"Machine cleanup"; the `middle-management` skill gained Remote Control for coordinators,
+"surface every waiting session to your user, one line each", resource hygiene and the
+wrap-in-one-motion rule; the checkout-guard deny text says "one lane = one branch = one
+pull request"; the `claim` reminder names `claude --rc -n orchestrator`; README lists the
+recommended `settings.json` entries (retry watchdog, Remote Control off by default).
+
 ## 0.2.0 — 2026-09-02
 
 Added the `morning-ritual` skill (coordinator day-opener with CUSTOMIZE markers),

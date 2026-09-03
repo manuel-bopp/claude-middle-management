@@ -39,7 +39,7 @@ Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
 | Staging guard | PreToolUse hook | Blocks `git add -A` / `git add .` / `git commit -a` so parallel sessions stage only their own files. Off-switch for solo users: `surgicalStaging: false`. |
 | `/middle-management-setup` | command | Shows the current config, then interviews you and writes/edits it — with validation. |
 | `middle-management` skill | skill | Extended reference: appointment, handover between sessions, troubleshooting. |
-| `morning-ritual` skill | skill | The coordinator’s day-opener: messages delta, repo state, wrap audit, board sweep, day plan. Coordinator sessions only; carries CUSTOMIZE markers for your team’s stack. |
+| `morning-ritual` skill | skill | The coordinator’s day-opener: messages delta, repo state, wrap audit, board sweep, machine cleanup, day plan. Coordinator sessions only; carries CUSTOMIZE markers for your team’s stack. |
 
 ## How the roles work
 
@@ -116,6 +116,15 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   untested; Windows via WSL.
 - For a private marketplace repo: working git credentials for the host on every
   installing machine (`/plugin marketplace add` clones over git).
+
+## Recommended settings (your user-scope `settings.json` — the plugin never writes it)
+
+- `"env": { "CLAUDE_CODE_RETRY_WATCHDOG": "1" }` — long-running coordinator and worker
+  sessions keep retrying on API overload (429/529) instead of giving up after ten
+  attempts. Sessions started before the change keep the old behaviour until restarted.
+- `"remoteControlAtStartup": false` — with many sessions on one machine, only the
+  coordinator should be reachable remotely; `claim` reminds it to turn Remote Control on
+  in its tab, and a fresh coordinator starts as `claude --rc -n orchestrator`.
 
 ## Why this exists
 
