@@ -176,6 +176,11 @@ assert_rc "wt new (remote repo) succeeds" 0 "$RC"
 [ -d "$W/.worktrees-app/topic1" ] && ok "worktree created at sibling default" || bad "worktree created at sibling default" "$OUT"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1)"
 assert_has "wt list shows topic1" "topic1" "$OUT"
+# a slash topic lands in a dash directory; `done` by the directory name must still name the real branch
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new 'feat/slash' >/dev/null 2>&1
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done feat-slash 2>&1)"; RC=$?
+assert_rc "wt done by directory name succeeds" 0 "$RC"
+assert_has "done hint names the real branch, not the directory" "branch -D 'feat/slash'" "$OUT"
 # local-only repo, base = local branch
 git -C "$W" init -qb main solo 2>/dev/null
 git -C "$W/solo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init

@@ -77,15 +77,16 @@ case "$CMD" in
     check_base
     DEST="$WTDIR/${TOPIC//\//-}"
     [ -d "$DEST" ] || die "no worktree at $DEST"
+    BRANCH=$(git -C "$DEST" rev-parse --abbrev-ref HEAD)  # real branch: <topic> may be the dir name (sec-step0 vs sec/step0)
     [ -z "$(git -C "$DEST" status --porcelain)" ] || die "$DEST has uncommitted changes — commit, stash or clean up first"
     # refuse to drop commits that exist nowhere else
     if ! git -C "$DEST" merge-base --is-ancestor HEAD "$BASE" 2>/dev/null; then
       git -C "$DEST" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1 \
         && [ -z "$(git -C "$DEST" log '@{upstream}..HEAD' --oneline)" ] \
-        || die "branch $TOPIC has commits that are neither on $BASE nor pushed — push or merge first"
+        || die "branch $BRANCH has commits that are neither on $BASE nor pushed — push or merge first"
     fi
     git -C "$ROOT" worktree remove --force "$DEST"
-    echo "removed $DEST (branch $TOPIC kept; delete it after the merge with: git -C $ROOT branch -D '$TOPIC')"
+    echo "removed $DEST (branch $BRANCH kept; delete it after the merge with: git -C $ROOT branch -D '$BRANCH')"
     ;;
   *) die "usage: wt <name> <new|list|done> [topic]" ;;
 esac
