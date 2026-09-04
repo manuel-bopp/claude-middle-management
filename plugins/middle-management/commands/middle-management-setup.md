@@ -1,5 +1,5 @@
 ---
-description: Show and edit the middle-management config — protected checkouts, staging protection, board path
+description: Show and edit the middle-management config — protected checkouts, staging protection, board path, alarm channel; optionally install the stuck-coordinator heartbeat
 allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 ---
 
@@ -7,7 +7,8 @@ allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 
 Show the user their current configuration, interview them about the changes they
 want, then write the file back and validate it. The config is one JSON file that
-arms the worktree guard, the `/wt` helper and the blanket-staging guard.
+arms the worktree guard, the `/wt` helper, the blanket-staging guard and the
+heartbeat's alarm channel.
 
 Schema (nothing else is valid):
 
@@ -15,6 +16,7 @@ Schema (nothing else is valid):
 {
   "board": "/abs/path/to/board.md",
   "surgicalStaging": true,
+  "notifyCommand": ". ~/.claude/secrets/telegram.env && curl -sS -m 15 -X POST \"https://api.telegram.org/bot$BOT_TOKEN/sendMessage\" --data-urlencode \"chat_id=$CHAT_ID\" --data-urlencode \"text=$1\"",
   "protectedCheckouts": [
     { "name": "app", "root": "/abs/path/repo", "base": "origin/main",
       "install": "npm install", "worktreeDir": "/abs/path/.worktrees-app" }
@@ -23,7 +25,8 @@ Schema (nothing else is valid):
 ```
 
 `name`, `root` and `base` are required per entry; `install` and `worktreeDir`
-are optional; `board` and `surgicalStaging` are optional top-level keys.
+are optional; `board`, `surgicalStaging` and `notifyCommand` are optional
+top-level keys.
 
 ## Step 1 — show the current state first
 
@@ -106,6 +109,13 @@ repositories; the user names them.
 7. **Board.** Ask for the path of the shared board document the coordinator
    maintains, if the user keeps one. Omit the key when there is none.
 
+8. **Alarm channel.** Ask for a shell command that reaches the user (phone,
+   chat). The heartbeat (step 5) and the unit-failure alarm run it with the
+   message as `$1` and on stdin. Tokens belong in a mode-600 env file the
+   command sources, never inline — this command shows the config back to the
+   user in step 1. The schema block above carries a Telegram example. Omit the
+   key when the user does not want the heartbeat; step 5 then refuses to arm.
+
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped
 from the file.
@@ -151,3 +161,59 @@ effective worktree directory; whether blanket staging is blocked; the board
 path. Add the two operational facts: implementation work goes into a worktree
 via `/wt <name> new <topic>`, and the config takes effect immediately — the
 hooks read it on every run, so no restart is needed.
+
+## Step 5 — heartbeat (optional, Linux only)
+
+The stuck-coordinator heartbeat is a systemd **user** timer: every 10 minutes it
+checks whether the coordinator session's last turn got an answer; after 45
+minutes of silence it alarms once through `notifyCommand` and pokes the session
+over its own socket. What it is a net for and what it cannot see: skill
+`middle-management`, section "Recovery after a kill". Offer it only when the
+user runs a coordinator session that sits unattended for hours; otherwise skip
+this step and say so.
+
+Preconditions — run all four and stop with one plain sentence at the first
+that fails:
+
+```bash
+CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"; CFG="$(bash "$CHECK" file)"
+systemctl --user --version >/dev/null 2>&1 && echo "systemd user manager: ok" || echo "NO systemd user manager (macOS/launchd is not supported)"
+command -v python3 >/dev/null && echo "python3: ok" || echo "NO python3 (the poke sender needs it)"
+[ -n "$(jq -r '.notifyCommand // ""' "$CFG" 2>/dev/null)" ] && echo "notifyCommand: set" || echo "NO notifyCommand in $CFG (step 2, item 8)"
+echo "linger: $(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo unknown)"
+```
+
+`linger: no` means the timer dies with the login session — the user runs
+`loginctl enable-linger "$USER"` first (it may ask for their password).
+
+Install — copies the heartbeat files OUT of the plugin, because the plugin
+cache path changes with every update and a unit pointing there would die
+silently — then arms the timer:
+
+```bash
+CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
+HB="$(bash "$CHECK" dir)/middle-management-heartbeat"; UNITS="$HOME/.config/systemd/user"
+mkdir -p "$HB" "$UNITS"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{orch-heartbeat.sh,poke-session.py,unit-failure-alarm.sh} "$HB/"
+[ -e "$HB/orch-heartbeat-poke.md" ] || cp "${CLAUDE_PLUGIN_ROOT}/scripts/orch-heartbeat-poke.md" "$HB/"
+for u in orch-heartbeat.timer orch-heartbeat.service unit-failure-alarm@.service; do
+  sed "s|__HEARTBEAT_DIR__|$HB|g" "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
+done
+systemctl --user daemon-reload && systemctl --user enable --now orch-heartbeat.timer
+systemctl --user list-timers orch-heartbeat.timer --no-pager
+```
+
+Then tell the user, in plain text: the poke prompt to customize is
+`$HB/orch-heartbeat-poke.md` (board path, commit convention, alarm line — the
+CUSTOMIZE marks; this copy survives plugin updates); **after every plugin update
+re-run this step** so the scripts are refreshed; and
+`cat "$(bash "$CHECK" dir)/state/orch-heartbeat/last-tick"` answers "is it
+still armed" — older than 15 minutes means it is not running. Offer a test
+alarm and run it ONLY when the user says yes, because it reaches their phone:
+
+```bash
+MSG="middle-management heartbeat: test alarm"
+printf '%s\n' "$MSG" | sh -c "$(jq -r .notifyCommand "$CFG")" notify "$MSG"
+```
+
+Disarm and uninstall are in the skill; never run them here unasked.

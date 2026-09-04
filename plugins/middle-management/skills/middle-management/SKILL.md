@@ -142,6 +142,71 @@ State lives in the Claude config dir (`CLAUDE_CONFIG_DIR` when set, otherwise `~
 `bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" dir` prints the resolved one. It
 survives plugin updates and uninstalls.
 
+## Recovery after a kill
+
+A coordinator whose turn dies — an exhausted retry budget, a crashed turn, a spend limit —
+sits silent with no error anyone sees, and every worker waits on it. Three layers cover it.
+
+**Before you close the coordinator tab, release the seat** (`/orchestrator release`). A
+released marker means "regime off", which every watcher understands; a closed tab with the
+marker still set looks exactly like a death.
+
+**The heartbeat** (optional, Linux, installed by `/middle-management-setup` step 5) is a
+systemd user timer that ticks every 10 minutes. Who coordinates: the marker, else a live
+`orch*` session. Is that session alive: registry entry, `kind == "interactive"`, `kill -0`,
+and its `procStart` equal to field 22 of `/proc/<pid>/stat` (the PID-reuse guard) — the
+same liveness rule the role hook and `orchestrator.sh` apply, plus that guard. Did its last
+turn get an answer: one `stat` and one tail-read of the transcript under
+`<config dir>/projects/*/<sessionId>.jsonl`, comparing timestamps, never file position
+(retry records are flushed late and out of order). Stuck for 45 minutes → ONE alarm through
+`notifyCommand` and a **poke**: a peer message written straight into the session's own Unix
+socket by `poke-session.py` — no `claude` process, no model call, no quota. Then at most one
+poke per hour, giving up after 24 h; a new answer closes the episode with one "back" line.
+
+It is a net for **dead turns**. A session asleep inside an API retry only buffers the poke
+and wakes at its own reset, so there the heartbeat is harmless, not helpful. It cannot see
+a session parked on a permission dialog (its last record is a tool call, so it reads
+healthy), nor anything on a machine that is off.
+
+Files after the install: `<config dir>/middle-management-heartbeat/` — the scripts and
+your copy of the poke prompt, which later plugin updates do not touch; **after a plugin
+update, re-run setup step 5** so the scripts are refreshed — plus
+`~/.config/systemd/user/orch-heartbeat.{timer,service}` and `unit-failure-alarm@.service`,
+and state under `<config dir>/state/orch-heartbeat/` (one open episode per coordinator,
+`latches`, `last-tick`).
+
+- Armed? `systemctl --user list-timers orch-heartbeat.timer` and
+  `cat <config dir>/state/orch-heartbeat/last-tick` — a timestamp older than 15 minutes
+  means it is not running, whatever the timer says.
+- Test without a stall: `bash tests/heartbeat.sh` in the plugin repo (sends nothing). The
+  verdict for a live session, touching no state:
+  `orch-heartbeat.sh classify <transcript.jsonl>`.
+- Disarm: `systemctl --user disable --now orch-heartbeat.timer`. Nothing else runs on its
+  own; the state directory is inert.
+- Uninstall: disarm, delete the three unit files, `systemctl --user daemon-reload`, delete
+  `<config dir>/middle-management-heartbeat/` and `<config dir>/state/orch-heartbeat/`.
+
+Alarm lines, all latched (none repeats every tick): `coordinator "<name>" stuck since HH:MM`
+(once per episode; poking now) · `coordinator "<name>" is back` (once per episode) ·
+`… has been stuck for over 24 h` (gave up) · `the coordinator (<id>) is gone, not stuck`
+(the process is gone; nothing re-wakes it — someone claims a fresh coordinator) ·
+`heartbeat cannot decide whether … is alive` (hourly: registry or `/proc` unreadable, PID
+reuse) · `heartbeat cannot poke …` (once per episode) · `heartbeat found no transcript` ·
+`heartbeat cannot tell who coordinates` (several `orch*` sessions and no marker; hourly) ·
+`heartbeat: internal error` (hourly; the journal has the line) · `systemd user unit … FAILED`
+from `unit-failure-alarm@` (hourly per unit — it ships the unit's last 8 journal lines, so
+never point it at a unit whose journal can carry a credential).
+
+**The poked coordinator** works the checklist in the poke prompt: confirm it still holds the
+seat, reconcile board against roster, re-poke workers whose turn may have died the same
+way, write one dated RE-WAKE line on the board, tell the user, stop. **A resumed
+coordinator** (the user reopens the tab) reads that RE-WAKE block before anything else —
+see "The two roles".
+
+A headless `--resume` of a session whose tab may still be open is the double-writer hazard
+(two processes on one transcript). The heartbeat never does it; neither should you while
+the process may be alive.
+
 ## The other half of the plugin
 
 `/middle-management-setup` shows and edits the configuration (board path, protected

@@ -40,6 +40,7 @@ Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
 | `/middle-management-setup` | command | Shows the current config, then interviews you and writes/edits it — with validation. |
 | `middle-management` skill | skill | Extended reference: appointment, handover between sessions, troubleshooting. |
 | `morning-ritual` skill | skill | The coordinator’s day-opener: messages delta, repo state, wrap audit, board sweep, machine cleanup, day plan. Coordinator sessions only; carries CUSTOMIZE markers for your team’s stack. |
+| Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. Installed by setup step 5. |
 
 ## How the roles work
 
@@ -52,7 +53,9 @@ Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
    session registry and announces the session's role with its contract. Workers talk
    ONLY to the coordinator; the coordinator plans, routes, and does not build.
 3. `release` (in the coordinating session) turns the regime off; with no living
-   coordinator the hook is silent and every session works standalone.
+   coordinator the hook is silent and every session works standalone. When the
+   coordinating session is gone, any session clears the orphaned marker with
+   `release <id>` (the id from `status`) — never without it.
 4. Terminal fallback without the marker: start a session named `orchestrator`
    (`claude -n orchestrator`) — a living session whose name starts with `orch` counts.
 
@@ -68,6 +71,7 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
 {
   "board": "/abs/path/to/your-status-board.md",
   "surgicalStaging": true,
+  "notifyCommand": ". ~/.claude/secrets/telegram.env && curl -sS -m 15 -X POST \"https://api.telegram.org/bot$BOT_TOKEN/sendMessage\" --data-urlencode \"chat_id=$CHAT_ID\" --data-urlencode \"text=$1\"",
   "protectedCheckouts": [
     { "name": "app",
       "root": "/home/you/code/app",
@@ -79,6 +83,9 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
 ```
 
 - `board` (optional): a status/waiting board only the coordinator writes; workers read.
+- `notifyCommand` (optional): a shell command that reaches you; the heartbeat and the
+  unit-failure alarm run it with the message as `$1` and on stdin. Keep tokens in a
+  mode-600 env file the command sources — setup prints this file back to you.
 - `protectedCheckouts` (optional): repos whose main checkout is edit-protected;
   work happens in worktrees under `worktreeDir`. `base` is the branch new worktree
   branches start from — setup always writes it explicitly.
@@ -106,7 +113,12 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   same-named commands from other plugins is untested.
 - Uninstall (`/plugin uninstall middle-management`) removes the plugin but NOT your data:
   `<config-dir>/middle-management.json` and `<config-dir>/state/{orchestrator,allow-main-checkout-edits}`
-  stay; delete them by hand if you want a clean slate.
+  stay; delete them by hand if you want a clean slate. The heartbeat, if installed, keeps
+  running from its copy — disarm and uninstall it per the skill.
+- The heartbeat's units point at a COPY under `<config-dir>/middle-management-heartbeat/`
+  (the plugin cache path is versioned and would go stale on the next update): **after a
+  plugin update, re-run setup step 5** to refresh that copy. `last-tick` under
+  `<config-dir>/state/orch-heartbeat/` older than 15 minutes means the timer is not running.
 
 ## Requirements
 
@@ -114,6 +126,8 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   and cross-session peer messaging — the substrate the roles ride on.
 - `jq`, `bash`, POSIX `ps`/`kill`. Linux tested; macOS expected-compatible but
   untested; Windows via WSL.
+- For the heartbeat only: Linux with a systemd user manager (`loginctl enable-linger`),
+  `python3`, GNU `date`. macOS launchd is not supported.
 - For a private marketplace repo: working git credentials for the host on every
   installing machine (`/plugin marketplace add` clones over git).
 
