@@ -209,7 +209,7 @@ tick >/dev/null
 is "C10 name fallback watches"    "$(pokes)" 1
 
 # C11 no marker and no orch* session -> regime off, open episode closed
-setup buildos-xx; transcript 60 < <( { a "61 min ago"; u "60 min ago"; } )
+setup worker-xx; transcript 60 < <( { a "61 min ago"; u "60 min ago"; } )
 mkdir -p "$ENVDIR/hbstate"; echo '{"alarmed":"yes"}' > "$ENVDIR/hbstate/$SID.json"
 rm -f "$ENVDIR/state/orchestrator"
 tick >/dev/null
