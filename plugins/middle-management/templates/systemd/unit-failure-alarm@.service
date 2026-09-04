@@ -1,0 +1,10 @@
+# middle-management plugin — USER unit template: the OnFailure= target of the heartbeat unit
+# (an unattended failure must be loud). Any further user unit may point at it with
+#   OnFailure=unit-failure-alarm@%n.service
+# Not enabled, not timed: systemd starts it when the named unit fails.
+[Unit]
+Description=middle-management: fail-loud alarm for %i (via notifyCommand)
+
+[Service]
+Type=oneshot
+ExecStart=__HEARTBEAT_DIR__/unit-failure-alarm.sh %i

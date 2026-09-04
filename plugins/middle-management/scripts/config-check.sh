@@ -36,6 +36,7 @@ validate() {
     (type == "object")
     and ((.board // "") | type == "string")
     and ((.surgicalStaging // true) | type == "boolean")
+    and ((.notifyCommand // "") | type == "string")
     and ((.protectedCheckouts // []) | (type == "array") and all(
           (type == "object")
           and (.name | type == "string")

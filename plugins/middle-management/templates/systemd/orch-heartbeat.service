@@ -1,0 +1,12 @@
+# middle-management plugin — USER unit template, started by orch-heartbeat.timer, never enabled
+# itself. One tick: is the coordinator session alive, and did its last turn get an answer?
+# TimeoutStartSec: a tick is one stat plus one tail-read; two minutes keeps a hung
+# notifyCommand from overlapping the next tick.
+[Unit]
+Description=middle-management: stuck-coordinator heartbeat tick
+OnFailure=unit-failure-alarm@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=__HEARTBEAT_DIR__/orch-heartbeat.sh
+TimeoutStartSec=2min

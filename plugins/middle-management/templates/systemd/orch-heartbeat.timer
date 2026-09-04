@@ -1,0 +1,13 @@
+# middle-management plugin — USER unit template. /middle-management-setup installs it into
+# ~/.config/systemd/user/ with __HEARTBEAT_DIR__ filled in, then:
+#   systemctl --user enable --now orch-heartbeat.timer
+[Unit]
+Description=middle-management: stuck-coordinator heartbeat - tick every 10 minutes
+
+[Timer]
+OnCalendar=*:00/10
+Persistent=true
+Unit=orch-heartbeat.service
+
+[Install]
+WantedBy=timers.target

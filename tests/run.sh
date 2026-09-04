@@ -206,5 +206,13 @@ OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" ghost new x 2>&1)"; RC=$?
 [ "$RC" -ne 0 ] && ok "unknown name -> loud error" || bad "unknown name -> loud error" "$OUT"
 
 say ""
-say "RESULT: $PASS passed, $FAIL failed"
+say "== heartbeat (tests/heartbeat.sh) =="
+HB_OUT="$(bash "$ROOT/tests/heartbeat.sh" 2>&1)"; HB_RC=$?
+printf '%s\n' "$HB_OUT" | grep -E '^\s+(FAIL|skip)' || true
+HB_LINE="$(printf '%s\n' "$HB_OUT" | grep -E '^[0-9]+ passed' | tail -1)"
+say "  ${HB_LINE:-heartbeat matrix did not report}"
+[ "$HB_RC" -eq 0 ] || FAIL=$((FAIL+1))
+
+say ""
+say "RESULT: $PASS passed, $FAIL failed (plus heartbeat: ${HB_LINE:-FAILED TO RUN})"
 [ "$FAIL" -eq 0 ]
