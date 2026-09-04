@@ -81,7 +81,7 @@ NAMED_COUNT=$(printf '%s' "$NAMED" | grep -c .)
 if [ -z "$ORCH_SRC" ]; then
   if [ "$NAMED_COUNT" -eq 0 ]; then
     # Both exits, with a human gate: this hint fires in EVERY living session.
-    [ -n "$STALE" ] && printf 'middle-management: the coordinator marker points at a session that is not visibly alive (%s) — until someone acts there is no coordinator. ONLY if your user wants THIS session to coordinate:\n  take over:   bash %s/scripts/orchestrator.sh claim\n  regime OFF:  bash %s/scripts/orchestrator.sh release %s   (the id is also printed by status)\nOtherwise ignore this.\n' "$MID" "$PLUGIN_ROOT" "$PLUGIN_ROOT" "$MID"
+    [ -n "$STALE" ] && printf 'middle-management: the coordinator marker points at a session that is not visibly alive (%s) — until someone acts there is no coordinator. Workers keep working their lane, hold every outward coordination the regime routes through the coordinator (posts, tickets, pull requests, asks to the user), close their books when done or blocked, and report to whoever claims next. ONLY if your user wants THIS session to coordinate:\n  take over:   bash %s/scripts/orchestrator.sh claim\n  regime OFF:  bash %s/scripts/orchestrator.sh release %s   (the id is also printed by status)\nOtherwise ignore this.\n' "$MID" "$PLUGIN_ROOT" "$PLUGIN_ROOT" "$MID"
     exit 0
   fi
   if [ "$NAMED_COUNT" -gt 1 ]; then
@@ -114,6 +114,8 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
   printf 'Resource hygiene is YOUR job: orphaned dev servers, worktrees of merged branches and stale\n'
   printf 'watchers go as soon as their reason is gone (sub-agent, by verified PID lineage, never by\n'
   printf 'pattern) — not when memory runs out. Morning ritual, step 5.\n'
+  printf 'After a re-wake or a resume: work the RE-WAKE checklist (top of the board, or the last checklist\n'
+  printf 'in your own transcript) before any new task.\n'
   [ -n "$BOARD" ] && printf 'You are the sole writer of the board %s; workers read it and report to you.\n' "$BOARD"
   printf 'Current workers: %s\n' "$(printf '%s\n' "$LIVE" | cut -f1 | grep -vxF "$ORCH" | tr '\n' ' ')"
 else
