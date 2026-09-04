@@ -71,7 +71,13 @@ rm -f "$H/.claude/middle-management.json"
 touch "$H/.claude/state/allow-main-checkout-edits"
 OUT="$(role "$H" "sess-alpha")"
 assert_has "override marker -> warning" "override marker" "$OUT"
+OUT="$(printf '{"session_id":"x"}' | HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$JQLESS" bash "$ROLE" 2>&1)"
+assert_has "override nag fires even without jq" "override marker" "$OUT"
 rm -f "$H/.claude/state/allow-main-checkout-edits"
+mkdir -p "$H/.claude/state/allow-main-checkout-edits"   # a DIRECTORY disarms the guard too (-e)
+OUT="$(role "$H" "sess-alpha")"
+assert_has "override marker as a directory -> warning" "override marker" "$OUT"
+rmdir "$H/.claude/state/allow-main-checkout-edits"
 
 say "== roles: claim/release/status =="
 H="$(new_home)"; PEER="$(add_peer "$H")"

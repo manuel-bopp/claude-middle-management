@@ -22,14 +22,19 @@ set -u
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 CHECK="$PLUGIN_ROOT/scripts/config-check.sh"
 
-command -v jq >/dev/null 2>&1 || {
-  echo "middle-management: jq not installed — plugin inactive (install jq)"; exit 0; }
-
 CFG_DIR="$(bash "$CHECK" dir)"
 CFG_FILE="$(bash "$CHECK" file)"
 REG="$CFG_DIR/sessions"
 MARKER="$CFG_DIR/state/orchestrator"
 OVERRIDE="$CFG_DIR/state/allow-main-checkout-edits"
+
+# The override nag comes first and needs no jq: a forgotten marker silently disarms the
+# checkout guard for every session on this machine. -e, not -f — the guard
+# (hooks/protect-main-checkouts.sh) tests -e, so a marker created as a directory disarms it too.
+[ -e "$OVERRIDE" ] && printf 'middle-management: override marker active — main-checkout guard is OFF; delete %s when the exception is done\n' "$OVERRIDE"
+
+command -v jq >/dev/null 2>&1 || {
+  echo "middle-management: jq not installed — plugin inactive (install jq)"; exit 0; }
 
 [ -d "$REG" ] || {
   echo "middle-management: session registry not found — role detection inactive (requires a recent Claude Code)"
@@ -47,8 +52,6 @@ elif [ "$CFG_STATE" -eq 0 ]; then
         [ -d "$pc_root" ] || printf 'middle-management: protected checkout "%s" points at %s, which is not a directory — that entry is inert (run /middle-management-setup)\n' "$pc_name" "$pc_root"
       done
 fi
-[ -f "$OVERRIDE" ] && printf 'middle-management: override marker active — main-checkout guard is OFF; delete %s when the exception is done\n' "$OVERRIDE"
-
 # --- role detection ---------------------------------------------------------------
 MY_ID=$(jq -r '.session_id // ""')
 
