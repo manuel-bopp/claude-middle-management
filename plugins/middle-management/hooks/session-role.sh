@@ -14,6 +14,9 @@
 # If neither finds a living coordinator, this hook stays SILENT — the regime is off and
 # every session works standalone. The role messages below ARE the behavioral contract;
 # the skill "middle-management" is the extended reference.
+# Alive = a registry entry with kind "interactive" whose pid answers kill -0. On the marker
+# route the sessionId is the identity and .name is display only; scripts/orchestrator.sh
+# follows the same rule (liveness rule F1).
 set -u
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -61,19 +64,21 @@ LIVE=$(cat "$REG"/*.json 2>/dev/null \
 
 name_of() { printf '%s\n' "$LIVE" | awk -F'\t' -v id="$1" '$2==id{print $1; exit}'; }
 
-ORCH=""; ORCH_SRC=""; STALE=""
+ORCH=""; ORCH_ID=""; ORCH_SRC=""; STALE=""
 if [ -f "$MARKER" ]; then
   MID=$(head -1 "$MARKER" | tr -d '[:space:]')
   if [ -n "$MID" ]; then
-    MNAME=$(name_of "$MID")
-    if [ -n "$MNAME" ]; then ORCH="$MNAME"; ORCH_SRC="marker"; else STALE=1; fi
+    # alive = the id is in LIVE (not: it has a name) — a nameless coordinator is still one
+    if printf '%s\n' "$LIVE" | cut -f2 | grep -qxF "$MID"; then
+      ORCH_ID="$MID"; ORCH="$(name_of "$MID")"; ORCH_SRC="marker"
+    else STALE=1; fi
   fi
 fi
 
 NAMED=$(printf '%s\n' "$LIVE" | cut -f1 | grep -i '^orch' | sort -u)
 NAMED_COUNT=$(printf '%s' "$NAMED" | grep -c .)
 
-if [ -z "$ORCH" ]; then
+if [ -z "$ORCH_SRC" ]; then
   if [ "$NAMED_COUNT" -eq 0 ]; then
     [ -n "$STALE" ] && printf 'middle-management: a previous coordinator session ended; the role regime is off until someone claims. Only if your user wants THIS session to coordinate, run: bash %s/scripts/orchestrator.sh claim — otherwise ignore this.\n' "$PLUGIN_ROOT"
     exit 0
@@ -86,15 +91,17 @@ if [ -z "$ORCH" ]; then
   ORCH="$NAMED"; ORCH_SRC="name"
 elif [ "$NAMED_COUNT" -ge 1 ] && ! printf '%s\n' "$NAMED" | grep -qxF "$ORCH"; then
   printf 'WARNING: the marker says the coordinator is "%s", but "%s" is also running under an orch* name.\n' \
-    "$ORCH" "$(printf '%s' "$NAMED" | tr '\n' ' ')"
+    "${ORCH:-unnamed}" "$(printf '%s' "$NAMED" | tr '\n' ' ')"
   printf 'The marker wins. Tell your user that two coordinators are in the race.\n'
 fi
 
 MY_NAME=$(name_of "$MY_ID")
 
-if [ "$MY_NAME" = "$ORCH" ]; then
+# Marker route: identity by sessionId. Name route: by name, but never an empty one.
+if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
+   || { [ "$ORCH_SRC" = name ] && [ -n "$MY_NAME" ] && [ "$MY_NAME" = "$ORCH" ]; }; then
   printf 'Session role: ORCHESTRATOR ("%s", by %s). You plan with your user and route the work —\n' \
-    "$MY_NAME" "$([ "$ORCH_SRC" = marker ] && echo marker || echo name)"
+    "${MY_NAME:-unnamed}" "$([ "$ORCH_SRC" = marker ] && echo marker || echo name)"
   printf 'you do NOT build yourself. Directly allowed: planning/decision docs, chat/GitHub coordination,\n'
   printf 'tasking workers and sub-agents. NOT yourself: product/repo code, repo git surgery, builds/tests —\n'
   printf 'delegate those. Small clear jobs (one-file fix, research, mechanical sweep) go to a sub-agent in\n'
@@ -109,8 +116,8 @@ if [ "$MY_NAME" = "$ORCH" ]; then
   [ -n "$BOARD" ] && printf 'You are the sole writer of the board %s; workers read it and report to you.\n' "$BOARD"
   printf 'Current workers: %s\n' "$(printf '%s\n' "$LIVE" | cut -f1 | grep -vxF "$ORCH" | tr '\n' ' ')"
 else
-  printf 'Session role: WORKER ("%s"). The coordinator is "%s".\n' "${MY_NAME:-unnamed}" "$ORCH"
-  printf 'Peer messages go ONLY to "%s" — never to other workers; anything another session needs\n' "$ORCH"
+  printf 'Session role: WORKER ("%s"). The coordinator is "%s".\n' "${MY_NAME:-unnamed}" "${ORCH:-unnamed}"
+  printf 'Peer messages go ONLY to "%s" — never to other workers; anything another session needs\n' "${ORCH:-unnamed}"
   printf 'goes through the coordinator. When you finish or block, report there yourself.\n'
   [ -n "$BOARD" ] && printf 'The board %s is read-only for you — the coordinator is its only writer.\n' "$BOARD"
 fi

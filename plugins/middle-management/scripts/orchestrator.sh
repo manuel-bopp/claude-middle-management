@@ -29,9 +29,12 @@ done
 MY_ID=$(jq -r '.sessionId' "$REG/$me.json")
 MY_NAME=$(jq -r '.name // "unnamed"' "$REG/$me.json")
 
+# Alive = a registry entry with this sessionId, kind "interactive" and a pid that answers
+# kill -0 — the same rule hooks/session-role.sh applies (the sessionId is the identity, .name
+# is display only). A bg/daemon entry counts as a holder for NEITHER of the two.
 alive_name() {  # $1 = sessionId -> name, if its process is still running
   cat "$REG"/*.json 2>/dev/null \
-    | jq -r --arg id "$1" 'select(.sessionId==$id) | [.pid, .name // "unnamed"] | @tsv' 2>/dev/null \
+    | jq -r --arg id "$1" 'select(.sessionId==$id and .kind == "interactive") | [.pid, .name // "unnamed"] | @tsv' 2>/dev/null \
     | { while IFS=$'\t' read -r pid name; do
           kill -0 "$pid" 2>/dev/null && { printf '%s' "$name"; break; }
         done; }
