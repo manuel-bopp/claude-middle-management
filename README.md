@@ -21,7 +21,7 @@ drawn in detail under [How the roles work](#how-the-roles-work).
 ## Install
 
 ```
-/plugin marketplace add <owner>/<repo>
+/plugin marketplace add manuel-bopp/claude-middle-management
 /plugin install middle-management@bopp-plugins
 ```
 
