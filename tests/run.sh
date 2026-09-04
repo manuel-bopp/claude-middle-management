@@ -24,7 +24,8 @@ assert_empty()  { [ -z "$3" ] && ok "$1" || bad "$1" "$3"; }
 assert_rc()     { [ "$3" -eq "$2" ] && ok "$1" || bad "$1" "rc=$3 (want $2)"; }
 
 new_home() {  # [$1 = registry name of THIS process, default alpha] -> fresh fake HOME with a live entry for $$
-  T="$(mktemp -d -p "$TMPBASE")"; mkdir -p "$T/.claude/sessions" "$T/.claude/state"
+  T="$(mktemp -d -p "$TMPBASE")"; [ "$T" = "$HOME" ] && { echo "refusing: real HOME"; exit 2; }
+  mkdir -p "$T/.claude/sessions" "$T/.claude/state"
   printf '{"pid":%s,"name":"%s","sessionId":"sess-%s","kind":"interactive"}\n' "$$" "${1:-alpha}" "${1:-alpha}" \
     > "$T/.claude/sessions/$$.json"
   echo "$T"
@@ -49,6 +50,9 @@ as_peer() {  # $1=home $2=name, rest = orchestrator.sh args — run as ANOTHER s
 }
 edit_json() { printf '{"tool_input":{"file_path":"%s"}}' "$1"; }
 bash_json() { printf '{"tool_input":{"command":"%s"}}' "$1"; }
+
+REAL_MARKER="$(bash "$P/scripts/config-check.sh" dir)/state/allow-main-checkout-edits"
+REAL_MARKER_BEFORE="$([ -e "$REAL_MARKER" ] && echo yes || echo no)"
 
 say "== role hook: preconditions =="
 H="$(new_home)"
@@ -84,6 +88,7 @@ mkdir -p "$H/.claude/state/allow-main-checkout-edits"   # a DIRECTORY disarms th
 OUT="$(role "$H" "sess-alpha")"
 assert_has "override marker as a directory -> warning" "override marker" "$OUT"
 rmdir "$H/.claude/state/allow-main-checkout-edits"
+[ "$([ -e "$REAL_MARKER" ] && echo yes || echo no)" = "$REAL_MARKER_BEFORE" ] && ok "real override marker untouched" || bad "real override marker untouched"
 
 say "== roles: claim/release/status =="
 H="$(new_home)"; PEER="$(add_peer "$H")"
@@ -94,6 +99,13 @@ assert_has "claimer sees ORCHESTRATOR" "ORCHESTRATOR" "$OUT"
 OUT="$(role "$H" "sess-beta")"
 assert_has "peer sees WORKER" "WORKER" "$OUT"
 assert_has "worker told coordinator name" "alpha" "$OUT"
+printf '{"board":"%s/board.md"}' "$H" > "$H/.claude/middle-management.json"
+OUT="$(role "$H" "sess-alpha")"
+assert_has "orchestrator banner: sole writer of the board" "sole writer of the board $H/board.md" "$OUT"
+assert_has "orchestrator banner: RE-WAKE checklist first" "RE-WAKE checklist" "$OUT"
+OUT="$(role "$H" "sess-beta")"
+assert_has "worker banner: board read-only" "read-only for you" "$OUT"
+rm -f "$H/.claude/middle-management.json"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" status 2>&1)"
 assert_has "status names holder" "alpha" "$OUT"
 OUT="$(as_peer "$H" gamma release)"; RC=$?

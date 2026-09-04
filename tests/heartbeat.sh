@@ -337,6 +337,17 @@ is "D4 second failure throttled"  "$(grep -c 'some.service FAILED' "$ENVDIR/noti
 rm -f "$ENVDIR/mm.json"
 UFA_CONFIG=$ENVDIR/mm.json UFA_LATCH_DIR=$ENVDIR/ufa2 "$UFA" other.service >/dev/null 2>&1; RC=$?
 is "D4 no notifyCommand -> exit 1 (loud in the journal)" "$RC" 1
+# D5 the unit templates: the install step's sed fills both placeholders, and the two service
+# units carry the config dir — the systemd user manager inherits no shell environment
+setup; TPL=$(cd "$HB/.." && pwd)/templates/systemd
+for u in orch-heartbeat.timer orch-heartbeat.service unit-failure-alarm@.service; do
+  sed "s|__HEARTBEAT_DIR__|/tmp/hb|g; s|__CONFIG_DIR__|/tmp/cfg|g" "$TPL/$u" > "$ENVDIR/$u"
+done
+is "D5 no placeholder left"                "$(cat "$ENVDIR"/orch-heartbeat.* "$ENVDIR/unit-failure-alarm@.service" | grep -c '__')" 0
+is "D5 tick unit carries the config dir"   "$(grep -c '^Environment=CLAUDE_CONFIG_DIR=/tmp/cfg$' "$ENVDIR/orch-heartbeat.service")" 1
+is "D5 alarm unit carries the config dir"  "$(grep -c '^Environment=CLAUDE_CONFIG_DIR=/tmp/cfg$' "$ENVDIR/unit-failure-alarm@.service")" 1
+is "D5 tick unit runs the copied script"   "$(grep -c '^ExecStart=/tmp/hb/orch-heartbeat.sh$' "$ENVDIR/orch-heartbeat.service")" 1
+is "D5 timer starts the tick unit"         "$(grep -c '^Unit=orch-heartbeat.service$' "$ENVDIR/orch-heartbeat.timer")" 1
 
 echo
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"

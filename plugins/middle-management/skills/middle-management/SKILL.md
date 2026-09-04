@@ -166,7 +166,9 @@ poke per hour, giving up after 24 h; a new answer closes the episode with one "b
 It is a net for **dead turns**. A session asleep inside an API retry only buffers the poke
 and wakes at its own reset, so there the heartbeat is harmless, not helpful. It cannot see
 a session parked on a permission dialog (its last record is a tool call, so it reads
-healthy), nor anything on a machine that is off.
+healthy), nor anything on a machine that is off. One honest caveat: that a poke re-triggers
+an *idle* session is proven; that it re-triggers a session whose *turn died* is not — treat
+the alarm as the reliable half of this unit and the poke as the cheap bet.
 
 Files after the install: `<config dir>/middle-management-heartbeat/` — the scripts and
 your copy of the poke prompt, which later plugin updates do not touch; **after a plugin

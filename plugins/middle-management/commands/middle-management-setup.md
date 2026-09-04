@@ -192,12 +192,14 @@ silently — then arms the timer:
 
 ```bash
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
-HB="$(bash "$CHECK" dir)/middle-management-heartbeat"; UNITS="$HOME/.config/systemd/user"
+CFG_DIR="$(bash "$CHECK" dir)"; HB="$CFG_DIR/middle-management-heartbeat"; UNITS="$HOME/.config/systemd/user"
 mkdir -p "$HB" "$UNITS"
 cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{orch-heartbeat.sh,poke-session.py,unit-failure-alarm.sh} "$HB/"
 [ -e "$HB/orch-heartbeat-poke.md" ] || cp "${CLAUDE_PLUGIN_ROOT}/scripts/orch-heartbeat-poke.md" "$HB/"
+# The units carry the resolved config dir: the systemd user manager inherits no shell environment,
+# so a CLAUDE_CONFIG_DIR set in the shell would otherwise never reach the tick.
 for u in orch-heartbeat.timer orch-heartbeat.service unit-failure-alarm@.service; do
-  sed "s|__HEARTBEAT_DIR__|$HB|g" "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
+  sed "s|__HEARTBEAT_DIR__|$HB|g; s|__CONFIG_DIR__|$CFG_DIR|g" "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
 done
 systemctl --user daemon-reload && systemctl --user enable --now orch-heartbeat.timer
 systemctl --user list-timers orch-heartbeat.timer --no-pager
@@ -212,6 +214,7 @@ still armed" — older than 15 minutes means it is not running. Offer a test
 alarm and run it ONLY when the user says yes, because it reaches their phone:
 
 ```bash
+CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"; CFG="$(bash "$CHECK" file)"
 MSG="middle-management heartbeat: test alarm"
 printf '%s\n' "$MSG" | sh -c "$(jq -r .notifyCommand "$CFG")" notify "$MSG"
 ```

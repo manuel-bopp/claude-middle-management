@@ -119,6 +119,8 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   (the plugin cache path is versioned and would go stale on the next update): **after a
   plugin update, re-run setup step 5** to refresh that copy. `last-tick` under
   `<config-dir>/state/orch-heartbeat/` older than 15 minutes means the timer is not running.
+- The heartbeat's alarm is the proven half; the poke is a cheap bet — a socket write is
+  known to re-trigger an idle session, not yet known to revive one whose turn died.
 
 ## Requirements
 

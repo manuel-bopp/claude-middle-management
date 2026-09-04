@@ -7,4 +7,5 @@ Description=middle-management: fail-loud alarm for %i (via notifyCommand)
 
 [Service]
 Type=oneshot
+Environment=CLAUDE_CONFIG_DIR=__CONFIG_DIR__
 ExecStart=__HEARTBEAT_DIR__/unit-failure-alarm.sh %i
