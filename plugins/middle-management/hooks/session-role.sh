@@ -80,7 +80,8 @@ NAMED_COUNT=$(printf '%s' "$NAMED" | grep -c .)
 
 if [ -z "$ORCH_SRC" ]; then
   if [ "$NAMED_COUNT" -eq 0 ]; then
-    [ -n "$STALE" ] && printf 'middle-management: a previous coordinator session ended; the role regime is off until someone claims. Only if your user wants THIS session to coordinate, run: bash %s/scripts/orchestrator.sh claim — otherwise ignore this.\n' "$PLUGIN_ROOT"
+    # Both exits, with a human gate: this hint fires in EVERY living session.
+    [ -n "$STALE" ] && printf 'middle-management: the coordinator marker points at a session that is not visibly alive (%s) — until someone acts there is no coordinator. ONLY if your user wants THIS session to coordinate:\n  take over:   bash %s/scripts/orchestrator.sh claim\n  regime OFF:  bash %s/scripts/orchestrator.sh release %s   (the id is also printed by status)\nOtherwise ignore this.\n' "$MID" "$PLUGIN_ROOT" "$PLUGIN_ROOT" "$MID"
     exit 0
   fi
   if [ "$NAMED_COUNT" -gt 1 ]; then
