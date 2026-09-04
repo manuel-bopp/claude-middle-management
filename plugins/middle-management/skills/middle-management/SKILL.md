@@ -18,7 +18,10 @@ appointed and handed over, what breaks, and how to fix it.
 
 **By marker (primary).** The user tells a running session "you are the coordinator now";
 that session runs `/orchestrator claim` and thereby records its sessionId in the marker
-file. Hand back with `/orchestrator release` in the same session. Check with
+file. Hand back with `/orchestrator release` in the same session — only the holder gives up
+the seat. **Exception for an orphaned marker:** another session may clear it only when the
+holder is not visibly alive AND it passes the holder's sessionId, `/orchestrator release
+<id>` (`status` prints the id); then `claim` in the new session. Check with
 `/orchestrator status`. All three run
 `bash "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh" <subcommand>`.
 
@@ -106,10 +109,14 @@ coordinator releases the seat, the new one claims it.
 - **"a previous coordinator session ended"** — a status line, not a task. The marker
   points at a session that is gone, so the regime is off. Claim ONLY if the user wants
   this session to coordinate; otherwise leave the seat empty.
-- **`release` refused** — only a LIVING different holder refuses. If the recorded holder
-  is dead, any session may release the marker; nobody has to delete files by hand.
-- **A solo user wants the banner gone** — `/orchestrator release` in any session clears
-  the seat and switches the regime off.
+- **`release` refused** — a living different holder always refuses. When the recorded
+  holder is not visibly alive, a non-holder clears the marker only by naming its id,
+  `/orchestrator release <id>` (`status` prints it). Nobody deletes files by hand, and
+  nobody clears a seat by accident — a coordinator in the middle of a reconnect looks dead
+  for a moment.
+- **A solo user wants the banner gone** — `/orchestrator release` in the coordinating
+  session clears the seat and switches the regime off (`release <id>` from any session
+  when that one is gone).
 - **No banner at all** — either there is no coordinator (expected), or the hooks are not
   armed yet: right after installing or updating the plugin, start a new session or run
   `/reload-plugins`.

@@ -70,27 +70,39 @@ case "${1:-status}" in
     fi
     ;;
   release)
+    # Invariant: only the holder gives up the seat. The one exception: the holder is not
+    # visibly alive AND the calling session names its sessionId (printed by 'status') — nobody
+    # types that by accident, and a coordinator in the middle of a reconnect looks dead for a
+    # moment. This is also how the regime is switched OFF after the coordinator's process ended.
     if [ -z "$HID" ]; then echo "There is no coordinator — nothing to release."; exit 0; fi
-    # A living OTHER holder refuses; a dead holder may be released by anyone.
-    if [ "$HID" != "$MY_ID" ] && [ -n "$HNAME" ]; then
-      echo "REFUSED: the coordinator is \"$HNAME\", not this session (\"$MY_NAME\")."
-      echo "Only the holder gives up the seat — have it run release there."
-      exit 1
+    if [ "$HID" != "$MY_ID" ]; then
+      if [ -n "$HNAME" ]; then
+        echo "REFUSED: the coordinator is \"$HNAME\", not this session (\"$MY_NAME\")."
+        echo "Only the holder gives up the seat — have it run release there (bash $SELF release)."
+        exit 1
+      fi
+      if [ "${2:-}" != "$HID" ]; then
+        echo "REFUSED: the marker points at $HID — this session is not the holder, and the holder"
+        echo "is not visibly alive right now (ended OR in the middle of a reconnect)."
+        echo "Only if your user says the coordinator session is gone:"
+        echo "  bash $SELF release $HID"
+        exit 1
+      fi
     fi
     rm -f "$MARKER"
     if [ "$HID" = "$MY_ID" ]; then
       echo "OK: seat released. There is no coordinator now — the role regime is OFF."
     else
-      echo "OK: the marker pointed at a session that is no longer running ($HID) — removed."
+      echo "OK: the marker pointing at the no longer visible session $HID is removed."
       echo "There is no coordinator now — the role regime is OFF."
     fi
     ;;
   status)
     echo "This session: \"$MY_NAME\" ($MY_ID)"
     if [ -z "$HID" ];      then echo "Coordinator:  none — the role regime is OFF."
-    elif [ -z "$HNAME" ];  then echo "Coordinator:  the marker points at a session that has ENDED ($HID) — 'claim' takes it over, 'release' clears it."
+    elif [ -z "$HNAME" ];  then echo "Coordinator:  the marker points at a session that is not visibly alive ($HID) — 'claim' takes it over, 'release $HID' clears it."
     elif [ "$HID" = "$MY_ID" ]; then echo "Coordinator:  this session."
     else echo "Coordinator:  \"$HNAME\""; fi
     ;;
-  *) echo "Usage: orchestrator.sh [claim|release|status]"; exit 1 ;;
+  *) echo "Usage: orchestrator.sh [claim|release [<sessionId of the not visibly alive holder>]|status]"; exit 1 ;;
 esac

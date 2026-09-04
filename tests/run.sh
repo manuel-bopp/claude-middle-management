@@ -91,7 +91,10 @@ printf 'sess-ghost\n' > "$H/.claude/state/orchestrator"
 OUT="$(role "$H" "sess-alpha")"
 assert_has "dead holder -> stale hint with human gate" "your user" "$OUT"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" release 2>&1)"; RC=$?
-assert_rc "release of DEAD holder succeeds" 0 "$RC"
+assert_rc "release of a DEAD holder WITHOUT its id -> refused" 1 "$RC"
+assert_has "refusal names the runnable release <id>" "release sess-ghost" "$OUT"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" release sess-ghost 2>&1)"; RC=$?
+assert_rc "release <dead holder's id> by a non-holder succeeds" 0 "$RC"
 OUT="$(role "$H" "sess-alpha")"
 assert_empty "after release -> silent" "" "$OUT"
 kill "$PEER" 2>/dev/null

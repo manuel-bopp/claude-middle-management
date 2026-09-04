@@ -1,6 +1,6 @@
 ---
 description: Claim, release, or show the coordinator seat for parallel Claude Code sessions (middle-management)
-argument-hint: "[claim|release|status]"
+argument-hint: "[claim|release [<sessionId>]|status]"
 allowed-tools: ["Bash"]
 ---
 
@@ -28,6 +28,8 @@ the marker that decides which one.
      session on this machine.
    - on `BUSY` / `REFUSED`: say which session holds the seat and that only that session
      (or the user) can hand it over. Do not retry, and never delete the marker by hand.
+     A `REFUSED` that prints `release <id>` means the holder is not visibly alive: rerun
+     with that id ONLY when the user confirms the coordinator session is gone.
    - on the "no session registry entry" error: the script ran outside this session's
      process tree (a sandboxed bash does that) — rerun it as a normal Bash call in this
      session.
