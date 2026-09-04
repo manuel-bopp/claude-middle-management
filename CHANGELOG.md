@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-09-04
 
 Synced from the master setup (2026-09-04, round 2): **the stuck-coordinator heartbeat** — a
 systemd user timer (Linux) that alarms through the new config key `notifyCommand` when the
