@@ -49,10 +49,12 @@ fi
 # --- role detection ---------------------------------------------------------------
 MY_ID=$(jq -r '.session_id // ""')
 
-# name<TAB>sessionId of every living interactive session
+# name<TAB>sessionId of every living interactive session. The (possibly empty) name comes LAST
+# in the jq array: `read` with a tab IFS collapses empty fields, so a nameless session would
+# otherwise get its sessionId in the name column and no id at all (found 04.09.2026, case F1).
 LIVE=$(cat "$REG"/*.json 2>/dev/null \
-  | jq -r 'select(.pid and .kind == "interactive") | [.pid, .name // "", .sessionId // ""] | @tsv' 2>/dev/null \
-  | while IFS=$'\t' read -r pid name sid; do
+  | jq -r 'select(.pid and .sessionId and .kind == "interactive") | [.pid, .sessionId, .name // ""] | @tsv' 2>/dev/null \
+  | while IFS=$'\t' read -r pid sid name; do
       kill -0 "$pid" 2>/dev/null && printf '%s\t%s\n' "$name" "$sid"
     done)
 [ -z "$LIVE" ] && exit 0
