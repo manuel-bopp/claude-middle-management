@@ -50,6 +50,11 @@ other's status. When your lane is done, the report and closing your own books (y
 wrap convention: touched docs, log entry, local commit) are ONE motion — nobody has to
 remind you.
 
+**If the coordinator dies, keep working your lane.** Hold every outward coordination the
+regime routes through the coordinator (posts, tickets, pull requests, asks to the user),
+close your books when done or blocked, and report to whoever claims next. The role hook
+tells you when the marker points at a session that is not visibly alive.
+
 **Orchestrator.** You hold the conversation with the user: plan roughly together, write a
 handoff doc, then task a worker session with it — by peer message carrying the PATH to
 the doc, never its content (peer messages are plain text, not files). You are the only
@@ -75,6 +80,11 @@ user. Procedure: `morning-ritual` skill, step 5.
 **After a handover you still close your books.** Releasing the seat and briefing the
 successor is not a wrap: the outgoing coordinator writes its own log entry and commits
 the docs it changed, like any worker.
+
+**After a re-wake or a resume, work the RE-WAKE checklist first.** A re-triggered or
+resumed coordinator reads the RE-WAKE block at the top of the board (or the last checklist
+in its own transcript) and works it before taking any new task — see "Recovery after a
+kill" below.
 
 ## Gotchas
 
