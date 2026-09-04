@@ -51,7 +51,8 @@ Reconcile three sources by sessionId — never by peer name (client reconnects
 re-register sessions under NEW names; map names via the session registry,
 `<config-dir>/sessions/*.json`):
 
-- Registry + PID liveness (`kill -0 <pid>` per registry entry).
+- Registry + PID liveness (`kill -0 <pid>` per registry entry) — entries with
+  `kind != "interactive"` (bg/daemon) are not sessions your user sits in front of; skip them.
 - Yesterday's block in your team's session log, if you keep one — CUSTOMIZE: this
   plugin ships the roles, your team ships the wrap convention; if you have none,
   skip the audit or start keeping one.
