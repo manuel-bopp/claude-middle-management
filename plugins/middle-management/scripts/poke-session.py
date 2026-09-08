@@ -13,6 +13,7 @@
 #         2 no live registry entry for that sessionId
 #         3 socket absent or refusing (the session is gone)
 #         4 unsupported peer protocol (the CLI changed its frame shape — do not guess)
+# Sender name: $POKE_FROM_NAME (default "heartbeat"), shown to the receiving session.
 # Registry: $OHB_REG, else <config dir>/sessions (config dir = $CLAUDE_CONFIG_DIR or ~/.claude).
 import hashlib, json, os, socket, sys, uuid
 
@@ -41,7 +42,12 @@ token = json.load(open(key, encoding="utf-8"))["peerToken"]
 
 # `from` is omitted on purpose: without a reply address the receiver skips the delivery receipt it
 # would otherwise try to send back to a socket that does not exist.
-envelope = f'<cross-session-message from-name="heartbeat">\n{body}\n</cross-session-message>'
+# The sender name the receiving session sees. Default "heartbeat"; another caller on the same
+# transport (a forwarder for your user's off-keyboard replies, say) sets POKE_FROM_NAME so the
+# receiver can tell who is poking. Sanitised: it lands inside an attribute value.
+sender = "".join(c for c in os.environ.get("POKE_FROM_NAME", "heartbeat")
+                 if c.isalnum() or c in "-_") or "heartbeat"
+envelope = f'<cross-session-message from-name="{sender}">\n{body}\n</cross-session-message>'
 frame = {"type": "user", "session_id": sid, "uuid": str(uuid.uuid4()),
          "priority": "next", "message": {"content": envelope}}
 
