@@ -42,11 +42,15 @@ command -v jq >/dev/null 2>&1 || {
 
 # --- preconditions: warn loudly, then carry on with the role logic ---------------
 bash "$CHECK" validate; CFG_STATE=$?
+# Initialised BEFORE the branches: a roles-only install has no config file (CFG_STATE 2) and
+# this hook runs under `set -u` — an unset variable below would abort every message.
 BOARD=""
+NOTIFY=""
 if [ "$CFG_STATE" -eq 1 ]; then
   printf 'middle-management: %s is invalid — worktree guard and wt are DISARMED and blanket-staging protection is forced ON until fixed (run /middle-management-setup)\n' "$CFG_FILE"
 elif [ "$CFG_STATE" -eq 0 ]; then
   BOARD=$(jq -r '.board // ""' "$CFG_FILE" 2>/dev/null)
+  NOTIFY=$(jq -r '.notifyCommand // ""' "$CFG_FILE" 2>/dev/null)
   jq -r '.protectedCheckouts[]? | [.name, .root] | @tsv' "$CFG_FILE" 2>/dev/null \
     | while IFS=$'\t' read -r pc_name pc_root; do
         [ -d "$pc_root" ] || printf 'middle-management: protected checkout "%s" points at %s, which is not a directory — that entry is inert (run /middle-management-setup)\n' "$pc_name" "$pc_root"
@@ -119,6 +123,13 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
   printf 'pattern) — not when memory runs out. Morning ritual, step 5.\n'
   printf 'After a re-wake or a resume: work the RE-WAKE checklist (top of the board, or the last checklist\n'
   printf 'in your own transcript) before any new task.\n'
+  printf 'Sub-agents write long results to a FILE and return you at most ten lines; the file path goes\n'
+  printf 'where you track lanes. Your context is for decisions and routing, not raw material — put that\n'
+  printf 'instruction in every sub-agent prompt you write.\n'
+  printf 'Every sub-agent you announce to your user names its model and whether the strongest model was\n'
+  printf 'needed or a cheaper one suffices; briefs name model and effort per role. Cheapest plausible\n'
+  printf 'model first, escalate after two failed attempts, never a third try on the same one.\n'
+  [ -n "$NOTIFY" ] && printf 'Your off-keyboard channel to your user is configured (notifyCommand): use it for what must reach\nthem away from the desk — plain text, one topic, the fact first. The skill has the call.\n'
   [ -n "$BOARD" ] && printf 'You are the sole writer of the board %s; workers read it and report to you.\n' "$BOARD"
   printf 'Current workers: %s\n' "$(printf '%s\n' "$LIVE" | cut -f1 | grep -vxF "$ORCH" | tr '\n' ' ')"
 else
