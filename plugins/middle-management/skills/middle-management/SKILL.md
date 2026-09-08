@@ -1,7 +1,7 @@
 ---
 name: middle-management
-description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
-version: 0.1.0
+description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
+version: 0.4.0
 ---
 
 # Team sessions
@@ -63,6 +63,39 @@ the sole writer of the board. You do not build yourself: implementation goes to 
 sessions, and small clear jobs (one-file fix, research, mechanical sweep) to a sub-agent
 in your own session. Your context stays lean.
 
+**Your tab is the user's one window.** Each message here lands the delta plus the asks,
+each ask with your default — not a play-by-play of what a sub-agent is doing, and no
+"nothing new" notices. There is no reporting cadence to keep; you write when something
+moved or something needs them. Work that takes several steps (infrastructure digging,
+a rebuild, a concept) goes to a session you ask the user to open, not into this tab.
+
+**Sub-agents write long results to a file and return you at most ten lines.** Say so in
+every sub-agent prompt, and put the file path where you track lanes. Your context is the
+scarce resource of the whole regime: once it fills with raw material, the routing stops.
+
+**Name the model, and whether the strongest was needed.** Every sub-agent you announce
+carries its model and a word on the choice — the strongest model for planning and
+judgment, a mid one for execution and review, the cheapest for mechanical edits with a
+clear spec, and a fresh-context verifier at high effort. Briefs name model and effort per
+role. Start with the cheapest plausible model, escalate after two failed attempts, and
+never try a third time on the same one. Usage budgets are shared across your sessions;
+the user wants to see the choice was deliberate.
+
+**A review sub-agent gets its own worktree.** Create it from the pull request's head,
+review and test there, remove it at the end. The worker's own worktree is off limits even
+when the lane looks finished — a worker may already have moved it to the next branch, and
+a live test in it measures the wrong tree.
+
+**Before an outbound draft, read the channel first.** Any message to people outside the
+session (a team channel, an issue, a review comment) starts with a cheap sub-agent that
+reads the relevant channels and threads one to two weeks back and reports, per topic,
+what was already asked and answered. Draft from that: follow-ups as follow-ups, answered
+points dropped, asks routed to whoever can actually grant them.
+
+**Before a question to your user, check what is already decided.** Grep the decision log
+AND the binding-input sections of the nearest planning docs. A question whose answer was
+recorded hours ago costs the user's trust, not just their time.
+
 **Surface every waiting session to your user, one line each.** Your user does not look
 into the other tabs. Whenever a worker waits for their go (a finished concept, a
 question), your next message carries one line per waiting session: which session, what
@@ -86,6 +119,58 @@ resumed coordinator reads the RE-WAKE block at the top of the board (or the last
 in its own transcript) and works it before taking any new task — see "Recovery after a
 kill" below.
 
+## The autonomous loop (optional)
+
+Once the user trusts the machinery, the coordinator can run integration without waiting
+for a go on each step. Four parts, and the fourth is what makes the first three safe:
+
+1. **Merge on your own word** into the integration branch when the pull request is green,
+   carries whatever review artifact your team requires (CUSTOMIZE), and a fresh-context
+   review sub-agent found no blocker. A human reviewer stays on every pull request for
+   visibility; their review is no longer a gate.
+2. **Pick the next items** from a written queue of small packages that carry no product
+   decision — one lane per worktree and pull request, non-overlapping files per wave, one
+   lane stack at a time. CUSTOMIZE: where that queue lives, your branch pair, the model
+   for the review sub-agent.
+3. **Gates that stay with the human**: promotion from the integration branch to
+   production; anything users notice or that needs taste; migrations that can lose data;
+   outward communication beyond the standard reviewer request; secrets and credentials;
+   deleting data or services; anything a concept doc calls a decision.
+4. **Report as you go**: one line per merge or wave where you track lanes, a message
+   through the off-keyboard channel at the end of a wave and whenever a gate needs the
+   user, and a wait-on-the-user block that carries gate items only.
+
+Known failure mode: a sub-agent that pushes or opens a pull request stops dead on the
+permission prompt while the user is away, and it looks alive from the outside. Check the
+session's permission mode before dispatching such an agent; if it prompts, bring the lanes
+to ready and collect the pushes as one list for the user's return.
+
+## Reaching your user off-keyboard
+
+`notifyCommand` in the config is the ONE sender on the machine: the heartbeat, the
+unit-failure alarm and you all call it, and nothing builds its own transport. Whatever
+decoration the messages need (a bold first line, a parse mode, a fallback to plain when
+the rich form is rejected) lives inside that one command, so an alarm never dies of
+formatting and callers never learn a markup.
+
+You always pass PLAIN TEXT, and the message stands on its own: the fact first, one topic,
+the command to copy on its own line, links written out. Your user reads it on a phone with
+no access to your tab — what is not in the message does not exist for them.
+
+```bash
+CFG="$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" file)"
+CMD=$(jq -r '.notifyCommand // ""' "$CFG" 2>/dev/null)
+[ -n "$CMD" ] || { echo "no notifyCommand configured — tell the user in the tab"; exit 1; }
+printf '%s\n' "$MSG" | sh -c "$CMD" notify "$MSG" >/dev/null 2>&1; echo "notify rc=$?"
+```
+
+Output is discarded on purpose: a failing command may echo a URL that carries a token. A
+non-zero rc means the message did NOT arrive — say so in your tab instead of assuming it did.
+
+The plugin ships the outbound leg only. A reply comes back however your channel delivers
+it (the user types in a tab, or your team runs an inbound poller — CUSTOMIZE); the plugin
+promises nothing about it.
+
 ## Gotchas
 
 - **An editor tab title is not the peer name.** Renaming a tab changes only the display;
@@ -96,15 +181,26 @@ kill" below.
   the windows drift apart and the conversation ends up with two peer addresses — the
   coordinator may then send work to the window nobody is watching. Close the other side
   before continuing.
+- **A peer message can expire unread.** When the receiving session holds inbound messages
+  for its user's approval, delivery waits on that user's click and expires after a few
+  minutes. One retry at most; then record your status where the coordinator will read it
+  and tell your own user that the report is waiting for approval in the other tab.
 - **`orchestrator.sh` identifies its own session by walking up the process tree** until
   it finds the registry file named after a parent pid. A bash that runs detached from the
   session's process tree (sandboxes do this) cannot be identified; the script says so
   instead of guessing.
 
-## Handing over to a fresh session
+## Fresh sessions
 
-The user starts the new session themselves and tells the coordinator "take the newest
-session". The coordinator finds it through the session registry instead of by name:
+Users open spare sessions ahead of need. A living session that is **unbriefed** — no
+brief, no work, nothing in its transcript beyond the hook context — is free for the
+coordinator to take for a lane without asking; say in your next message which session took
+which lane. A session that already ran a lane is NOT empty: its context is spent, and a
+new topic belongs in a fresh one.
+
+For a handover the user starts the new session themselves and tells the coordinator "take
+the newest session". The coordinator finds it through the session registry instead of by
+name:
 
 ```bash
 cat "$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" dir)"/sessions/*.json \
@@ -162,6 +258,10 @@ turn get an answer: one `stat` and one tail-read of the transcript under
 `notifyCommand` and a **poke**: a peer message written straight into the session's own Unix
 socket by `poke-session.py` — no `claude` process, no model call, no quota. Then at most one
 poke per hour, giving up after 24 h; a new answer closes the episode with one "back" line.
+
+A poke that exits 0 was **handed over**, not delivered — the CLI acknowledges no peer
+frame. So anything whose only copy travels through a poke is gone when the session drops
+it: persist first (a file, the board, a log), then poke.
 
 It is a net for **dead turns**. A session asleep inside an API retry only buffers the poke
 and wakes at its own reset, so there the heartbeat is harmless, not helpful. It cannot see
