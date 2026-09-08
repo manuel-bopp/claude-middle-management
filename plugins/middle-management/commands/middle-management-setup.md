@@ -1,5 +1,5 @@
 ---
-description: Show and edit the middle-management config — protected checkouts, staging protection, board path, alarm channel; optionally install the stuck-coordinator heartbeat
+description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user; optionally install the stuck-coordinator heartbeat
 allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 ---
 
@@ -8,7 +8,8 @@ allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 Show the user their current configuration, interview them about the changes they
 want, then write the file back and validate it. The config is one JSON file that
 arms the worktree guard, the `/wt` helper, the blanket-staging guard and the
-heartbeat's alarm channel.
+off-keyboard channel the heartbeat, the unit-failure alarm and the coordinator
+all send through.
 
 Schema (nothing else is valid):
 
@@ -109,12 +110,16 @@ repositories; the user names them.
 7. **Board.** Ask for the path of the shared board document the coordinator
    maintains, if the user keeps one. Omit the key when there is none.
 
-8. **Alarm channel.** Ask for a shell command that reaches the user (phone,
-   chat). The heartbeat (step 5) and the unit-failure alarm run it with the
-   message as `$1` and on stdin. Tokens belong in a mode-600 env file the
-   command sources, never inline — this command shows the config back to the
-   user in step 1. The schema block above carries a Telegram example. Omit the
-   key when the user does not want the heartbeat; step 5 then refuses to arm.
+8. **Off-keyboard channel.** Ask for a shell command that reaches the user
+   (phone, chat). It is the ONE sender on this machine: the heartbeat (step 5),
+   the unit-failure alarm AND the coordinator itself run it with the message as
+   `$1` and on stdin. Callers pass plain text, so any decoration (a bold first
+   line, a parse mode, the fallback to plain when the rich form is rejected)
+   belongs inside this command. Tokens belong in a mode-600 env file the command
+   sources, never inline — this command shows the config back to the user in
+   step 1. The schema block above carries a Telegram example. Omit the key only
+   when the user wants neither the heartbeat alarm nor the coordinator's
+   off-keyboard asks; step 5 then refuses to arm.
 
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped

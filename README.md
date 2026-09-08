@@ -83,9 +83,12 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
 ```
 
 - `board` (optional): a status/waiting board only the coordinator writes; workers read.
-- `notifyCommand` (optional): a shell command that reaches you; the heartbeat and the
-  unit-failure alarm run it with the message as `$1` and on stdin. Keep tokens in a
-  mode-600 env file the command sources — setup prints this file back to you.
+- `notifyCommand` (optional): a shell command that reaches you when you are away from the
+  keyboard — the ONE sender on the machine. The heartbeat, the unit-failure alarm and the
+  coordinator itself run it with the message as `$1` and on stdin. Callers always pass plain
+  text; any decoration (a bold first line, a parse mode, the fallback to plain when the rich
+  form is rejected) lives inside this one command, so an alarm never dies of formatting. Keep
+  tokens in a mode-600 env file the command sources — setup prints this file back to you.
 - `protectedCheckouts` (optional): repos whose main checkout is edit-protected;
   work happens in worktrees under `worktreeDir`. `base` is the branch new worktree
   branches start from — setup always writes it explicitly.
