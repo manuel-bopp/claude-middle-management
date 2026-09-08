@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.0 — 2026-09-08
+
+Synced from the master setup (2026-09-08, round 3): **what a coordinator does when nobody is
+watching**. The `middle-management` skill gained four sections and the ORCHESTRATOR banner three
+lines. *The autonomous loop (optional)*: merge into the integration branch on the coordinator's
+own word when the pull request is green, carries the team's review artifact and a fresh-context
+review sub-agent found no blocker; take the next items from a written queue of decision-free
+packages, one lane per worktree; the gates that stay human (promotion to production, taste,
+data-loss migrations, outward communication, secrets, deletions, anything a concept calls a
+decision); and the reporting that makes the first three safe — plus the failure mode where a
+pushing sub-agent stalls invisibly on a permission prompt. *Reaching your user off-keyboard*:
+`notifyCommand` is now the ONE sender on the machine — the heartbeat, the unit-failure alarm and
+the coordinator all call it, callers pass plain text, decoration and the plain fallback live
+inside that one command, output is discarded because a failing command can echo a token, and a
+non-zero rc means "not delivered, say so in the tab". README and `/middle-management-setup` say
+the same; the plugin still ships the outbound leg only. *Fresh sessions*: an unbriefed living
+session is free for the coordinator to take for a lane, a session that already ran one is not.
+Sub-agents write long results to a FILE and return the coordinator at most ten lines; every
+sub-agent the coordinator announces names its model and whether the strongest was needed, with
+the escalation ladder (cheapest plausible first, escalate after two failed attempts). A review
+sub-agent gets its OWN temporary worktree, never the worker's. Before an outbound draft, a cheap
+sub-agent reads the channels one to two weeks back; before a question to the user, check what is
+already decided. Gotcha: a peer message to a session that holds inbound for approval expires
+after a few minutes. `poke exit 0` is a hand-over, not a delivery — persist first, then poke, and
+`POKE_FROM_NAME` now names the sender the receiving session sees. The morning ritual reads the
+off-keyboard inbox too, if the team runs one. Five new banner tests (91 + 101 cases).
+
+Heartbeat note: an installed heartbeat runs a COPY of `poke-session.py` under
+`<config-dir>/middle-management-heartbeat/` — re-run `/middle-management-setup` step 5 after this
+update to refresh it.
+
 ## 0.3.0 — 2026-09-04
 
 Synced from the master setup (2026-09-04, round 2): **the stuck-coordinator heartbeat** — a
