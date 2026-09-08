@@ -22,8 +22,11 @@ Window: since the last ritual run (default: yesterday evening).
 Read the delta from wherever your team talks — Slack/Teams/Discord channels, direct
 messages to the coordinator, watched threads. Gotchas that generalize: channel
 history usually does NOT include thread replies (fetch replies for every thread that
-mattered), and an empty watcher log means UNANSWERED, not "no thread". Never print
-tokens/secrets into output — load them into shell vars from your secret store.
+mattered), and an empty watcher log means UNANSWERED, not "no thread". If your team runs an
+inbound path for the user's off-keyboard replies — the plugin ships none — read that inbox
+too: a poke into a session is a hand-over, not a delivery, so the inbox is the only proof a
+reply arrived. Never print tokens/secrets into output — load them into shell vars from your
+secret store.
 
 Done when every new message is routed: into the day plan, to a lane/worker, or
 explicitly irrelevant.
