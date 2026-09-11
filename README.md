@@ -51,9 +51,9 @@ plugin's own cache path is versioned and goes stale with each update.
 | Worktree guard | PreToolUse hook | Denies direct edits inside configured main checkouts and points to the worktree workflow instead. Dormant until you configure repos. |
 | `/wt <name> new\|list\|run\|stop\|hold\|done` | command | Creates/lists/removes per-topic worktrees with the branch based on your configured base branch, deps installed. `done` refuses while the worktree is dirty, unpushed or any live process sits inside it, and deletes the branch (via `update-ref`, recording the tip) once it is merged into the base — a squash-merged branch is kept, since it is no ancestor of the base. |
 | `/wt <name> run\|stop <topic>`, `/wt cap` | command (Linux) | Starts the lane's dev server as a memory-capped systemd user unit `wt-<name>-<topic>` and stops it again, waiting for the cgroup to be empty rather than believing "inactive"; `cap` caps one heavy build or test run in the foreground. At most `maxUnits` lane units at a time. |
-| `/wt <name> hold <topic> <hours>`, `/wt list` | command | `hold` keeps the reaper off a lane that has to stay up. `list` is the one view: one parseable row per lane with its unit, owner, uptime, memory, hold, git state and pull-request state. |
+| `/wt <name> hold\|chown <topic>`, `/wt list` | command | `hold` keeps the reaper off a lane that has to stay up; `chown` hands a lane to another session so it does not go ownerless. `list` is the one view: one parseable row per lane with its unit, owner, uptime, memory, hold, git state and pull-request state. |
 | Long-runners as units | PreToolUse hook (optional, Linux) | Rewrites a hand-started `next dev`, `vite`, `<pm> run dev` into `wt run`, and `bun test`, `next build`, `playwright test`, `<pm> run build` into `wt cap`; refuses a dev server inside a compound command with the line to copy. Off unless `longRunningAsUnit: true`. |
-| Lane reaper | systemd user timer (optional, Linux) | Every 30 minutes: stops lane units past `reaperMaxHours` or whose owning session is gone, removes the worktree of a merged, clean, pushed lane, and lists everything else with its reason — never killing a process by pid. Alarms and digests go through your `notifyCommand`. Installed by setup step 6. |
+| Lane reaper | systemd user timer (optional, Linux) | Every 30 minutes: stops lane units past `reaperMaxHours` or whose owning session is gone, removes the worktree of a merged, clean, pushed lane, and lists everything else with its reason — never killing a process by pid, and never touching a lane that has produced nothing yet. Alarms go through your `notifyCommand`, plus one digest a day so silence cannot mean a dead timer. Installed by setup step 6. |
 | Staging guard | PreToolUse hook | Blocks `git add -A` / `git add .` / `git commit -a` so parallel sessions stage only their own files. Off-switch for solo users: `surgicalStaging: false`. |
 | `/middle-management-setup` | command | Shows the current config, then interviews you and writes/edits it — with validation. |
 | `middle-management` skill | skill | Extended reference: appointment, handover between sessions, troubleshooting. |
@@ -96,6 +96,7 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   "maxUnits": 2,
   "reaperMaxHours": 10,
   "reaperOwnerlessMinutes": 30,
+  "reaperDigestHour": 7,
   "protectedCheckouts": [
     { "name": "app",
       "root": "/home/you/code/app",
@@ -118,9 +119,10 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   dev servers and heavy builds into `wt run` / `wt cap`.
 - `unitMemoryMax` / `capMemoryMax` / `maxUnits` (optional, defaults `3G` / `5G` / `2`): the
   memory ceiling of a lane unit, of a `wt cap` command, and how many lane units may run at once.
-- `reaperMaxHours` / `reaperOwnerlessMinutes` (optional, defaults `10` / `30`): when the lane
-  reaper calls a unit expired, and how long an owning session must be gone before its lane
-  counts as ownerless (confirmed on a second sighting).
+- `reaperMaxHours` / `reaperOwnerlessMinutes` / `reaperDigestHour` (optional, defaults `10` /
+  `30` / `7`): when the lane reaper calls a unit expired, how long an owning session must be
+  gone before its lane counts as ownerless (confirmed on a second sighting), and the hour from
+  which its once-a-day digest goes out.
 - `protectedCheckouts` (optional): repos whose main checkout is edit-protected;
   work happens in worktrees under `worktreeDir`. `base` is the branch new worktree
   branches start from — setup always writes it explicitly, and `serve` is the dev-server
@@ -155,11 +157,22 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   (the plugin cache path is versioned and would go stale on the next update): **after a
   plugin update, re-run setup step 5** to refresh that copy. `last-tick` under
   `<config-dir>/state/orch-heartbeat/` older than 15 minutes means the timer is not running.
-- The lane reaper decides from `wt list` alone. Without `gh` the `pr` column is `-`, so only
-  lanes whose branch is an ancestor of the base are cleaned up and squash-merged ones are
-  listed instead — the safe half of that trade. It never kills a process by pid, and its units
-  point at a COPY under `<config-dir>/middle-management-reaper/`, so re-run setup step 6 after
-  a plugin update.
+- The lane reaper decides from `wt list` alone. The `pr` column reads `-` whenever there is no
+  pull-request information to be had (no `gh`, no GitHub remote, `gh` never logged in), and
+  only a gh that was supposed to answer and failed reads `error`, which alarms. Without that
+  column only lanes whose branch is an ancestor of the base are cleaned up, and squash-merged
+  ones are listed instead — the safe half of that trade. Such a branch then keeps its ref for
+  good: once the worktree is gone the lane is never listed again, so delete it yourself with
+  the `update-ref` line `/wt … done` printed. The reaper never kills a process by pid, and its
+  units point at a COPY under `<config-dir>/middle-management-reaper/`, so re-run setup step 6
+  after a plugin update.
+- **There is no idle rule.** Deciding that a lane is idle means reading request lines out of
+  its server's log, and the plugin cannot know what those look like; a unit nobody uses is
+  caught by `reaperMaxHours` instead — later, but without guessing.
+- No lock around `wt`'s own verbs and no free-memory check before starting a unit (the master
+  this was extracted from has both): two `run` calls racing each other can exceed `maxUnits`,
+  which `MemoryMax` per unit bounds anyway. The unit count is machine-wide — every
+  `wt-*.service` on the user's systemd counts, including ones another tool started.
 - The long-runner hook is a stripper, not a shell parser. It matches in command position only
   (so `echo "bun test"` is left alone) and its blind spots are listed in its own header; a dev
   server started outside any lane is not rewritten, because there is no lane to name the unit

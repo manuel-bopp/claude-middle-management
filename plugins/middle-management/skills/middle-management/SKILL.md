@@ -355,11 +355,53 @@ A headless `--resume` of a session whose tab may still be open is the double-wri
 (two processes on one transcript). The heartbeat never does it; neither should you while
 the process may be alive.
 
+## The lane reaper
+
+Optional, Linux, installed by `/middle-management-setup` step 6 — the answer to "why did my
+worktree vanish?" and to "why is nothing being cleaned up?".
+
+Every 30 minutes it reads `/wt list` — its only input — and acts on three things: a lane unit
+that has run longer than `reaperMaxHours` (default 10) is stopped; a lane whose owning session
+has been gone for `reaperOwnerlessMinutes` (default 30), seen on two consecutive runs, is
+stopped; a lane with no unit, a clean tree, nothing unpushed and work that has landed in the
+base is removed with `/wt <name> done`, which deletes the branch and prints the tip SHA for
+the way back. Everything else it **lists** with its reason and leaves alone: dirty trees,
+unpushed commits, pull requests that are open, closed or absent, a lane somebody is working
+inside, an unknown owner. A valid `/wt <name> hold <topic> <hours>` beats every rule. It never
+kills a process by pid and never touches a ref itself.
+
+A lane that has produced nothing is never removed, however merged it looks: a brand-new
+worktree branches off the base and is trivially "contained" in it, so `merged` also requires
+that the lane tracks a branch of its own and has moved since it was created.
+
+There is no idle rule. Judging a lane idle means reading request lines out of its server's
+log, and the plugin cannot know what those look like; a unit nobody uses is caught by
+`reaperMaxHours` instead — later, but without guessing.
+
+Operating it:
+
+- **Is it armed?** `systemctl --user list-timers lane-reaper.timer`. The last run is the
+  header line of `<config dir>/state/wt/reaper-latest.md`; the run before it is
+  `reaper-previous.md`.
+- **What did it do?** That same listing — actions first, then everything it decided to leave
+  alone. It also sends through `notifyCommand` whenever it acted, whenever the set of listed
+  rows changed, and once a day (the first run at or after `reaperDigestHour`, default 7), so
+  silence never means "the timer died".
+- **Try it without consequences:** `lane-reaper.sh --dry-run`, plus `--now +11h` to see what
+  an aging machine would look like and `--only <lane>` to let it act on one lane only.
+- **Hand a lane over** instead of letting it go ownerless: `/wt <name> chown <topic> <owner>`.
+- **Disarm:** `systemctl --user disable --now lane-reaper.timer`. **Uninstall:** that, then
+  delete `<config dir>/middle-management-reaper/` and the two unit files in
+  `~/.config/systemd/user/`. Its state (markers, listings) lives under
+  `<config dir>/state/wt/` and is yours to delete.
+- **After a plugin update, re-run setup step 6** — the units run a copy, not the plugin.
+
 ## The other half of the plugin
 
 `/middle-management-setup` shows and edits the configuration (board path, protected
-checkouts, staging guard). `/wt <name> new|list|done` creates and cleans up per-topic
-worktrees, and a hook keeps edits out of the protected main checkouts. Roles work with no
+checkouts, staging guard, lane caps). `/wt <name> new|list|run|stop|hold|chown|done` creates
+per-topic worktrees, runs their servers as capped units and cleans them up again, and a hook
+keeps edits out of the protected main checkouts. Roles work with no
 configuration at all; the worktree part needs one entry per repo.
 
 Pair this with your own team conventions — boards, handoff-doc naming, wrap rituals. The

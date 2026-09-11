@@ -43,6 +43,7 @@ validate() {
     and ((.longRunningAsUnit // false) | type == "boolean")
     and ((.reaperMaxHours // 0) | type == "number")
     and ((.reaperOwnerlessMinutes // 0) | type == "number")
+    and ((.reaperDigestHour // 0) | type == "number")
     and ((.protectedCheckouts // []) | (type == "array") and all(
           (type == "object")
           and (.name | type == "string")

@@ -24,6 +24,7 @@ Schema (nothing else is valid):
   "maxUnits": 2,
   "reaperMaxHours": 10,
   "reaperOwnerlessMinutes": 30,
+  "reaperDigestHour": 7,
   "protectedCheckouts": [
     { "name": "app", "root": "/abs/path/repo", "base": "origin/main",
       "install": "npm install", "serve": "npm run dev",
@@ -126,7 +127,7 @@ repositories; the user names them.
 
 9. **Off-keyboard channel.** Ask for a shell command that reaches the user
    (phone, chat). It is the ONE sender on this machine: the heartbeat (step 5),
-   the unit-failure alarm AND the coordinator itself run it with the message as
+   the unit-failure alarm, the lane reaper (step 6) AND the coordinator itself run it with the message as
    `$1` and on stdin. Callers pass plain text, so any decoration (a bold first
    line, a parse mode, the fallback to plain when the rich form is rejected)
    belongs inside this command. Tokens belong in a mode-600 env file the command
@@ -274,10 +275,11 @@ for u in lane-reaper.service lane-reaper.timer; do
   sed "s|__REAPER_DIR__|$RP|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
 done
-# the reaper's OnFailure= points at the same alarm unit step 5 installs
-[ -e "$UNITS/unit-failure-alarm@.service" ] || sed "s|__HEARTBEAT_DIR__|$RP|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
+# the reaper's OnFailure= points at the same alarm unit step 5 installs — written every time,
+# so re-running this step after a plugin update really refreshes every copy
+cp "${CLAUDE_PLUGIN_ROOT}/scripts/unit-failure-alarm.sh" "$RP/"
+sed "s|__HEARTBEAT_DIR__|$RP|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
   "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
-[ -e "$RP/unit-failure-alarm.sh" ] || cp "${CLAUDE_PLUGIN_ROOT}/scripts/unit-failure-alarm.sh" "$RP/"
 systemctl --user daemon-reload && systemctl --user enable --now lane-reaper.timer
 systemctl --user list-timers lane-reaper.timer --no-pager
 ```
@@ -292,7 +294,7 @@ Tell them, in plain text: the listing lands in `<config dir>/state/wt/reaper-lat
 and is where the morning ritual reads what was cleaned up; a lane that must stay up
 gets `/wt <name> hold <topic> <hours>`; and **after every plugin update re-run this
 step**, because the units run the copies, not the plugin. Thresholds are the config
-keys `reaperMaxHours` and `reaperOwnerlessMinutes`.
+keys `reaperMaxHours`, `reaperOwnerlessMinutes` and `reaperDigestHour`.
 
 Disarm with `systemctl --user disable --now lane-reaper.timer`; never run that here
 unasked.
