@@ -21,6 +21,9 @@
 #   list only  everything else: dirty trees, unpushed commits, open/closed/absent pull requests,
 #              an unknown pr state — listed with the reason, never touched
 #   markers    owner/hold/dead files of lanes that no longer exist are deleted
+# There is deliberately NO idle rule: judging a lane idle means reading request lines out of its
+# server's log, and no plugin can know what those look like. A unit nobody uses is caught by
+# reaperMaxHours instead, later but without guessing.
 # It never kills a process by pid and never deletes a ref; `wt done` deletes the branch of merged
 # work itself, and the tip SHA it prints is carried into the listing.
 #
@@ -80,6 +83,7 @@ PREV="$STATE/reaper-previous.md"
 TTL_SEC=$(( $(jq -r '.reaperMaxHours // 10' "$CFG_FILE") * 3600 ))
 DEAD_SEC=$(( $(jq -r '.reaperOwnerlessMinutes // 30' "$CFG_FILE") * 60 ))
 NOTIFY="$(jq -r '.notifyCommand // ""' "$CFG_FILE")"
+DIGEST_HOUR="$(jq -r '.reaperDigestHour // 7' "$CFG_FILE")"
 mkdir -p "$STATE"
 
 RC=0; ACTIONS=(); ROWS=(); KEYS=(); OWNERS_GONE=""
@@ -93,17 +97,23 @@ act() {  # act <lane> <key> <why> -- <cmd...>
   if ! only_match "$lane" "$key"; then
     row "skip:$key" "skipped" "$key" "$why" "not matched by --only $ONLY"; return 0
   fi
-  ACTIONS+=("$why → ${*}")
-  [ "$DRY" = 1 ] && return 0
+  if [ "$DRY" = 1 ]; then ACTIONS+=("$why → ${*}"); return 0; fi
   local out st=0 tip
   out=$("$@" 2>&1) || st=$?
-  if [ "$st" = 0 ]; then
-    # once the branch is deleted, the tip SHA wt printed is the only record that the commits
-    # can be restored
-    tip=$(grep -m1 'tip was' <<<"$out" || true); [ -n "$tip" ] && ACTIONS+=("$tip") || true
-  else
-    RC=1; ACTIONS+=("FAILED: ${*} → $(printf '%s' "$out" | tail -2 | tr '\n' ' ')")
-  fi
+  case "$st" in
+    0) ACTIONS+=("$why → ${*}")
+       # once the branch is deleted, the tip SHA wt printed is the only record that the commits
+       # can be restored
+       tip=$(grep -m1 'tip was' <<<"$out" || true); [ -n "$tip" ] && ACTIONS+=("$tip") || true ;;
+    3) # wt refuses to remove a worktree a live process sits in, and names the pids. That is a
+       # state to report — with the pids, in the line that gets sent — not a failure to alarm
+       # about again every 30 minutes.
+       local pids
+       pids=$(printf '%s' "$out" | grep -oE 'pid [0-9]+' | head -3 | tr '\n' ' ' || true)
+       row "busy:$key" "listed" "$key" "refused, ${pids:-a process} still works inside $key" \
+           "$why — the worktree stays; stop it by explicit pid, never by pattern" ;;
+    *) RC=1; ACTIONS+=("FAILED on $key: ${*} → $(printf '%s' "$out" | tail -2 | tr '\n' ' ')") ;;
+  esac
   return 0
 }
 dead_since() {  # owner -> seconds it has been seen gone (0 = first sighting)
@@ -123,7 +133,7 @@ while IFS= read -r line; do
   case "$line" in '#'*) continue ;; '') continue ;; esac
   # shellcheck disable=SC2086
   set -- $line
-  [ $# -ge 12 ] || fail "unexpected row in wt list — refusing to guess its columns: $line"
+  [ $# -eq 12 ] || fail "unexpected row in wt list — refusing to guess its columns: $line"
   CO=$1 LANE=$2 BRANCH=$3 UNIT=$4 OWNER=$5 ALIVE=$6 STARTED=$7 HOLD=${9} STATE_C=${10} MERGED=${11} PR=${12}
   KEY="$CO-$LANE"; ST=$(epoch "$STARTED")
   [ "$ALIVE" = no ] && OWNERS_GONE="$OWNERS_GONE $OWNER"
@@ -137,6 +147,9 @@ while IFS= read -r line; do
     else
       row "busy:$KEY" "running" "$KEY" "up $(age "$ST")" "owner $OWNER (alive $ALIVE), $UNIT"
     fi
+  elif [ "$PR" = error ]; then
+    RC=1; row "prerror:$KEY" "listed" "$KEY" "pull-request state UNKNOWN — gh failed" \
+      "alarm raised; an unreadable state is never read as 'nothing merged'"
   elif [ "$STATE_C" != clean ]; then
     row "$STATE_C:$KEY" "listed" "$KEY" "tree is $STATE_C" "branch $BRANCH — nothing is removed while work can be lost"
   elif [ "$MERGED" = yes ] || [ "$PR" = MERGED ]; then
@@ -183,6 +196,12 @@ LISTING="$(
 OLDKEYS=$(sed -n 's/^<!-- rowkeys: \(.*\) -->$/\1/p' "$LATEST" 2>/dev/null || true)
 [ -f "$LATEST" ] || OLDKEYS="__first_run__"
 CHANGED=0; [ "$OLDKEYS" = "${KEYS[*]:-}" ] || CHANGED=1
+# One send a day even when nothing changed: silence must not be the same signal as a dead timer.
+# A once-a-day fact, not a minute match — the timer is Persistent=true, so a catch-up run after
+# downtime fires late and would miss an exact time.
+DAY=$(date -d "@$NOW" +%F); DIGEST=0
+[ "$(( 10#$(date -d "@$NOW" +%H) ))" -ge "$DIGEST_HOUR" ] \
+  && [ "$(cat "$STATE/digest-last" 2>/dev/null || true)" != "$DAY" ] && DIGEST=1
 
 BODY=()
 for a in ${ACTIONS[@]+"${ACTIONS[@]}"}; do BODY+=("$a"); done
@@ -190,20 +209,21 @@ BODY+=("listed untouched: ${#ROWS[@]}")
 for r in ${ROWS[@]+"${ROWS[@]}"}; do
   BODY+=("· $(awk -F'|' '{gsub(/^ +| +$/,"",$3); gsub(/^ +| +$/,"",$4); print $3" — "$4}' <<<"$r")")
 done
-MSG="lane reaper: $([ ${#ACTIONS[@]} -eq 0 ] && echo 'no action' || echo "${#ACTIONS[@]} action(s)")
+MSG="lane reaper: $([ ${#ACTIONS[@]} -eq 0 ] && echo 'no action' || echo "${#ACTIONS[@]} action(s)")$([ "$DIGEST" = 1 ] && echo ' · daily digest')
 $(printf '%s\n' "${BODY[@]}" | head -12)
 full listing: $LATEST"
 
 if [ "$DRY" = 1 ]; then
   printf '%s\n' "$LISTING"
-  echo "--- would notify: $( { [ "${#ACTIONS[@]}" -gt 0 ] || [ "$CHANGED" = 1 ]; } && echo yes || echo 'no, nothing changed') ---"
+  echo "--- would notify: $( { [ "${#ACTIONS[@]}" -gt 0 ] || [ "$CHANGED" = 1 ] || [ "$DIGEST" = 1 ]; } && echo yes || echo 'no, nothing changed') ---"
   printf '%s\n' "$MSG"
   exit "$RC"
 fi
 
 [ -f "$LATEST" ] && mv -f "$LATEST" "$PREV" || true
 printf '%s\n' "$LISTING" > "$LATEST"
-if [ ${#ACTIONS[@]} -gt 0 ] || [ "$CHANGED" = 1 ]; then
+[ "$DIGEST" = 1 ] && echo "$DAY" > "$STATE/digest-last" || true
+if [ ${#ACTIONS[@]} -gt 0 ] || [ "$CHANGED" = 1 ] || [ "$DIGEST" = 1 ]; then
   if [ "${MM_REAPER_NO_NOTIFY:-0}" = 1 ] || [ -z "$NOTIFY" ]; then
     echo "not sent (no notifyCommand, or suppressed); the message would have been:"; printf '%s\n' "$MSG"
   elif ! printf '%s\n' "$MSG" | sh -c "$NOTIFY" notify "$MSG" >/dev/null 2>&1; then

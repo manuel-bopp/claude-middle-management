@@ -293,7 +293,7 @@ assert_has "refusal names the branch" "branch topic1 has commits" "$OUT"
 # a slash topic lands in a dash directory; `done` by the directory name must still name the real branch
 HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new 'feat/slash' >/dev/null 2>&1
 OUT="$(cd "$W/.worktrees-app/feat-slash" && HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done feat-slash 2>&1)"; RC=$?
-assert_rc "wt done from a cwd inside the worktree -> refused" 1 "$RC"
+assert_rc "wt done from a cwd inside the worktree -> refused with 3" 3 "$RC"
 assert_has "refusal names the cwd" "cwd is inside" "$OUT"
 [ -d "$W/.worktrees-app/feat-slash" ] && ok "refused done left the worktree alone" || bad "refused done left the worktree alone"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done feat-slash 2>&1)"; RC=$?
@@ -359,7 +359,9 @@ HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new lane1 >/dev/null 2>&1
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" list 2>&1)"
 assert_has "wt list prints the documented header" "# checkout worktree branch unit owner alive started mem hold state merged pr" "$OUT"
 ROW="$(printf '%s\n' "$OUT" | grep '^app lane1 ' || true)"
-assert_has "a fresh lane: no unit, no owner, clean, merged" "app lane1 lane1 - - - - - - clean yes" "$ROW"
+# a lane that has produced nothing is NOT merged, however much its HEAD is an ancestor of the
+# base: `wt new` sets its upstream to the base, which would otherwise read as "landed already"
+assert_has "a fresh lane: no unit, no owner, clean, NOT merged" "app lane1 lane1 - - - - - - clean no" "$ROW"
 assert_rc "the row has exactly 12 fields" 12 "$(printf '%s' "$ROW" | wc -w)"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app hold lane1 3 2>&1)"; RC=$?
 assert_rc "wt hold succeeds" 0 "$RC"
@@ -369,7 +371,7 @@ assert_lacks "the hold column is no longer empty" "- - - - - clean" "$ROW"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app hold lane1 0 2>&1)"
 assert_has "hold 0 clears it" "hold cleared for app-lane1" "$OUT"
 ROW="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1 | grep '^app lane1 ' || true)"
-assert_has "the cleared hold reads as -" "app lane1 lane1 - - - - - - clean yes" "$ROW"
+assert_has "the cleared hold reads as -" "app lane1 lane1 - - - - - - clean no" "$ROW"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app hold lane1 soon 2>&1)"; RC=$?
 assert_rc "hold with a non-numeric duration -> refused" 1 "$RC"
 printf 'x' > "$W/.worktrees-app/lane1/dirt.txt"
@@ -379,6 +381,15 @@ git -C "$W/.worktrees-app/lane1" add dirt.txt
 git -C "$W/.worktrees-app/lane1" -c user.email=t@t -c user.name=t commit -q -m dirt
 ROW="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1 | grep '^app lane1 ' || true)"
 assert_has "a commit that is nowhere else shows as unpushed, not merged" " unpushed no " "$ROW"
+# a lane that was pushed under its own name and whose commits landed in the base IS merged
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new landed >/dev/null 2>&1
+git -C "$W/.worktrees-app/landed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m landed
+git -C "$W/.worktrees-app/landed" push -q -u origin landed 2>/dev/null
+git -C "$W/.worktrees-app/landed" push -q origin HEAD:dev 2>/dev/null
+git -C "$W/app" fetch -q origin
+ROW="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1 | grep '^app landed ' || true)"
+assert_has "a pushed lane whose work landed in the base reads merged" " clean yes " "$ROW"
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done landed >/dev/null 2>&1
 # run: refused without a systemd user manager, and refused without a command
 NOSD="$(mktemp -d -p "$TMPBASE")"; ln -s /usr/bin/* /bin/* "$NOSD"/ 2>/dev/null
 rm -f "$NOSD/systemctl" "$NOSD/systemd-run"
@@ -398,6 +409,27 @@ OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" cap true 2>&1)"; RC=$?
 assert_rc "wt cap without -- -> refused" 1 "$RC"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new 'two words' 2>&1)"; RC=$?
 assert_rc "a topic with whitespace -> refused (it would break the list columns)" 1 "$RC"
+# chown: a lane handed over does not go ownerless when the session that started it ends
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app chown lane1 someone 2>&1)"; RC=$?
+assert_rc "wt chown succeeds" 0 "$RC"
+ROW="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1 | grep '^app lane1 ' || true)"
+assert_has "the new owner shows in the list" " someone " "$ROW"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app chown lane1 2>&1)"; RC=$?
+assert_rc "chown without an owner -> refused" 1 "$RC"
+# stop drops the owner marker but keeps a valid hold — the hold protects the lane, not the unit
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app hold lane1 3 >/dev/null
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$NOSD" bash "$WT" app stop lane1 2>&1)"
+assert_has "stop says the hold survived" "hold kept until" "$OUT"
+ROW="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1 | grep '^app lane1 ' || true)"
+assert_lacks "the owner marker is gone after stop" " someone " "$ROW"
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app hold lane1 0 >/dev/null
+# a checkout whose root cannot be read must fail loudly, not vanish from the view
+CFGBAD="{\"protectedCheckouts\":[{\"name\":\"gone\",\"root\":\"$W/vanished\",\"base\":\"origin/dev\"}]}"
+printf '%s' "$CFGBAD" > "$H/.claude/middle-management.json"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" list 2>&1)"; RC=$?
+assert_rc "wt list with an unreadable checkout root -> loud failure" 1 "$RC"
+assert_has "the failure names the checkout" "checkout 'gone'" "$OUT"
+printf '%s' "$CFG" > "$H/.claude/middle-management.json"
 
 say "== long-runners as units (optional hook) =="
 LRU="$P/hooks/long-running-as-unit.sh"
@@ -446,6 +478,11 @@ cat > "$STUB/wt" <<'STUBEOF'
 #!/usr/bin/env bash
 [ "$1" = list ] && { cat "$STUB_LIST"; exit 0; }
 printf '%s\n' "$*" >> "$STUB_LOG"
+if [ -n "${STUB_ACT_RC:-}" ]; then
+  echo "wt: refusing to remove it — these processes have their cwd inside it:" >&2
+  echo "  pid 4242  bash  cwd /lane" >&2
+  exit "$STUB_ACT_RC"
+fi
 echo "removed it; branch b deleted, tip was abc1234"
 STUBEOF
 chmod +x "$STUB/wt"
@@ -488,10 +525,31 @@ assert_has "the dirty lane is listed with its reason" "tree is dirty" "$OUT"
 lanes "app lane1 lane1 - beta yes - - - unpushed no OPEN"
 OUT="$(reap)"
 assert_empty "unpushed commits are never removed" "" "$(cat "$STUB_LOG")"
-lanes "app lane1 lane1 - beta yes - - - clean no OPEN" "app lane2 lane2 - beta yes - - - clean no error"
+lanes "app lane1 lane1 - beta yes - - - clean no OPEN"
 OUT="$(reap)"
-assert_empty "an open or unknown pull request is only listed" "" "$(cat "$STUB_LOG")"
-assert_has "the unknown pr state says so" "pr error" "$OUT"
+assert_empty "an open pull request is only listed" "" "$(cat "$STUB_LOG")"
+# a lane straight out of `wt new` reads exactly this row — it must survive
+lanes "app fresh fresh - - - - - - clean no none"
+OUT="$(reap)"; RC=$?
+assert_rc "a fresh lane run exits 0" 0 "$RC"
+assert_empty "a lane that has produced nothing is never removed" "" "$(cat "$STUB_LOG")"
+# the gh-less half of the merged rule: the local verdict alone is enough
+lanes "app lane1 lane1 - beta yes - - - clean yes none"
+OUT="$(reap)"
+assert_has "merged yes with no pull request at all -> removed" "app done lane1" "$(cat "$STUB_LOG")"
+lanes "app lane1 lane1 - beta yes - - - clean no error"
+OUT="$(reap)"; RC=$?
+assert_rc "an unreadable pr state alarms" 1 "$RC"
+assert_empty "an unreadable pr state acts on nothing" "" "$(cat "$STUB_LOG")"
+assert_has "the unreadable pr state says so" "UNKNOWN" "$OUT"
+# a worktree somebody is working in: wt refuses with 3, which is a state, not an alarm
+lanes "app lane1 lane1 - beta yes - - - clean yes MERGED"
+export STUB_ACT_RC=3
+OUT="$(reap)"; RC=$?
+unset STUB_ACT_RC
+assert_rc "a refused removal does not alarm" 0 "$RC"
+assert_has "the refused lane is listed as busy" "still works inside app-lane1" "$OUT"
+assert_has "the busy row names the pid" "pid 4242" "$OUT"
 lanes "app lane1 lane1 - beta yes - - - clean yes MERGED" "app lane2 lane2 - beta yes - - - clean yes MERGED"
 OUT="$(reap --only lane2)"
 assert_lacks "--only keeps the other lane untouched" "app done lane1" "$(cat "$STUB_LOG")"
@@ -505,11 +563,33 @@ mkdir -p "$H/.claude/state/wt"; printf 'beta' > "$H/.claude/state/wt/owner-app-g
 lanes "app lane1 lane1 - beta yes - - - clean no OPEN"
 OUT="$(reap)"
 [ -f "$H/.claude/state/wt/owner-app-gone" ] && bad "the marker of a vanished lane is deleted" || ok "the marker of a vanished lane is deleted"
+# one send a day even when nothing changed: a dead timer must not look like a quiet machine
+lanes "app lane1 lane1 - beta yes - - - clean no OPEN"
+OUT="$(reap)"
+OUT="$(reap)"
+assert_has "a second run with nothing new sends nothing" "no change, nothing sent" "$OUT"
+OUT="$(reap --now +24h)"
+assert_has "the first run of a new day sends a digest anyway" "daily digest" "$OUT"
 lanes "app lane1 lane1 - beta yes - clean"
 OUT="$(reap)"; RC=$?
 assert_rc "a row with the wrong column count -> loud failure" 1 "$RC"
 assert_has "the failure refuses to guess" "refusing to guess" "$OUT"
 unset STUB_LIST STUB_LOG
+
+say "== lane reaper against the real wt: a fresh lane survives a full run =="
+H="$(new_home)"
+W2="$(mktemp -d -p "$TMPBASE")"
+git -C "$W2" init -qb main src >/dev/null 2>&1
+git -C "$W2/src" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git clone -q "$W2/src" "$W2/app" 2>/dev/null
+printf '{"protectedCheckouts":[{"name":"app","root":"%s/app","base":"origin/main"}]}' "$W2" \
+  > "$H/.claude/middle-management.json"
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new fresh >/dev/null 2>&1
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_REAPER_NO_NOTIFY=1 bash "$REAPER" 2>&1)"; RC=$?
+assert_rc "a real run over a fresh lane exits 0" 0 "$RC"
+[ -d "$W2/.worktrees-app/fresh" ] && ok "the fresh worktree is still there" || bad "the fresh worktree is still there" "$OUT"
+git -C "$W2/app" rev-parse --verify --quiet refs/heads/fresh >/dev/null \
+  && ok "the fresh branch is still there" || bad "the fresh branch is still there" "$OUT"
 
 say ""
 say "== heartbeat (tests/heartbeat.sh) =="

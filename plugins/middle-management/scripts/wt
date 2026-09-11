@@ -16,6 +16,9 @@
 #   wt <name> stop <topic>     stop that unit, verified, and drop the lane's markers
 #   wt <name> hold <topic> <hours>
 #                              keep the reaper off the lane for <hours>; 0 clears the hold
+#   wt <name> chown <topic> <owner>
+#                              hand the lane over: write <owner> into its owner marker, so it
+#                              does not count as ownerless when the session that started it ends
 #   wt <name> done <topic>     stop the unit and remove the worktree — refuses while it is
 #                              dirty, unpushed or a live process sits in it — and delete the
 #                              branch once it is merged into <base>
@@ -32,15 +35,19 @@
 #   alive   yes|no|-  (the owner session's pid, kill -0) · started ISO minute · mem MiB
 #   hold    ISO minute the hold expires
 #   state   clean|dirty|unpushed  (unpushed = commits neither on <base> nor on the upstream)
-#   merged  yes|no  (HEAD is an ancestor of <base>)
-#   pr      OPEN|MERGED|CLOSED|none|error, or `-` when gh is not installed
+#   merged  yes|no  — HEAD is an ancestor of <base> AND the lane tracks a branch of its own AND
+#           it has moved since it was created, so a brand-new lane reads `no`
+#   pr      OPEN|MERGED|CLOSED|none|error, or `-` when there is no pull-request information to
+#           be had (no gh, no GitHub remote, gh never logged in). `error` — gh was supposed to
+#           answer and failed — is never quietly `none`, and the reaper alarms about it.
 # Only worktrees that sit directly in the checkout's worktreeDir are lanes; other worktrees git
 # knows about are left out, because `run`, `stop`, `hold` and `done` address a lane by its
 # directory name. A lane whose branch was squash-merged reads `merged no` — the `pr` column is
 # what catches it, so without gh such a lane is listed rather than cleaned up.
 #
-# Exit codes: 0 ok · 1 usage or refusal · 3 a slot is taken (the unit is already up, or maxUnits
-# units are running). `wt cap` passes the wrapped command's exit status through instead.
+# Exit codes: 0 ok · 1 usage or refusal · 3 something else holds it (the unit is already up,
+# maxUnits units are running, or a live process sits in the worktree `done` should remove — the
+# message names the pids). `wt cap` passes the wrapped command's exit status through instead.
 #
 # One lane = one branch = one small pull request. <name>, root, base, install command, serve
 # command and worktree directory all come from the config; create or change it with
@@ -176,21 +183,33 @@ pr_state() {  # $1 repo root, $2 branch -> OPEN|MERGED|CLOSED|none|error|-
     case "$out" in OPEN|MERGED|CLOSED|DRAFT) echo "$out" ;; '') echo none ;; *) echo error ;; esac
     return
   fi
-  # a repo that is not on GitHub has no PR state and never will — that is `none`, not a failure
-  case "$out" in *"no pull requests found"*|*GitHub*|*"not a git repository"*) echo none ;; *) echo error ;; esac
+  # `error` is never silently `none`: gh's own "no pull requests found" is the only answer that
+  # means none. A repository that is not on GitHub has no pull requests to have — that reads `-`,
+  # like a missing gh. Everything else (auth, network, rate limit, a timeout) is `error`, which
+  # the reaper alarms about instead of treating as "nothing merged".
+  case "$out" in
+    *"no pull requests found"*) echo none ;;
+    # No pull-request information to be had here — a static fact, like a missing gh, not a
+    # failure worth an alarm every half hour: no GitHub remote, or gh was never logged in.
+    *"none of the git remotes"*|*"no git remotes found"*|*"not a git repository"*|*"gh auth login"*) echo - ;;
+    *) echo error ;;
+  esac
 }
 
 # ─── the one view ────────────────────────────────────────────────────────────────────────────
 list_header() { echo "# checkout worktree branch unit owner alive started mem hold state merged pr"; }
 list_one() {  # $1 = checkout name
-  local n="$1" e root base wtdir wt lane br u unit owner st mem state merged
+  local n="$1" e root base wtdir wt lane br u unit owner st mem state merged up basefull moves
   e="$(entry_of "$n")"; [ -n "$e" ] || return 0
   root="$(printf '%s' "$e" | jq -r '.root')"; root="${root%/}"
   base="$(printf '%s' "$e" | jq -r '.base // ""')"
   wtdir="$(printf '%s' "$e" | jq -r '.worktreeDir // ""')"
   [ -n "$wtdir" ] || wtdir="$(dirname "$root")/.worktrees-$n"
   wtdir="${wtdir%/}"
-  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  # Loudly, not silently: a cleanup routine reads this view and would take a missing checkout
+  # for "this lane is gone" and drop its markers.
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 \
+    || die "the root of checkout '$n' is not a readable git repository: $root — fix it with /middle-management-setup"
   while read -r wt; do
     [ -n "$wt" ] || continue
     [ "$(dirname "$wt")" = "$wtdir" ] || continue      # only lanes, see the header
@@ -203,7 +222,18 @@ list_one() {  # $1 = checkout name
     state=clean
     [ -z "$(git -C "$wt" status --porcelain 2>/dev/null)" ] || state=dirty
     merged=no
-    if [ -n "$base" ] && git -C "$wt" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then merged=yes; fi
+    if [ -n "$base" ] && git -C "$wt" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then
+      # "merged" must mean the lane produced work that landed — not that it was just created.
+      # `wt new` branches off the base, and git sets the new branch's upstream TO THE BASE, so an
+      # untouched lane is trivially an ancestor of it and would read as merged. Two more
+      # conditions: the lane tracks a ref of its OWN (it was pushed under its own name), and it
+      # has moved since `wt new` created it — the branch reflog is the only record of that.
+      up=$(git -C "$wt" rev-parse --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+      basefull=$(git -C "$wt" rev-parse --symbolic-full-name "$base" 2>/dev/null || true)
+      moves=$(git -C "$wt" reflog show "$br" 2>/dev/null || true)
+      moves=$(printf '%s' "$moves" | grep -c . || true)
+      if [ -n "$up" ] && [ "$up" != "$basefull" ] && [ "${moves:-0}" -gt 1 ]; then merged=yes; fi
+    fi
     if [ "$state" = clean ] && [ "$merged" = no ]; then
       # unpushed = there is no upstream, or it does not contain HEAD. No pipe: `| head` under
       # pipefail kills git on a long log and the test would never run.
@@ -305,14 +335,17 @@ case "$CMD" in
       } >&2
       exit 3
     fi
+    # The caller's cwd wins while it is inside the lane: a dev server started in <lane>/apps/web
+    # must not be relocated to the lane root, which is what a monorepo lane usually looks like.
+    WD="$PWD"; case "$PWD/" in "$DEST"/*) ;; *) WD="$DEST" ;; esac
     systemd-run --user --unit="${U%.service}" --collect \
       -p MemoryMax="$MEMMAX" -p OOMScoreAdjust=500 \
-      -p WorkingDirectory="$DEST" \
+      -p WorkingDirectory="$WD" \
       -p Description="wt $NAME run $TOPIC" \
       --setenv=PATH="$PATH" \
       "${CMDV[@]}" >/dev/null
     set_owner "$NAME" "$TOPIC"
-    echo "started $U (owner $(owner_of "$NAME" "$TOPIC"), cwd $DEST, MemoryMax=$MEMMAX)"
+    echo "started $U (owner $(owner_of "$NAME" "$TOPIC"), cwd $WD, MemoryMax=$MEMMAX)"
     echo "logs:  journalctl --user -u ${U%.service} -f"
     echo "stop:  wt $NAME stop '$TOPIC'"
     ;;
@@ -321,8 +354,9 @@ case "$CMD" in
     need_topic
     U="$(unit_of "$NAME" "$TOPIC")"
     stop_unit "$U"
-    clear_markers "$NAME" "$TOPIC"
-    echo "stopped $U (no process left in its cgroup); markers for $(key_of "$NAME" "$TOPIC") removed"
+    rm -f "$(owner_file "$NAME" "$TOPIC")"     # the hold protects the LANE, not the unit: it stays
+    echo "stopped $U (no process left in its cgroup); owner marker for $(key_of "$NAME" "$TOPIC") removed"
+    [ -n "$(hold_until "$NAME" "$TOPIC")" ] && echo "hold kept until $(hold_str "$NAME" "$TOPIC") — clear it with: wt $NAME hold '$TOPIC' 0" || true
     ;;
   hold)
     [ -n "$NAME" ] || usage
@@ -339,6 +373,14 @@ case "$CMD" in
       echo "$UNTIL" > "$(hold_file "$NAME" "$TOPIC")"
       echo "hold for $(key_of "$NAME" "$TOPIC") until $(date -d "@$UNTIL" +%Y-%m-%dT%H:%M) — the reaper leaves this lane alone until then"
     fi
+    ;;
+  chown)
+    [ -n "$NAME" ] || usage
+    need_topic
+    NEWOWNER="${2:-}"
+    [ -n "$NEWOWNER" ] || die "usage: wt $NAME chown <topic> <new-owner>   (a session name from the registry)"
+    mkdir -p "$STATE"; printf '%s\n' "$NEWOWNER" > "$(owner_file "$NAME" "$TOPIC")"
+    echo "owner of $(key_of "$NAME" "$TOPIC") is now $NEWOWNER (session alive: $(session_alive "$NEWOWNER"))"
     ;;
   cap)
     [ "${1:-}" = "--" ] || die "expected '--' before the command: wt cap -- <cmd...>"
@@ -361,7 +403,7 @@ case "$CMD" in
     fi
     # A cwd inside the worktree survives its removal as a "(deleted)" path and breaks every
     # later command in that shell. This is the portable half — the /proc scan below is the rest.
-    case "$PWD/" in "$DEST"/*) die "your shell's cwd is inside $DEST — cd out of it first (e.g. cd $ROOT), then retry" ;; esac
+    case "$PWD/" in "$DEST"/*) fail 3 "your shell's cwd is inside $DEST — cd out of it first (e.g. cd $ROOT), then retry" ;; esac
     # Real branch: <topic> may be the dir name (sec-step0 vs sec/step0). NOT `rev-parse
     # --abbrev-ref` and NOT `symbolic-ref --short`: both shorten to the shortest UNAMBIGUOUS name,
     # so a tag of the same name turns the branch into "heads/<name>" and every later
@@ -395,7 +437,7 @@ case "$CMD" in
         echo "  anything else    -> stop it by explicit pid, never by pattern; removing the directory"
         echo "                      under a live process is what leaves (deleted)-cwd orphans behind"
       } >&2
-      exit 1
+      exit 3
     fi
     git -C "$ROOT" worktree remove --force "$DEST"
     clear_markers "$NAME" "$TOPIC"
@@ -421,5 +463,5 @@ case "$CMD" in
       fi
     fi
     ;;
-  *) die "unknown verb '$CMD' — try: wt ${NAME:-<name>} new|list|run|stop|hold|done <topic>, wt list, wt cap -- <cmd>" ;;
+  *) die "unknown verb '$CMD' — try: wt ${NAME:-<name>} new|list|run|stop|hold|chown|done <topic>, wt list, wt cap -- <cmd>" ;;
 esac
