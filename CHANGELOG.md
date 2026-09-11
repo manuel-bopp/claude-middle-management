@@ -35,6 +35,43 @@ update-ref line as the hint. `done` also refuses when the calling shell's cwd is
 worktree, and exits 0 with "already removed" when the worktree is gone, so cleanup routines can
 call it blind. Seventeen new test cases (108 + 101).
 
+**Resource management for lanes.** A lane is no longer only a directory: `wt <name> run <topic>
+[-- <cmd>]` starts its dev server — the command passed in, or the checkout's new `serve` key — as
+a memory-capped transient systemd user unit `wt-<name>-<topic>`, `stop` takes it down and waits
+for the cgroup to be empty instead of believing systemd's "inactive", `hold <topic> <hours>` keeps
+the reaper off a lane that must stay up, and `wt cap -- <cmd>` caps one heavy build or test run in
+the foreground. At most `maxUnits` (default 2) lane units run at once. `wt list` becomes the one
+view: a documented, whitespace-separated row per lane (checkout, worktree, branch, unit, owner,
+alive, started, memory, hold, git state, merged, pull request) that a cleanup routine can parse.
+`done` stops the lane's unit first and now refuses while ANY live process has its cwd inside the
+worktree, not just the calling shell.
+
+An OPTIONAL PreToolUse hook, off unless `longRunningAsUnit: true`, rewrites hand-started dev
+servers and heavy one-shots into those capped units — in command position only, so prose about a
+command is left alone — and refuses a dev server inside a compound command with the replacement
+line to copy.
+
+An OPTIONAL lane reaper, installed like the heartbeat by the new setup step 6 into
+`<config dir>/middle-management-reaper/`, runs every 30 minutes: it stops lane units that ran past
+`reaperMaxHours` or whose owning session has been gone for `reaperOwnerlessMinutes` (confirmed on
+a second sighting), removes the worktree of a merged, clean, pushed lane through `wt done`, and
+lists everything else — dirty, unpushed, not merged, unknown owner — with its reason instead of
+touching it. It never kills a process by pid and never deletes a ref. It reports through
+`notifyCommand` when something happened or the listed set changed.
+
+Both role banners carry the rule this exists for: a lane ends with its unit stopped and its
+worktree removed, proven by the `wt list` line in the wrap, and `wt hold` is how a slot stays.
+Stopping a lane unit and removing a merged, clean, pushed worktree is housekeeping, done unasked;
+anything dirty, unpushed or unmerged stays and goes to the user. Morning-ritual step 5 reads the
+reaper's listing and works only its list-only rows, by verified PID lineage.
+
+`wt done` took the branch name from `rev-parse --abbrev-ref HEAD`, which shortens to the shortest
+UNAMBIGUOUS name: a tag sharing the branch name yielded `heads/<name>`, and the delete then
+targeted `refs/heads/heads/<name>` and failed after the worktree was already gone. The tip SHA had
+the mirror bug — resolved in the root checkout, where tags outrank heads and a detached worktree
+reported the root's HEAD. Both now come from the worktree, from the full ref. Sixty-nine new test
+cases (177 + 110).
+
 The marketplace is renamed from `bopp-plugins` to `dr-bopp`. Nothing migrates automatically:
 uninstall, `/plugin marketplace remove bopp-plugins`, re-add, install from `dr-bopp` — the README
 carries the four commands.

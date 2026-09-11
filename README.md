@@ -38,9 +38,9 @@ rename migrates nothing — re-register it once:
 /plugin install middle-management@dr-bopp
 ```
 
-**After every plugin update, re-run `/middle-management-setup` step 5** if you installed the
-heartbeat — its units run a copy of the scripts, because the plugin's own cache path is
-versioned and goes stale with each update.
+**After every plugin update, re-run `/middle-management-setup` step 5 and step 6** if you
+installed the heartbeat or the lane reaper — their units run a copy of the scripts, because the
+plugin's own cache path is versioned and goes stale with each update.
 
 ## What you get
 
@@ -49,7 +49,11 @@ versioned and goes stale with each update.
 | Session roles | UserPromptSubmit hook | Tells every session, on every message, whether it is the ORCHESTRATOR or a WORKER — including the operative rules for that role. Silent when no coordinator exists. |
 | `/orchestrator claim\|release\|status` | command | Appoints this session as coordinator (marker file), hands the seat back, or shows who holds it. |
 | Worktree guard | PreToolUse hook | Denies direct edits inside configured main checkouts and points to the worktree workflow instead. Dormant until you configure repos. |
-| `/wt <name> new\|list\|done` | command | Creates/lists/removes per-topic worktrees with the branch based on your configured base branch, deps installed. `done` refuses while the worktree is dirty, unpushed or your own shell sits inside it, and deletes the branch (via `update-ref`, recording the tip) once it is merged into the base. |
+| `/wt <name> new\|list\|run\|stop\|hold\|done` | command | Creates/lists/removes per-topic worktrees with the branch based on your configured base branch, deps installed. `done` refuses while the worktree is dirty, unpushed or any live process sits inside it, and deletes the branch (via `update-ref`, recording the tip) once it is merged into the base — a squash-merged branch is kept, since it is no ancestor of the base. |
+| `/wt <name> run\|stop <topic>`, `/wt cap` | command (Linux) | Starts the lane's dev server as a memory-capped systemd user unit `wt-<name>-<topic>` and stops it again, waiting for the cgroup to be empty rather than believing "inactive"; `cap` caps one heavy build or test run in the foreground. At most `maxUnits` lane units at a time. |
+| `/wt <name> hold <topic> <hours>`, `/wt list` | command | `hold` keeps the reaper off a lane that has to stay up. `list` is the one view: one parseable row per lane with its unit, owner, uptime, memory, hold, git state and pull-request state. |
+| Long-runners as units | PreToolUse hook (optional, Linux) | Rewrites a hand-started `next dev`, `vite`, `<pm> run dev` into `wt run`, and `bun test`, `next build`, `playwright test`, `<pm> run build` into `wt cap`; refuses a dev server inside a compound command with the line to copy. Off unless `longRunningAsUnit: true`. |
+| Lane reaper | systemd user timer (optional, Linux) | Every 30 minutes: stops lane units past `reaperMaxHours` or whose owning session is gone, removes the worktree of a merged, clean, pushed lane, and lists everything else with its reason — never killing a process by pid. Alarms and digests go through your `notifyCommand`. Installed by setup step 6. |
 | Staging guard | PreToolUse hook | Blocks `git add -A` / `git add .` / `git commit -a` so parallel sessions stage only their own files. Off-switch for solo users: `surgicalStaging: false`. |
 | `/middle-management-setup` | command | Shows the current config, then interviews you and writes/edits it — with validation. |
 | `middle-management` skill | skill | Extended reference: appointment, handover between sessions, troubleshooting. |
@@ -86,11 +90,18 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   "board": "/abs/path/to/your-status-board.md",
   "surgicalStaging": true,
   "notifyCommand": ". ~/.claude/secrets/telegram.env && curl -sS -m 15 -X POST \"https://api.telegram.org/bot$BOT_TOKEN/sendMessage\" --data-urlencode \"chat_id=$CHAT_ID\" --data-urlencode \"text=$1\"",
+  "longRunningAsUnit": false,
+  "unitMemoryMax": "3G",
+  "capMemoryMax": "5G",
+  "maxUnits": 2,
+  "reaperMaxHours": 10,
+  "reaperOwnerlessMinutes": 30,
   "protectedCheckouts": [
     { "name": "app",
       "root": "/home/you/code/app",
       "base": "origin/dev",
       "install": "npm install",
+      "serve": "npm run dev",
       "worktreeDir": "/home/you/code/.worktrees-app" }
   ]
 }
@@ -103,9 +114,17 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   text; any decoration (a bold first line, a parse mode, the fallback to plain when the rich
   form is rejected) lives inside this one command, so an alarm never dies of formatting. Keep
   tokens in a mode-600 env file the command sources — setup prints this file back to you.
+- `longRunningAsUnit` (optional, default `false`): arms the hook that rewrites hand-started
+  dev servers and heavy builds into `wt run` / `wt cap`.
+- `unitMemoryMax` / `capMemoryMax` / `maxUnits` (optional, defaults `3G` / `5G` / `2`): the
+  memory ceiling of a lane unit, of a `wt cap` command, and how many lane units may run at once.
+- `reaperMaxHours` / `reaperOwnerlessMinutes` (optional, defaults `10` / `30`): when the lane
+  reaper calls a unit expired, and how long an owning session must be gone before its lane
+  counts as ownerless (confirmed on a second sighting).
 - `protectedCheckouts` (optional): repos whose main checkout is edit-protected;
   work happens in worktrees under `worktreeDir`. `base` is the branch new worktree
-  branches start from — setup always writes it explicitly.
+  branches start from — setup always writes it explicitly, and `serve` is the dev-server
+  command `/wt <name> run <topic>` starts when the caller passes none.
 - No config file = roles-only mode; the worktree part stays completely silent.
 - User-global on purpose: the coordinator seat is per machine, and protected checkouts
   are absolute paths independent of any one project. One board per machine for now.
@@ -136,6 +155,15 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   (the plugin cache path is versioned and would go stale on the next update): **after a
   plugin update, re-run setup step 5** to refresh that copy. `last-tick` under
   `<config-dir>/state/orch-heartbeat/` older than 15 minutes means the timer is not running.
+- The lane reaper decides from `wt list` alone. Without `gh` the `pr` column is `-`, so only
+  lanes whose branch is an ancestor of the base are cleaned up and squash-merged ones are
+  listed instead — the safe half of that trade. It never kills a process by pid, and its units
+  point at a COPY under `<config-dir>/middle-management-reaper/`, so re-run setup step 6 after
+  a plugin update.
+- The long-runner hook is a stripper, not a shell parser. It matches in command position only
+  (so `echo "bun test"` is left alone) and its blind spots are listed in its own header; a dev
+  server started outside any lane is not rewritten, because there is no lane to name the unit
+  after.
 - The heartbeat's alarm is the proven half; the poke is a cheap bet — a socket write is
   known to re-trigger an idle session, not yet known to revive one whose turn died.
 
@@ -144,7 +172,9 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
 - Claude Code recent enough to have the session registry (`<config-dir>/sessions/`)
   and cross-session peer messaging — the substrate the roles ride on.
 - `jq`, `bash`, POSIX `ps`/`kill`. Linux tested; macOS expected-compatible but
-  untested; Windows via WSL.
+  untested; Windows via WSL. `/wt run`, `/wt stop`, `/wt cap`, the long-runner hook and the
+  reaper need a systemd user manager and refuse where there is none; `gh` is optional and only
+  fills the `pr` column of `/wt list`.
 - For the heartbeat only: Linux with a systemd user manager (`loginctl enable-linger`),
   `python3`, GNU `date`. macOS launchd is not supported.
 - For a private marketplace repo: working git credentials for the host on every
