@@ -88,7 +88,12 @@ case "$CMD" in
     # ponytail: only THIS shell's cwd — scanning every process for it needs /proc and buys
     # little, since the caller's own shell is the case that actually happens.
     case "$PWD/" in "$DEST"/*) die "your shell's cwd is inside $DEST — cd out of it first (e.g. cd $ROOT), then retry" ;; esac
-    BRANCH=$(git -C "$DEST" rev-parse --abbrev-ref HEAD)  # real branch: <topic> may be the dir name (sec-step0 vs sec/step0)
+    # Real branch: <topic> may be the dir name (sec-step0 vs sec/step0). NOT `rev-parse
+    # --abbrev-ref` and NOT `symbolic-ref --short`: both shorten to the shortest UNAMBIGUOUS name,
+    # so a tag of the same name turns the branch into "heads/<name>" and every later
+    # refs/heads/<branch> becomes refs/heads/heads/<name>. Take the full ref and strip the prefix
+    # ourselves; empty means detached HEAD.
+    BRANCH=$(git -C "$DEST" symbolic-ref -q HEAD 2>/dev/null || true); BRANCH=${BRANCH#refs/heads/}
     [ -z "$(git -C "$DEST" status --porcelain)" ] || die "$DEST has uncommitted changes — commit, stash or clean up first"
     # refuse to drop commits that exist nowhere else
     MERGED=""
@@ -97,17 +102,19 @@ case "$CMD" in
     else
       git -C "$DEST" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1 \
         && [ -z "$(git -C "$DEST" log '@{upstream}..HEAD' --oneline)" ] \
-        || die "branch $BRANCH has commits that are neither on $BASE nor pushed — push or merge first"
+        || die "branch ${BRANCH:-<detached HEAD>} has commits that are neither on $BASE nor pushed — push or merge first"
     fi
-    TIP=$(git -C "$ROOT" rev-parse "$BRANCH" 2>/dev/null || true)
+    # Tip from the WORKTREE, not the root checkout: the root resolves a bare name with tags
+    # taking precedence over heads, and on a detached worktree it would print the root's own HEAD.
+    TIP=$(git -C "$DEST" rev-parse HEAD 2>/dev/null || true)
     git -C "$ROOT" worktree remove --force "$DEST"
     echo "removed $DEST"
     # Deleting the branch of merged work is cleanup, not destruction — but `git branch -D` is
     # deny-listed in careful setups and `branch -d` refuses squash-merged branches. So: record
     # the tip, make sure no other worktree still has the branch checked out, then update-ref -d
     # with the expected old value, which makes the delete atomic and prints the way back.
-    if [ -z "$BRANCH" ] || [ "$BRANCH" = HEAD ]; then
-      echo "branch kept — $DEST was on a detached HEAD (tip $TIP)"
+    if [ -z "$BRANCH" ]; then
+      echo "no branch to delete — $DEST was on a detached HEAD (tip $TIP)"
     elif [ -z "$MERGED" ]; then
       echo "branch $BRANCH kept — it is not merged into $BASE yet. Delete it after the merge with:"
       echo "  git -C $ROOT update-ref -d refs/heads/$BRANCH   # tip is $TIP, restore with: git -C $ROOT branch $BRANCH $TIP"

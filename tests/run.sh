@@ -312,6 +312,28 @@ assert_has "unmerged branch kept" "branch pushed1 kept" "$OUT"
 assert_has "delete hint uses update-ref" "update-ref -d refs/heads/pushed1" "$OUT"
 git -C "$W/app" rev-parse --verify --quiet refs/heads/pushed1 >/dev/null \
   && ok "unmerged branch ref still there" || bad "unmerged branch ref still there"
+# a tag of the same name shadows the branch: the short forms return "heads/tagged" and the
+# delete would target refs/heads/heads/tagged
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new tagged >/dev/null 2>&1
+git -C "$W/app" tag tagged
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done tagged 2>&1)"; RC=$?
+assert_rc "wt done with a tag shadowing the branch name -> rc 0" 0 "$RC"
+assert_has "shadowed branch deleted under its real ref" "branch tagged deleted" "$OUT"
+git -C "$W/app" rev-parse --verify --quiet refs/heads/tagged >/dev/null \
+  && bad "shadowed branch ref really gone" || ok "shadowed branch ref really gone"
+git -C "$W/app" rev-parse --verify --quiet refs/tags/tagged >/dev/null \
+  && ok "the tag itself survived" || bad "the tag itself survived"
+# detached HEAD: the printed tip is the only record of the commits the removal orphans, so it
+# must come from the worktree, not from the root checkout
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new det >/dev/null 2>&1
+git -C "$W/.worktrees-app/det" checkout -q --detach
+WTIP="$(git -C "$W/.worktrees-app/det" rev-parse HEAD)"
+git -C "$W/app" -c user.email=t@t -c user.name=t commit -q --allow-empty -m root-moved
+RTIP="$(git -C "$W/app" rev-parse HEAD)"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done det 2>&1)"; RC=$?
+assert_rc "wt done on a detached worktree -> rc 0" 0 "$RC"
+assert_has "detached worktree prints its OWN tip" "$WTIP" "$OUT"
+assert_lacks "detached worktree does not print the root's tip" "$RTIP" "$OUT"
 # local-only repo, base = local branch
 git -C "$W" init -qb main solo 2>/dev/null
 git -C "$W/solo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
