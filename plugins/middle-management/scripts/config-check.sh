@@ -46,7 +46,7 @@ validate() {
     and ((.reaperDigestHour // 0) | type == "number")
     and ((.protectedCheckouts // []) | (type == "array") and all(
           (type == "object")
-          and (.name | type == "string")
+          and (.name | (type == "string") and (test("^[^[:space:]]+$")))  # a column of `wt list`
           and (.root | type == "string")
           and (.base | type == "string")
           and ((.install // "") | type == "string")

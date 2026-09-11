@@ -88,8 +88,8 @@ reaper's listing and works only its list-only rows, by verified PID lineage.
 UNAMBIGUOUS name: a tag sharing the branch name yielded `heads/<name>`, and the delete then
 targeted `refs/heads/heads/<name>` and failed after the worktree was already gone. The tip SHA had
 the mirror bug — resolved in the root checkout, where tags outrank heads and a detached worktree
-reported the root's HEAD. Both now come from the worktree, from the full ref. Ninety new test
-cases (198 + 110), including a real `wt new` followed by a real reaper run that has to leave
+reported the root's HEAD. Both now come from the worktree, from the full ref. Ninety-one new test
+cases (199 + 110), including a real `wt new` followed by a real reaper run that has to leave
 the lane standing.
 
 The marketplace is renamed from `bopp-plugins` to `dr-bopp`. Nothing migrates automatically:
