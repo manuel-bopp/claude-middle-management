@@ -225,8 +225,8 @@ sub-agents in your own.
 tabs they can close, and send each of those sessions its own peer message so it answers in
 its own tab with "close this tab" and nothing else. Your user cannot map peer names to editor
 tabs — naming the peer name alone has closed the wrong tabs twice. Send it only to sessions
-you can identify, and never reuse a wrapped session for a new lane: its context is spent and
-the wrap already told your user it is finished.
+you can identify, and never reuse a wrapped session for a new lane — the wrap already told
+your user that session is finished.
 
 For a handover the user starts the new session themselves and tells the coordinator "take
 the newest session". The coordinator finds it through the session registry instead of by
