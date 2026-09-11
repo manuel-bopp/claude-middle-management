@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-09-11
 
 Synced from the master setup (2026-09-11, round 4): **a lane runs itself and ends clean**. The
 WORKER banner and the skill now say that a worker is the **sub-orchestrator of its own lane** —
