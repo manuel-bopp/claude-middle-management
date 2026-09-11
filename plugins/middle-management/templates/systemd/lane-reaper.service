@@ -1,0 +1,15 @@
+# middle-management plugin — USER unit template, started by lane-reaper.timer, never enabled
+# itself. /middle-management-setup step 6 installs it into ~/.config/systemd/user/ with the
+# placeholders filled in. Environment= is written by that step because the systemd user manager
+# inherits no shell environment: without it the reaper finds neither its config dir nor git, jq
+# and gh.
+[Unit]
+Description=middle-management: lane reaper — stop unused lane units, remove merged worktrees
+OnFailure=unit-failure-alarm@%n.service
+
+[Service]
+Type=oneshot
+Environment=CLAUDE_CONFIG_DIR=__CONFIG_DIR__
+Environment=PATH=__PATH__
+ExecStart=__REAPER_DIR__/lane-reaper.sh
+TimeoutStartSec=10min

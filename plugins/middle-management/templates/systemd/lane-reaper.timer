@@ -1,0 +1,13 @@
+# middle-management plugin — USER unit template. /middle-management-setup step 6 installs it
+# into ~/.config/systemd/user/, then:
+#   systemctl --user enable --now lane-reaper.timer
+[Unit]
+Description=middle-management: lane reaper tick — every 30 minutes
+
+[Timer]
+OnCalendar=*:00/30
+Persistent=true
+Unit=lane-reaper.service
+
+[Install]
+WantedBy=timers.target

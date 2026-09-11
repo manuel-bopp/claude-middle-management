@@ -1,5 +1,5 @@
 ---
-description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user; optionally install the stuck-coordinator heartbeat
+description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user; optionally install the stuck-coordinator heartbeat and the lane reaper
 allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 ---
 
@@ -18,16 +18,24 @@ Schema (nothing else is valid):
   "board": "/abs/path/to/board.md",
   "surgicalStaging": true,
   "notifyCommand": ". ~/.claude/secrets/telegram.env && curl -sS -m 15 -X POST \"https://api.telegram.org/bot$BOT_TOKEN/sendMessage\" --data-urlencode \"chat_id=$CHAT_ID\" --data-urlencode \"text=$1\"",
+  "longRunningAsUnit": false,
+  "unitMemoryMax": "3G",
+  "capMemoryMax": "5G",
+  "maxUnits": 2,
+  "reaperMaxHours": 10,
+  "reaperOwnerlessMinutes": 30,
   "protectedCheckouts": [
     { "name": "app", "root": "/abs/path/repo", "base": "origin/main",
-      "install": "npm install", "worktreeDir": "/abs/path/.worktrees-app" }
+      "install": "npm install", "serve": "npm run dev",
+      "worktreeDir": "/abs/path/.worktrees-app" }
   ]
 }
 ```
 
-`name`, `root` and `base` are required per entry; `install` and `worktreeDir`
-are optional; `board`, `surgicalStaging` and `notifyCommand` are optional
-top-level keys.
+`name`, `root` and `base` are required per entry; `install`, `serve` and
+`worktreeDir` are optional. Every top-level key except `protectedCheckouts` is
+optional and has the default shown above; write only the ones the user decides
+on, and leave the rest out.
 
 ## Step 1 — show the current state first
 
@@ -97,20 +105,26 @@ repositories; the user names them.
    fresh worktree (for example `npm install`). It runs as `sh -c "<command>"`
    inside the new worktree. Empty means the step is skipped.
 
-5. **Worktree directory.** State the default — the sibling directory
+5. **Serve command.** Ask for the command that starts that repo's dev server
+   (for example `npm run dev`). `/wt <name> run <topic>` then starts it in the
+   lane's worktree as a memory-capped systemd unit, which is what makes a lane's
+   server visible to the cleanup routines. Omit the key when there is none — a
+   caller can always pass a command after `--`.
+
+6. **Worktree directory.** State the default — the sibling directory
    `<parent of root>/.worktrees-<name>` — and ask only whether the user wants a
    different one. Keep it outside the root so the checkout stays clean. Write
    the `worktreeDir` key only for a custom directory.
 
-6. **Staging protection.** Ask: "Do you run several Claude Code sessions in
+7. **Staging protection.** Ask: "Do you run several Claude Code sessions in
    parallel on this machine?" Yes means `surgicalStaging: true` (blanket
    `git add -A` and `git commit -a` are blocked so sessions cannot commit each
    other's work); no means `false`. Write the key explicitly.
 
-7. **Board.** Ask for the path of the shared board document the coordinator
+8. **Board.** Ask for the path of the shared board document the coordinator
    maintains, if the user keeps one. Omit the key when there is none.
 
-8. **Off-keyboard channel.** Ask for a shell command that reaches the user
+9. **Off-keyboard channel.** Ask for a shell command that reaches the user
    (phone, chat). It is the ONE sender on this machine: the heartbeat (step 5),
    the unit-failure alarm AND the coordinator itself run it with the message as
    `$1` and on stdin. Callers pass plain text, so any decoration (a bold first
@@ -120,6 +134,13 @@ repositories; the user names them.
    step 1. The schema block above carries a Telegram example. Omit the key only
    when the user wants neither the heartbeat alarm nor the coordinator's
    off-keyboard asks; step 5 then refuses to arm.
+
+10. **Long-runners as units** (Linux with systemd only). Ask whether hand-started
+    dev servers and heavy builds should be rewritten into `wt run` / `wt cap`
+    automatically. Yes means `longRunningAsUnit: true`; the default is `false` and
+    the hook then exits without doing anything. Explain what it costs: a matched
+    command is rewritten in place, and a dev server inside a compound command
+    (`cd x && npm run dev`) is refused with the replacement line to copy.
 
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped
@@ -184,7 +205,7 @@ that fails:
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"; CFG="$(bash "$CHECK" file)"
 systemctl --user --version >/dev/null 2>&1 && echo "systemd user manager: ok" || echo "NO systemd user manager (macOS/launchd is not supported)"
 command -v python3 >/dev/null && echo "python3: ok" || echo "NO python3 (the poke sender needs it)"
-[ -n "$(jq -r '.notifyCommand // ""' "$CFG" 2>/dev/null)" ] && echo "notifyCommand: set" || echo "NO notifyCommand in $CFG (step 2, item 8)"
+[ -n "$(jq -r '.notifyCommand // ""' "$CFG" 2>/dev/null)" ] && echo "notifyCommand: set" || echo "NO notifyCommand in $CFG (step 2, item 9)"
 echo "linger: $(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo unknown)"
 ```
 
@@ -225,3 +246,53 @@ printf '%s\n' "$MSG" | sh -c "$(jq -r .notifyCommand "$CFG")" notify "$MSG"
 ```
 
 Disarm and uninstall are in the skill; never run them here unasked.
+
+## Step 6 — lane reaper (optional, Linux only)
+
+The lane reaper is a systemd **user** timer: every 30 minutes it reads `wt list` and
+stops lane units that have run past `reaperMaxHours` or whose owning session is gone,
+removes the worktrees of merged lanes through `wt done`, and lists everything it must
+not touch — dirty trees, unpushed commits, lanes whose pull request is not merged. It
+never kills a process by pid and never deletes a ref. Offer it only when the user runs
+several lanes in parallel; otherwise skip this step and say so.
+
+Preconditions — the same four as step 5, plus `git`. Without a `notifyCommand` the
+reaper still runs and still writes its listing; it just cannot tell anyone, so say that
+before installing.
+
+Install — copies the reaper, `wt` and `config-check.sh` OUT of the plugin for the same
+reason as step 5, then arms the timer:
+
+```bash
+CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
+CFG_DIR="$(bash "$CHECK" dir)"; RP="$CFG_DIR/middle-management-reaper"; UNITS="$HOME/.config/systemd/user"
+mkdir -p "$RP" "$UNITS"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{lane-reaper.sh,wt,config-check.sh} "$RP/"
+# The unit inherits no shell environment: the config dir and a PATH that finds git, jq and gh
+# have to be written into it.
+for u in lane-reaper.service lane-reaper.timer; do
+  sed "s|__REAPER_DIR__|$RP|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
+    "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
+done
+# the reaper's OnFailure= points at the same alarm unit step 5 installs
+[ -e "$UNITS/unit-failure-alarm@.service" ] || sed "s|__HEARTBEAT_DIR__|$RP|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
+  "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
+[ -e "$RP/unit-failure-alarm.sh" ] || cp "${CLAUDE_PLUGIN_ROOT}/scripts/unit-failure-alarm.sh" "$RP/"
+systemctl --user daemon-reload && systemctl --user enable --now lane-reaper.timer
+systemctl --user list-timers lane-reaper.timer --no-pager
+```
+
+Then show the user one dry run, which acts on nothing:
+
+```bash
+bash "$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" dir)/middle-management-reaper/lane-reaper.sh" --dry-run
+```
+
+Tell them, in plain text: the listing lands in `<config dir>/state/wt/reaper-latest.md`
+and is where the morning ritual reads what was cleaned up; a lane that must stay up
+gets `/wt <name> hold <topic> <hours>`; and **after every plugin update re-run this
+step**, because the units run the copies, not the plugin. Thresholds are the config
+keys `reaperMaxHours` and `reaperOwnerlessMinutes`.
+
+Disarm with `systemctl --user disable --now lane-reaper.timer`; never run that here
+unasked.
