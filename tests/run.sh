@@ -100,6 +100,7 @@ assert_has "orchestrator banner: sub-agents return ten lines" "at most ten lines
 assert_has "orchestrator banner: model choice announced" "whether the strongest model was" "$OUT"
 assert_has "orchestrator banner: one lane one session" "One lane = one session" "$OUT"
 assert_has "orchestrator banner: closable tabs get their own message" "close this tab" "$OUT"
+assert_has "orchestrator banner: waiting items carry their link" "in the SAME" "$OUT"
 # no config file at all (roles-only install): the off-keyboard line must stay away, and the
 # hook must survive `set -u` with no config branch taken.
 assert_lacks "no config -> no off-keyboard line" "notifyCommand" "$OUT"

@@ -127,6 +127,8 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
   printf 'good. After every wrap, tell your user unprompted which tabs to close AND send each of those\n'
   printf 'sessions its own peer message, so it answers in its own tab with "close this tab" — your user\n'
   printf 'cannot map peer names to editor tabs. Never send that message to a session you cannot identify.\n'
+  printf 'Every waiting item you put in front of your user carries its link or command line in the SAME\n'
+  printf 'line, at every repetition — a reminder they have to scroll for is worthless.\n'
   printf 'After a re-wake or a resume: work the RE-WAKE checklist (top of the board, or the last checklist\n'
   printf 'in your own transcript) before any new task.\n'
   printf 'Sub-agents write long results to a FILE and return you at most ten lines; the file path goes\n'

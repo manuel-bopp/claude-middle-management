@@ -110,6 +110,8 @@ into the other tabs. Whenever a worker waits for their go (a finished concept, a
 question), your next message carries one line per waiting session: which session, what
 it waits for, your default, "your go here is enough". A collective "open with you" list
 is not enough — a finished concept once sat unnoticed for 40 minutes in a worker tab.
+That line carries the link or the command to copy, in the SAME line, every time you repeat
+it: an item your user has to scroll back for is an item they will not act on.
 If the user stays silent for long and the default is safe and reversible, pass the go
 with the default and say so.
 
