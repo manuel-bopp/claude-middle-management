@@ -1,6 +1,6 @@
 ---
-description: Create, list or remove a per-topic git worktree for a configured checkout
-argument-hint: <name> new|list|done [topic]
+description: Per-topic git worktrees for a configured checkout — create, list, run the lane's server, hold it against the reaper, remove it
+argument-hint: <name> new|list|run|stop|hold|done [topic] — or list | cap -- <cmd>
 allowed-tools: ["Bash"]
 ---
 
@@ -25,6 +25,19 @@ Then:
    there, tell the user to add it with `/add-dir` or to start a session in that
    directory.
 
-Arguments the helper accepts: `<name> new <topic>`, `<name> list`,
-`<name> done <topic>`. `<name>` is a checkout name from the plugin config; the
-helper lists the configured names when it does not recognise one.
+Arguments the helper accepts, where `<name>` is a checkout name from the plugin
+config (it lists the configured names when it does not recognise one):
+
+| Arguments | What it does |
+|---|---|
+| `<name> new <topic>` | worktree plus branch off the configured base, dependencies installed |
+| `<name> list` | the lanes of that checkout, one row each |
+| `<name> run <topic> [-- <cmd>]` | start `<cmd>`, or the checkout's configured `serve` command, in the lane's worktree as a memory-capped systemd user unit |
+| `<name> stop <topic>` | stop that unit, verified |
+| `<name> hold <topic> <hours>` | keep the lane reaper off this lane; `0` clears the hold |
+| `<name> done <topic>` | remove the worktree and delete its branch once it is merged |
+| `list` | every configured checkout in one view |
+| `cap -- <cmd>` | run one heavy command (test run, build) memory-capped, in the foreground |
+
+`run`, `stop`, `hold` and `cap` need Linux with a systemd user manager; the helper
+says so and refuses where there is none.

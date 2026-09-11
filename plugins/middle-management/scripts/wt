@@ -1,31 +1,66 @@
 #!/usr/bin/env bash
-# middle-management plugin — one-command git worktrees for the checkouts listed in
-# the plugin config (<config dir>/middle-management.json, key protectedCheckouts).
-# Consumers: commands/wt.md (the /wt slash command), the deny message of
-#   hooks/protect-main-checkouts.sh, and users calling it directly.
+# middle-management plugin — per-topic git worktrees for the checkouts listed in the plugin
+# config (<config dir>/middle-management.json, key protectedCheckouts), and the long-runners
+# of a lane as capped transient systemd user units.
+# Consumers: commands/wt.md (the /wt slash command), scripts/lane-reaper.sh (parses `wt list`),
+#   hooks/long-running-as-unit.sh (rewrites hand-started commands into `run` / `cap`),
+#   the deny message of hooks/protect-main-checkouts.sh, and users calling it directly.
 #
-# Usage:
-#   wt <name> new <topic>    worktree <worktreeDir>/<topic>, branch <topic> off <base>
-#   wt <name> list           list the checkout's worktrees
-#   wt <name> done <topic>   remove the worktree (refuses if dirty or unpushed) and
-#                            delete its branch once it is merged into <base>
+# Usage — per checkout (<name> is a checkout name from the config):
+#   wt <name> new <topic>      worktree <worktreeDir>/<topic>, branch <topic> off <base>
+#   wt <name> list             the lanes of that checkout (columns below)
+#   wt <name> run <topic> [-- <cmd...>]
+#                              start <cmd> — or the checkout's configured `serve` command — in
+#                              the lane's worktree as the transient unit
+#                              wt-<name>-<topic>.service, capped at unitMemoryMax
+#   wt <name> stop <topic>     stop that unit, verified, and drop the lane's markers
+#   wt <name> hold <topic> <hours>
+#                              keep the reaper off the lane for <hours>; 0 clears the hold
+#   wt <name> done <topic>     stop the unit and remove the worktree — refuses while it is
+#                              dirty, unpushed or a live process sits in it — and delete the
+#                              branch once it is merged into <base>
 #
-# One lane = one branch = one small pull request. <name>, root, base, install
-# command and worktree directory all come from the config; create or change it
-# with /middle-management-setup. worktreeDir defaults to the sibling directory
-# <parent of root>/.worktrees-<name>.
+# Usage — machine-wide:
+#   wt list                    every configured checkout in one view
+#   wt cap -- <cmd...>         one heavy command (test run, build) in a capped foreground
+#                              scope; same cwd, env and exit status as the bare command
+#
+# `wt list` columns (STABLE — lane-reaper.sh parses them; `-` means none, and no field ever
+# contains whitespace):
+#   checkout worktree branch unit owner alive started mem hold state merged pr
+#   unit    the lane's unit while it is active · owner the session that started it
+#   alive   yes|no|-  (the owner session's pid, kill -0) · started ISO minute · mem MiB
+#   hold    ISO minute the hold expires
+#   state   clean|dirty|unpushed  (unpushed = commits neither on <base> nor on the upstream)
+#   merged  yes|no  (HEAD is an ancestor of <base>)
+#   pr      OPEN|MERGED|CLOSED|none|error, or `-` when gh is not installed
+# Only worktrees that sit directly in the checkout's worktreeDir are lanes; other worktrees git
+# knows about are left out, because `run`, `stop`, `hold` and `done` address a lane by its
+# directory name. A lane whose branch was squash-merged reads `merged no` — the `pr` column is
+# what catches it, so without gh such a lane is listed rather than cleaned up.
+#
+# Exit codes: 0 ok · 1 usage or refusal · 3 a slot is taken (the unit is already up, or maxUnits
+# units are running). `wt cap` passes the wrapped command's exit status through instead.
+#
+# One lane = one branch = one small pull request. <name>, root, base, install command, serve
+# command and worktree directory all come from the config; create or change it with
+# /middle-management-setup. worktreeDir defaults to the sibling directory
+# <parent of root>/.worktrees-<name>. Units, markers and the reaper need Linux with a systemd
+# user manager; everything else works anywhere.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CHECK="$HERE/config-check.sh"
 
-die() { echo "wt: $*" >&2; exit 1; }
+fail() { local c=$1; shift; echo "wt: $*" >&2; exit "$c"; }
+die() { fail 1 "$*"; }
+usage() { sed -n '/^# Usage/,/^# Exit codes/p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 
-NAME="${1:-}"; CMD="${2:-}"; TOPIC="${3:-}"
-[ -n "$NAME" ] && [ -n "$CMD" ] || die "usage: wt <name> <new|list|done> [topic]"
+[ $# -gt 0 ] || usage
 
 RC=0; bash "$CHECK" validate || RC=$?
 CFGFILE="$(bash "$CHECK" file)"
+CFGDIR="$(bash "$CHECK" dir)"
 case "$RC" in
   0) ;;
   1) die "the middle-management config $CFGFILE is invalid — fix it with /middle-management-setup" ;;
@@ -34,29 +69,197 @@ case "$RC" in
   *) die "config check failed with status $RC" ;;
 esac
 
-ENTRY="$(jq -c --arg n "$NAME" 'first((.protectedCheckouts // [])[] | select(.name == $n)) // empty' "$CFGFILE")"
-[ -n "$ENTRY" ] || die "no checkout named '$NAME' in $CFGFILE (configured: $(jq -r '[(.protectedCheckouts // [])[].name] | join(", ")' "$CFGFILE")) — add it with /middle-management-setup"
+STATE="$CFGDIR/state/wt"
+MEMMAX="$(jq -r '.unitMemoryMax // "3G"' "$CFGFILE")"
+CAPMEM="$(jq -r '.capMemoryMax // "5G"' "$CFGFILE")"
+MAXUNITS="$(jq -r '.maxUnits // 2' "$CFGFILE")"
+TIMEOUT="$(command -v timeout 2>/dev/null || true)"
+HAVE_SYSTEMD=no
+if command -v systemctl >/dev/null 2>&1 && systemctl --user --version >/dev/null 2>&1; then HAVE_SYSTEMD=yes; fi
 
-ROOT="$(printf '%s' "$ENTRY" | jq -r '.root')"; ROOT="${ROOT%/}"
-BASE="$(printf '%s' "$ENTRY" | jq -r '.base // ""')"
-INSTALL="$(printf '%s' "$ENTRY" | jq -r '.install // ""')"
-WTDIR="$(printf '%s' "$ENTRY" | jq -r '.worktreeDir // ""')"
-[ -n "$WTDIR" ] || WTDIR="$(dirname "$ROOT")/.worktrees-$NAME"
-WTDIR="${WTDIR%/}"
+entry_of() { jq -c --arg n "$1" 'first((.protectedCheckouts // [])[] | select(.name == $n)) // empty' "$CFGFILE"; }
+names_of() { jq -r '[(.protectedCheckouts // [])[].name] | join(", ")' "$CFGFILE"; }
 
-git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 \
-  || die "the root of checkout '$NAME' is not a git repository: $ROOT — fix it with /middle-management-setup"
+# ─── lane identity: directory name, unit name and marker key all replace "/" with "-" ────────
+mkey() { printf '%s' "${1//\//-}"; }
+unit_of() { printf 'wt-%s-%s.service' "$1" "$(mkey "$2")"; }
+key_of()  { printf '%s-%s' "$1" "$(mkey "$2")"; }
+owner_file() { printf '%s/owner-%s' "$STATE" "$(key_of "$1" "$2")"; }
+hold_file()  { printf '%s/hold-%s' "$STATE" "$(key_of "$1" "$2")"; }
+owner_of() { cat "$(owner_file "$1" "$2")" 2>/dev/null || echo -; }
+set_owner() { mkdir -p "$STATE"; owner_name > "$(owner_file "$1" "$2")"; }
+clear_markers() { rm -f "$(owner_file "$1" "$2")" "$(hold_file "$1" "$2")"; }
+
+owner_name() {  # this session's peer name, or the user — the registry is the only source
+  local n=""
+  if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+    n=$(cat "$CFGDIR"/sessions/*.json 2>/dev/null \
+        | jq -r --arg s "$CLAUDE_CODE_SESSION_ID" 'select(.sessionId==$s) | .name // empty' 2>/dev/null \
+        | head -1 || true)
+  fi
+  printf '%s\n' "${n:-${USER:-unknown}}"
+}
+session_alive() {  # owner name -> yes | no | -   (registry pid, kill -0)
+  local pid
+  case "$1" in ''|-|"${USER:-}") echo -; return ;; esac
+  pid=$(cat "$CFGDIR"/sessions/*.json 2>/dev/null \
+        | jq -r --arg n "$1" 'select(.name==$n) | .pid' 2>/dev/null | tail -1 || true)
+  [ -n "$pid" ] || { echo -; return; }
+  if kill -0 "$pid" 2>/dev/null; then echo yes; else echo no; fi
+}
+hold_until() {  # prints the epoch of a VALID hold (until > now), else nothing
+  local f u
+  f="$(hold_file "$1" "$2")"
+  [ -f "$f" ] || return 0
+  u=$(cat "$f" 2>/dev/null || echo 0)
+  case "$u" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$u" -gt "$(date +%s)" ] && echo "$u" || true
+}
+hold_str() { local u; u=$(hold_until "$1" "$2"); [ -n "$u" ] && date -d "@$u" +%Y-%m-%dT%H:%M || echo -; }
+
+# ─── systemd: everything below degrades to "-" / a refusal when there is no user manager ─────
+unit_active() { [ "$HAVE_SYSTEMD" = yes ] && systemctl --user is-active --quiet "$1"; }
+started_at() {
+  local t; t=$(systemctl --user show -p ActiveEnterTimestamp --value "$1" 2>/dev/null || true)
+  [ -n "$t" ] && date -d "$t" +%Y-%m-%dT%H:%M 2>/dev/null || echo -
+}
+unit_mem() {
+  local m; m=$(systemctl --user show -p MemoryCurrent --value "$1" 2>/dev/null || true)
+  case "$m" in ''|'[not set]'|*[!0-9]*) echo -; return ;; esac
+  [ "$m" -gt 1099511627776 ] && echo - || echo "$((m/1048576))M"   # UINT64_MAX = "not set"
+}
+unit_pids() {
+  local cg; cg=$(systemctl --user show -p ControlGroup --value "$1" 2>/dev/null || true)
+  [ -n "$cg" ] || return 0
+  cat "/sys/fs/cgroup$cg/cgroup.procs" 2>/dev/null || true
+}
+stop_unit() {  # verified stop: a unit that reports "inactive" while a process lives is a lie
+  local u="$1" i p
+  [ "$HAVE_SYSTEMD" = yes ] || return 0
+  systemctl --user stop "$u" 2>/dev/null || true
+  systemctl --user reset-failed "$u" 2>/dev/null || true
+  for i in $(seq 1 20); do            # 20 x 0.5 s = 10 s
+    p="$(unit_pids "$u")"
+    [ -z "$p" ] && return 0
+    sleep 0.5
+  done
+  { echo "wt: FAILED to stop $u — these processes survived 10 s after systemctl stop:"
+    for p in $(unit_pids "$u"); do
+      echo "  pid $p $(cat /proc/"$p"/comm 2>/dev/null || echo '?')"
+    done
+    echo "  investigate before reusing the lane: systemctl --user status $u ; kill only by explicit pid"
+  } >&2
+  return 1
+}
+
+# ponytail: /proc only. Without it (macOS) the $PWD check below is all there is — it catches the
+# case that actually happens, the caller's own shell.
+walk_up() { local p=$1 pp; while [ "$p" -gt 1 ] 2>/dev/null; do echo "$p"
+    pp=$(awk '/^PPid:/{print $2}' /proc/"$p"/status 2>/dev/null || true); [ -n "$pp" ] || break; p=$pp; done; }
+cwd_blockers() {  # $1 = worktree path -> pids OUTSIDE wt's own process tree with a cwd inside it
+  local d p c
+  [ -d /proc ] || return 0
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}
+    c=$(readlink "$d/cwd" 2>/dev/null) || continue
+    case "$c" in "$1"|"$1"/*) ;; *) continue ;; esac
+    grep -qx "$$" <<<"$(walk_up "$p")" || echo "$p"
+  done
+}
+
+pr_state() {  # $1 repo root, $2 branch -> OPEN|MERGED|CLOSED|none|error|-
+  local out
+  [ -n "$2" ] || { echo -; return; }
+  command -v gh >/dev/null 2>&1 || { echo -; return; }
+  if out=$( cd "$1" && ${TIMEOUT:+"$TIMEOUT" 20} gh pr view "$2" --json state --jq .state 2>&1 ); then
+    out=$(printf '%s' "$out" | tail -1)      # a gh notice must not become a second field
+    case "$out" in OPEN|MERGED|CLOSED|DRAFT) echo "$out" ;; '') echo none ;; *) echo error ;; esac
+    return
+  fi
+  # a repo that is not on GitHub has no PR state and never will — that is `none`, not a failure
+  case "$out" in *"no pull requests found"*|*GitHub*|*"not a git repository"*) echo none ;; *) echo error ;; esac
+}
+
+# ─── the one view ────────────────────────────────────────────────────────────────────────────
+list_header() { echo "# checkout worktree branch unit owner alive started mem hold state merged pr"; }
+list_one() {  # $1 = checkout name
+  local n="$1" e root base wtdir wt lane br u unit owner st mem state merged
+  e="$(entry_of "$n")"; [ -n "$e" ] || return 0
+  root="$(printf '%s' "$e" | jq -r '.root')"; root="${root%/}"
+  base="$(printf '%s' "$e" | jq -r '.base // ""')"
+  wtdir="$(printf '%s' "$e" | jq -r '.worktreeDir // ""')"
+  [ -n "$wtdir" ] || wtdir="$(dirname "$root")/.worktrees-$n"
+  wtdir="${wtdir%/}"
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  while read -r wt; do
+    [ -n "$wt" ] || continue
+    [ "$(dirname "$wt")" = "$wtdir" ] || continue      # only lanes, see the header
+    lane="$(basename "$wt")"
+    br="$(git -C "$wt" symbolic-ref -q HEAD 2>/dev/null || true)"; br="${br#refs/heads/}"
+    u="$(unit_of "$n" "$lane")"
+    if unit_active "$u"; then unit="$u"; st="$(started_at "$u")"; mem="$(unit_mem "$u")"
+    else unit=-; st=-; mem=-; fi
+    owner="$(owner_of "$n" "$lane")"
+    state=clean
+    [ -z "$(git -C "$wt" status --porcelain 2>/dev/null)" ] || state=dirty
+    merged=no
+    if [ -n "$base" ] && git -C "$wt" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then merged=yes; fi
+    if [ "$state" = clean ] && [ "$merged" = no ]; then
+      # unpushed = there is no upstream, or it does not contain HEAD. No pipe: `| head` under
+      # pipefail kills git on a long log and the test would never run.
+      if git -C "$wt" rev-parse '@{upstream}' >/dev/null 2>&1 \
+         && [ -z "$(git -C "$wt" log '@{upstream}..HEAD' --oneline -1 2>/dev/null)" ]; then :
+      else state=unpushed; fi
+    fi
+    printf '%s %s %s %s %s %s %s %s %s %s %s %s\n' \
+      "$n" "$lane" "${br:--}" "$unit" "$owner" "$(session_alive "$owner")" "$st" "$mem" \
+      "$(hold_str "$n" "$lane")" "$state" "$merged" "$(pr_state "$root" "$br")"
+  done < <(git -C "$root" worktree list --porcelain 2>/dev/null | sed -n 's|^worktree ||p')
+}
+
+# ─── dispatch: `wt <name> <verb>` for a checkout, `wt <verb>` machine-wide ────────────────────
+# A checkout of the config wins over the machine-wide verb of the same name; do not name a
+# checkout "list" or "cap".
+NAME=""; CMD=""
+if [ -n "$(entry_of "${1:-}")" ]; then
+  NAME="$1"; shift; CMD="${1:-}"; shift || true
+else
+  case "${1:-}" in
+    list|cap) CMD="$1"; shift ;;
+    *) die "no checkout named '$1' in $CFGFILE (configured: $(names_of)) — add it with /middle-management-setup, or use 'wt list' / 'wt cap --'" ;;
+  esac
+fi
+[ -n "$CMD" ] || usage
+
+if [ -n "$NAME" ]; then
+  ENTRY="$(entry_of "$NAME")"
+  ROOT="$(printf '%s' "$ENTRY" | jq -r '.root')"; ROOT="${ROOT%/}"
+  BASE="$(printf '%s' "$ENTRY" | jq -r '.base // ""')"
+  INSTALL="$(printf '%s' "$ENTRY" | jq -r '.install // ""')"
+  SERVE="$(printf '%s' "$ENTRY" | jq -r '.serve // ""')"
+  WTDIR="$(printf '%s' "$ENTRY" | jq -r '.worktreeDir // ""')"
+  [ -n "$WTDIR" ] || WTDIR="$(dirname "$ROOT")/.worktrees-$NAME"
+  WTDIR="${WTDIR%/}"
+  git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 \
+    || die "the root of checkout '$NAME' is not a git repository: $ROOT — fix it with /middle-management-setup"
+  TOPIC="${1:-}"
+fi
 
 check_base() {
   [ -n "$BASE" ] || die "checkout '$NAME' has no base branch configured — set it with /middle-management-setup"
   git -C "$ROOT" rev-parse --verify --quiet "$BASE^{commit}" >/dev/null \
     || die "base '$BASE' of checkout '$NAME' does not resolve to a commit in $ROOT — fix it with /middle-management-setup"
 }
+need_topic() { [ -n "${TOPIC:-}" ] || die "topic missing: wt $NAME $CMD <topic>"; }
+need_systemd() { [ "$HAVE_SYSTEMD" = yes ] || die "'wt $CMD' needs a systemd user manager (Linux) — it is not available here, so run the command yourself"; }
 
 case "$CMD" in
   new)
-    [ -n "$TOPIC" ] || die "topic missing: wt $NAME new <topic>"
-    DEST="$WTDIR/${TOPIC//\//-}"
+    [ -n "$NAME" ] || usage
+    need_topic
+    # whitespace would break the lane's directory name, its unit name and the `wt list` columns
+    case "$TOPIC" in *[[:space:]]*) die "topic must not contain whitespace: '$TOPIC'" ;; esac
+    DEST="$WTDIR/$(mkey "$TOPIC")"
     [ -e "$DEST" ] && die "$DEST already exists (wt $NAME done '$TOPIC' first?)"
     git -C "$ROOT" remote get-url origin >/dev/null 2>&1 && git -C "$ROOT" fetch origin --quiet
     check_base
@@ -66,27 +269,98 @@ case "$CMD" in
         || echo "wt: WARNING — '$INSTALL' failed, run it manually in $DEST" >&2
     fi
     echo "worktree ready: $DEST  (branch $TOPIC, base $BASE)"
-    echo "dev server:     run it on its own port if needed — the main checkout keeps its own"
+    echo "dev server:     wt $NAME run '$TOPIC'${SERVE:+   (runs: $SERVE)} — capped, and the reaper can see it"
     echo "session access: if this session cannot edit outside its working directory, add the worktree with /add-dir or start a session there"
     echo "when merged:    wt $NAME done '$TOPIC'"
     ;;
   list)
-    git -C "$ROOT" worktree list
+    list_header
+    if [ -n "$NAME" ]; then list_one "$NAME"
+    else
+      while read -r n; do [ -n "$n" ] && list_one "$n"; done \
+        < <(jq -r '(.protectedCheckouts // [])[].name' "$CFGFILE")
+    fi
+    ;;
+  run)
+    [ -n "$NAME" ] || usage
+    need_topic; shift || true
+    DEST="$WTDIR/$(mkey "$TOPIC")"
+    [ -d "$DEST" ] || die "no worktree $DEST — wt $NAME new '$TOPIC' first"
+    CMDV=()
+    if [ "${1:-}" = "--" ]; then shift; CMDV=("$@"); fi
+    if [ "${#CMDV[@]}" -eq 0 ]; then
+      [ -n "$SERVE" ] || die "no command to run: pass one after -- , or give checkout '$NAME' a \"serve\" command with /middle-management-setup"
+      CMDV=(bash -lc "$SERVE")
+    fi
+    need_systemd
+    U="$(unit_of "$NAME" "$TOPIC")"
+    unit_active "$U" && fail 3 "$U is already running — wt $NAME stop '$TOPIC' first"
+    ACTIVE=$(systemctl --user list-units --state=active --plain --no-legend 'wt-*.service' 2>/dev/null | awk '{print $1}' || true)
+    N=$(printf '%s\n' "$ACTIVE" | grep -c . || true)
+    if [ "${N:-0}" -ge "$MAXUNITS" ]; then
+      { echo "wt: $N lane units are already running (maxUnits $MAXUNITS), a further one is refused:"
+        printf '  %s\n' $ACTIVE
+        echo "  yours     -> wt <name> stop <topic>, then retry"
+        echo "  not yours -> ask your coordinator; raise maxUnits in the config if the machine can take it"
+      } >&2
+      exit 3
+    fi
+    systemd-run --user --unit="${U%.service}" --collect \
+      -p MemoryMax="$MEMMAX" -p OOMScoreAdjust=500 \
+      -p WorkingDirectory="$DEST" \
+      -p Description="wt $NAME run $TOPIC" \
+      --setenv=PATH="$PATH" \
+      "${CMDV[@]}" >/dev/null
+    set_owner "$NAME" "$TOPIC"
+    echo "started $U (owner $(owner_of "$NAME" "$TOPIC"), cwd $DEST, MemoryMax=$MEMMAX)"
+    echo "logs:  journalctl --user -u ${U%.service} -f"
+    echo "stop:  wt $NAME stop '$TOPIC'"
+    ;;
+  stop)
+    [ -n "$NAME" ] || usage
+    need_topic
+    U="$(unit_of "$NAME" "$TOPIC")"
+    stop_unit "$U"
+    clear_markers "$NAME" "$TOPIC"
+    echo "stopped $U (no process left in its cgroup); markers for $(key_of "$NAME" "$TOPIC") removed"
+    ;;
+  hold)
+    [ -n "$NAME" ] || usage
+    need_topic
+    HOURS="${2:-}"
+    [ -n "$HOURS" ] || die "usage: wt $NAME hold <topic> <hours>   (0 clears the hold)"
+    case "$HOURS" in *[!0-9]*) die "hours must be a whole number (0 clears the hold)" ;; esac
+    mkdir -p "$STATE"
+    if [ "$HOURS" -eq 0 ]; then
+      rm -f "$(hold_file "$NAME" "$TOPIC")"
+      echo "hold cleared for $(key_of "$NAME" "$TOPIC")"
+    else
+      UNTIL=$(( $(date +%s) + HOURS*3600 ))
+      echo "$UNTIL" > "$(hold_file "$NAME" "$TOPIC")"
+      echo "hold for $(key_of "$NAME" "$TOPIC") until $(date -d "@$UNTIL" +%Y-%m-%dT%H:%M) — the reaper leaves this lane alone until then"
+    fi
+    ;;
+  cap)
+    [ "${1:-}" = "--" ] || die "expected '--' before the command: wt cap -- <cmd...>"
+    shift
+    [ $# -gt 0 ] || die "command missing: wt cap -- <cmd...>"
+    need_systemd
+    exec systemd-run --user --scope --slice-inherit --collect -q -p MemoryMax="$CAPMEM" -- "$@"
     ;;
   done)
-    [ -n "$TOPIC" ] || die "topic missing: wt $NAME done <topic>"
+    [ -n "$NAME" ] || usage
+    need_topic
     check_base
-    DEST="$WTDIR/${TOPIC//\//-}"
+    DEST="$WTDIR/$(mkey "$TOPIC")"
     # idempotent: cleanup routines call `done` on lanes that may already be gone
     if [ ! -d "$DEST" ]; then
       git -C "$ROOT" worktree prune 2>/dev/null || true
+      clear_markers "$NAME" "$TOPIC"
       echo "already removed: $DEST (nothing to do)"
       exit 0
     fi
     # A cwd inside the worktree survives its removal as a "(deleted)" path and breaks every
-    # later command in that shell.
-    # ponytail: only THIS shell's cwd — scanning every process for it needs /proc and buys
-    # little, since the caller's own shell is the case that actually happens.
+    # later command in that shell. This is the portable half — the /proc scan below is the rest.
     case "$PWD/" in "$DEST"/*) die "your shell's cwd is inside $DEST — cd out of it first (e.g. cd $ROOT), then retry" ;; esac
     # Real branch: <topic> may be the dir name (sec-step0 vs sec/step0). NOT `rev-parse
     # --abbrev-ref` and NOT `symbolic-ref --short`: both shorten to the shortest UNAMBIGUOUS name,
@@ -94,6 +368,9 @@ case "$CMD" in
     # refs/heads/<branch> becomes refs/heads/heads/<name>. Take the full ref and strip the prefix
     # ourselves; empty means detached HEAD.
     BRANCH=$(git -C "$DEST" symbolic-ref -q HEAD 2>/dev/null || true); BRANCH=${BRANCH#refs/heads/}
+    # The git checks run BEFORE the unit is stopped: a refusal here must not have torn the lane
+    # down already. The cwd scan stays after the stop — stopping the unit is what takes its
+    # processes off the blocker list.
     [ -z "$(git -C "$DEST" status --porcelain)" ] || die "$DEST has uncommitted changes — commit, stash or clean up first"
     # refuse to drop commits that exist nowhere else
     MERGED=""
@@ -107,7 +384,21 @@ case "$CMD" in
     # Tip from the WORKTREE, not the root checkout: the root resolves a bare name with tags
     # taking precedence over heads, and on a detached worktree it would print the root's own HEAD.
     TIP=$(git -C "$DEST" rev-parse HEAD 2>/dev/null || true)
+    stop_unit "$(unit_of "$NAME" "$TOPIC")"
+    BLOCKERS=$(cwd_blockers "$DEST")
+    if [ -n "$BLOCKERS" ]; then
+      { echo "wt: refusing to remove $DEST — these processes have their cwd inside it:"
+        for p in $BLOCKERS; do
+          echo "  pid $p  $(cat /proc/"$p"/comm 2>/dev/null || echo '?')  cwd $(readlink /proc/"$p"/cwd 2>/dev/null || echo '?')"
+        done
+        echo "  a shell of yours -> cd out of the worktree, then retry"
+        echo "  anything else    -> stop it by explicit pid, never by pattern; removing the directory"
+        echo "                      under a live process is what leaves (deleted)-cwd orphans behind"
+      } >&2
+      exit 1
+    fi
     git -C "$ROOT" worktree remove --force "$DEST"
+    clear_markers "$NAME" "$TOPIC"
     echo "removed $DEST"
     # Deleting the branch of merged work is cleanup, not destruction — but `git branch -D` is
     # deny-listed in careful setups and `branch -d` refuses squash-merged branches. So: record
@@ -130,5 +421,5 @@ case "$CMD" in
       fi
     fi
     ;;
-  *) die "usage: wt <name> <new|list|done> [topic]" ;;
+  *) die "unknown verb '$CMD' — try: wt ${NAME:-<name>} new|list|run|stop|hold|done <topic>, wt list, wt cap -- <cmd>" ;;
 esac

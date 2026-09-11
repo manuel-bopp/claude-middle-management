@@ -349,6 +349,53 @@ assert_has "refusal points at setup" "middle-management-setup" "$OUT"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" ghost new x 2>&1)"; RC=$?
 [ "$RC" -ne 0 ] && ok "unknown name -> loud error" || bad "unknown name -> loud error" "$OUT"
 
+say "== wt lanes: list columns, hold, run =="
+CFG="{\"protectedCheckouts\":[{\"name\":\"app\",\"root\":\"$W/app\",\"base\":\"origin/dev\"}]}"
+printf '%s' "$CFG" > "$H/.claude/middle-management.json"
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new lane1 >/dev/null 2>&1
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" list 2>&1)"
+assert_has "wt list prints the documented header" "# checkout worktree branch unit owner alive started mem hold state merged pr" "$OUT"
+ROW="$(printf '%s\n' "$OUT" | grep '^app lane1 ' || true)"
+assert_has "a fresh lane: no unit, no owner, clean, merged" "app lane1 lane1 - - - - - - clean yes" "$ROW"
+assert_rc "the row has exactly 12 fields" 12 "$(printf '%s' "$ROW" | wc -w)"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app hold lane1 3 2>&1)"; RC=$?
+assert_rc "wt hold succeeds" 0 "$RC"
+assert_has "hold names the lane key" "hold for app-lane1 until" "$OUT"
+ROW="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1 | grep '^app lane1 ' || true)"
+assert_lacks "the hold column is no longer empty" "- - - - - clean" "$ROW"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app hold lane1 0 2>&1)"
+assert_has "hold 0 clears it" "hold cleared for app-lane1" "$OUT"
+ROW="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1 | grep '^app lane1 ' || true)"
+assert_has "the cleared hold reads as -" "app lane1 lane1 - - - - - - clean yes" "$ROW"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app hold lane1 soon 2>&1)"; RC=$?
+assert_rc "hold with a non-numeric duration -> refused" 1 "$RC"
+printf 'x' > "$W/.worktrees-app/lane1/dirt.txt"
+ROW="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1 | grep '^app lane1 ' || true)"
+assert_has "an uncommitted file shows as dirty" " dirty " "$ROW"
+git -C "$W/.worktrees-app/lane1" add dirt.txt
+git -C "$W/.worktrees-app/lane1" -c user.email=t@t -c user.name=t commit -q -m dirt
+ROW="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app list 2>&1 | grep '^app lane1 ' || true)"
+assert_has "a commit that is nowhere else shows as unpushed, not merged" " unpushed no " "$ROW"
+# run: refused without a systemd user manager, and refused without a command
+NOSD="$(mktemp -d -p "$TMPBASE")"; ln -s /usr/bin/* /bin/* "$NOSD"/ 2>/dev/null
+rm -f "$NOSD/systemctl" "$NOSD/systemd-run"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$NOSD" bash "$WT" app run lane1 -- sleep 60 2>&1)"; RC=$?
+assert_rc "wt run without systemd -> refused" 1 "$RC"
+assert_has "the refusal names the systemd user manager" "systemd user manager" "$OUT"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$NOSD" bash "$WT" app list 2>&1)"
+assert_has "wt list still works without systemd" "app lane1 lane1 - " "$OUT"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app run lane1 2>&1)"; RC=$?
+assert_rc "wt run with neither a command nor a serve key -> refused" 1 "$RC"
+assert_has "the refusal names the serve key" '"serve"' "$OUT"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app run nolane -- sleep 60 2>&1)"; RC=$?
+assert_rc "wt run for a lane that does not exist -> refused" 1 "$RC"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$NOSD" bash "$WT" cap -- true 2>&1)"; RC=$?
+assert_rc "wt cap without systemd -> refused" 1 "$RC"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" cap true 2>&1)"; RC=$?
+assert_rc "wt cap without -- -> refused" 1 "$RC"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new 'two words' 2>&1)"; RC=$?
+assert_rc "a topic with whitespace -> refused (it would break the list columns)" 1 "$RC"
+
 say ""
 say "== heartbeat (tests/heartbeat.sh) =="
 HB_OUT="$(bash "$ROOT/tests/heartbeat.sh" 2>&1)"; HB_RC=$?
