@@ -1,6 +1,6 @@
 ---
 name: middle-management
-description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
+description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
 version: 0.4.0
 ---
 
@@ -49,6 +49,15 @@ finish or block, YOU report to the coordinator; it should not have to poll you. 
 other's status. When your lane is done, the report and closing your own books (your team's
 wrap convention: touched docs, log entry, local commit) are ONE motion — nobody has to
 remind you.
+
+**You are the sub-orchestrator of your own lane.** Plan review, build, diff review,
+screenshots and report writing run in sub-agents with fresh context, and every sub-agent
+prompt names the model and effort for that role. Each of them writes long output to a file
+and returns you at most ten lines — up to twenty when the report carries a decision you have
+to make. You read those reports, not whole files or diffs. Every status you send the
+coordinator ends with your rough context fill (a quarter, a half, three quarters). A session
+that reads everything itself is full within the hour and dies with its lane; a lean one picks
+up a second topic after the wrap.
 
 **If the coordinator dies, keep working your lane.** Hold every outward coordination the
 regime routes through the coordinator (posts, tickets, pull requests, asks to the user),

@@ -136,6 +136,12 @@ else
   printf 'Session role: WORKER ("%s"). The coordinator is "%s".\n' "${MY_NAME:-unnamed}" "${ORCH:-unnamed}"
   printf 'Peer messages go ONLY to "%s" — never to other workers; anything another session needs\n' "${ORCH:-unnamed}"
   printf 'goes through the coordinator. When you finish or block, report there yourself.\n'
+  printf 'You are the SUB-ORCHESTRATOR of your lane: plan review, build, diff review, screenshots and\n'
+  printf 'report writing run in sub-agents with fresh context, each prompt naming its model and effort.\n'
+  printf 'Every sub-agent writes long output to a FILE and returns you at most ten lines — up to twenty\n'
+  printf 'when it carries a decision you must make. You read those reports, not whole files or diffs.\n'
+  printf 'End every report to the coordinator with your rough context fill (1/4, 1/2, 3/4): a session\n'
+  printf 'that reads everything itself is full within the hour and dies with its lane.\n'
   [ -n "$BOARD" ] && printf 'The board %s is read-only for you — the coordinator is its only writer.\n' "$BOARD"
 fi
 exit 0
