@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+Synced from the master setup (2026-09-11, round 4): **a lane runs itself and ends clean**. The
+WORKER banner and the skill now say that a worker is the **sub-orchestrator of its own lane** —
+plan review, build, diff review, screenshots and report writing run in sub-agents with fresh
+context, each prompt naming model and effort; every sub-agent writes long output to a file and
+returns at most ten lines, twenty when the report carries a decision the worker must make; the
+worker reads reports, not whole files or diffs; and every status to the coordinator ends with the
+worker's rough context fill. The ten-line and model-choice rules were coordinator-only until now.
+For the coordinator: **one lane = one session** (a new lane gets a fresh session, asked for with
+the model named, never a second lane stacked silently into a running one — exception only after
+around half an hour of user silence and only for safe, reversible work); **a wrapped session is
+closed for good**, so after every wrap the coordinator says unprompted which tabs can go and
+sends each of those sessions its own peer message so it answers in its own tab with "close this
+tab" (users cannot map peer names to editor tabs and have closed the wrong ones); and every
+**waiting item carries its link or command line in the SAME line, at every repetition**. The
+skill's off-keyboard section gains the rule for teams whose channel has an inbound leg: an answer
+arriving there is the user's word when it references the concrete question (reply-to, or the item
+named), and a loose "yes" is not.
+
+`poke-session.py` now declares the RECEIVER's permission mode in the envelope
+(`from-mode`, mirrored from the target's `--permission-mode` or the config dir's
+`permissions.defaultMode`; `POKE_FROM_MODE` overrides). Without it a session running in
+bypassPermissions HOLDS every peer message that does not declare the same mode — parked for
+approval, never queued, no log line anywhere — so heartbeat pokes and off-keyboard replies were
+silently swallowed. The attribute order in the envelope is load-bearing.
+
+`wt done` deletes the branch of work that is merged into the base instead of hinting at it,
+using `git update-ref -d refs/heads/<branch> <tip>` after recording the tip SHA and checking no
+other worktree still has the branch checked out (`git branch -D` is deny-listed in careful setups
+and `branch -d` refuses squash-merged branches); an unmerged branch is kept with that same
+update-ref line as the hint. `done` also refuses when the calling shell's cwd is inside the
+worktree, and exits 0 with "already removed" when the worktree is gone, so cleanup routines can
+call it blind. Seventeen new test cases (108 + 101).
+
+The marketplace is renamed from `bopp-plugins` to `dr-bopp`. Nothing migrates automatically:
+uninstall, `/plugin marketplace remove bopp-plugins`, re-add, install from `dr-bopp` — the README
+carries the four commands.
+
 ## 0.4.0 — 2026-09-08
 
 Synced from the master setup (2026-09-08, round 3): **what a coordinator does when nobody is
