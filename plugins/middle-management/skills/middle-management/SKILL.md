@@ -1,6 +1,6 @@
 ---
 name: middle-management
-description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, whether an approval that arrives through that channel counts, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
+description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, whether an approval that arrives through that channel counts, when a lane's dev server or worktree may be cleaned up and when it may not, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
 version: 0.4.0
 ---
 
@@ -58,6 +58,13 @@ to make. You read those reports, not whole files or diffs. Every status you send
 coordinator ends with your rough context fill (a quarter, a half, three quarters). A session
 that reads everything itself is full within the hour and dies with its lane; a lean one picks
 up a second topic after the wrap.
+
+**Your lane ends with its resources released.** The lane's server unit stopped, its worktree
+removed (`/wt <name> done <topic>`), and the `/wt list` line that proves both pasted into your
+wrap — a finished lane that keeps a worktree and a dev server alive is what fills the machine
+up. When the slot has to stay (a review is still running against it, your user wants to click
+through it), say so with `/wt <name> hold <topic> <hours>` instead of leaving it standing
+silently; that is also what keeps the lane reaper off it.
 
 **If the coordinator dies, keep working your lane.** Hold every outward coordination the
 regime routes through the coordinator (posts, tickets, pull requests, asks to the user),
@@ -120,6 +127,15 @@ stale watchers go as soon as their reason is gone (merge, answered thread, close
 — not when memory runs low (one leftover worktree once held 4.5 GB). Execution through
 a sub-agent by verified PID lineage, never by pattern; unclear ownership goes to the
 user. Procedure: `morning-ritual` skill, step 5.
+
+**Where the line runs.** Stopping a lane's unit and removing its worktree is housekeeping once
+the worktree is clean, every commit sits on the remote or in the base, and the work is merged —
+that happens unasked, and it is what the lane reaper does every half hour if your user installed
+it. Everything else stays destructive and needs their word: a dirty, unpushed or unmerged
+worktree, a process that is not inside a lane unit, and anything that deletes data. Branches of
+merged or closed pull requests fall on the housekeeping side and go with
+`git update-ref -d refs/heads/<branch>` after the tip SHA is recorded — `/wt <name> done` does
+exactly that, and prints the way back.
 
 **After a handover you still close your books.** Releasing the seat and briefing the
 successor is not a wrap: the outgoing coordinator writes its own log entry and commits

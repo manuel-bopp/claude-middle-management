@@ -87,15 +87,23 @@ coordinator-owned docs only.
 Free what yesterday left behind, before the day plan — so the plan reports what was
 freed. Gather in one read-only pass, then act through ONE sub-agent with explicit PIDs:
 
-- **Dev servers:** `ss -ltnp` over your dev-port range plus `pgrep -af` for your dev-server
-  commands — CUSTOMIZE both. A server whose worktree branch is merged or whose lane is
-  closed on the board is stale; the shared ones (the main checkout's server, shared
-  backends) always stay. Kill by verified PID lineage (parent first, cwd inside the
-  worktree), never by pattern.
-- **Worktrees:** `git -C <root> worktree list` for every protected checkout; per branch
-  `git merge-base --is-ancestor <branch> <base>` → merged AND clean → `/wt <name> done <topic>`.
-  Dirty or unmerged = keep and list; a dirty merged tree goes to your user (what is the
-  dirty file?), never discarded blind.
+- **Lanes:** with the lane reaper installed (setup step 6), read its listing
+  `<config dir>/state/wt/reaper-latest.md` instead of sweeping yourself — on its own 30-minute
+  cycle it already stopped the lane units nobody was using and removed the worktrees of merged
+  lanes. What is left for you are its **list only** rows: a dirty tree, unpushed commits, a
+  pull request that is open, closed or absent, an unknown owner, a process sitting inside a
+  worktree. Decide each by verified PID lineage (parent first, cwd inside the worktree), never
+  by pattern. A dirty merged tree goes to your user — what is the dirty file? — never discarded
+  blind. Without the reaper the same sweep by hand: `/wt list`, then `/wt <name> done <topic>`
+  for every lane that reads `clean` and `merged yes`.
+- **Branch deletion:** branches of merged or closed pull requests go without asking, with
+  `git update-ref -d refs/heads/<branch>` after recording the tip SHA and checking that no
+  worktree still has the branch checked out (`git branch -D` is deny-listed in careful setups,
+  and `branch -d` refuses a squash-merged branch). `/wt <name> done` already does it this way.
+- **Dev servers outside a lane:** `ss -ltnp` over your dev-port range plus `pgrep -af` for your
+  dev-server commands — CUSTOMIZE both. A server whose lane is closed on the board is stale;
+  the shared ones (the main checkout's server, shared backends) always stay. Kill by verified
+  PID lineage, never by pattern.
 - **Watchers:** long-running pollers your team runs (`pgrep -af <watcher>` — CUSTOMIZE)
   whose thread is answered or whose ask is moot (PR merged, decision taken) are killed by
   PID; the board names the live ones.

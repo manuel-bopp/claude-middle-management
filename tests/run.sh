@@ -101,6 +101,7 @@ assert_has "orchestrator banner: model choice announced" "whether the strongest 
 assert_has "orchestrator banner: one lane one session" "One lane = one session" "$OUT"
 assert_has "orchestrator banner: closable tabs get their own message" "close this tab" "$OUT"
 assert_has "orchestrator banner: waiting items carry their link" "in the SAME" "$OUT"
+assert_has "orchestrator banner: housekeeping vs destruction" "housekeeping, not" "$OUT"
 # no config file at all (roles-only install): the off-keyboard line must stay away, and the
 # hook must survive `set -u` with no config branch taken.
 assert_lacks "no config -> no off-keyboard line" "notifyCommand" "$OUT"
@@ -110,6 +111,8 @@ assert_has "worker told coordinator name" "alpha" "$OUT"
 assert_has "worker banner: sub-orchestrator of its lane" "SUB-ORCHESTRATOR of your lane" "$OUT"
 assert_has "worker banner: sub-agents return ten lines" "at most ten lines" "$OUT"
 assert_has "worker banner: report the context fill" "context fill" "$OUT"
+assert_has "worker banner: the lane ends with its resources released" "resources released" "$OUT"
+assert_has "worker banner: hold when the slot must stay" "/wt <name> hold" "$OUT"
 printf '{"board":"%s/board.md"}' "$H" > "$H/.claude/middle-management.json"
 OUT="$(role "$H" "sess-alpha")"
 assert_has "orchestrator banner: sole writer of the board" "sole writer of the board $H/board.md" "$OUT"

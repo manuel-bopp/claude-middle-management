@@ -121,6 +121,8 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
   printf 'Resource hygiene is YOUR job: orphaned dev servers, worktrees of merged branches and stale\n'
   printf 'watchers go as soon as their reason is gone (sub-agent, by verified PID lineage, never by\n'
   printf 'pattern) — not when memory runs out. Morning ritual, step 5.\n'
+  printf 'Stopping a lane unit and removing its merged, clean, pushed worktree is housekeeping, not\n'
+  printf 'destruction — done unasked; anything dirty, unpushed or unmerged stays and goes to your user.\n'
   printf 'One lane = one session: a new lane gets a FRESH session — ask your user to open one and name\n'
   printf 'the model; never stack a second lane into a running session (exception: after ~30 minutes of\n'
   printf 'silence from your user, and only for safe, reversible work). A wrapped session is closed for\n'
@@ -150,6 +152,8 @@ else
   printf 'when it carries a decision you must make. You read those reports, not whole files or diffs.\n'
   printf 'End every report to the coordinator with your rough context fill (1/4, 1/2, 3/4): a session\n'
   printf 'that reads everything itself is full within the hour and dies with its lane.\n'
+  printf 'Your lane ends with its resources released: unit stopped, worktree removed (/wt <name> done\n'
+  printf '<topic>), the /wt list line proving it in your wrap. Need the slot longer? /wt <name> hold.\n'
   [ -n "$BOARD" ] && printf 'The board %s is read-only for you — the coordinator is its only writer.\n' "$BOARD"
 fi
 exit 0
