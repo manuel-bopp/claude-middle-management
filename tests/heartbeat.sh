@@ -5,6 +5,7 @@
 #   B  fixtures for the classifier (every record shape that must or must not count as a turn)
 #   C  every transition, liveness outcome and latch, against a fake registry/marker/transcript
 #   D  the configured notifyCommand and the unit-failure alarm
+#   E  the real poke sender's envelope against a fake socket
 # The master setup this plugin derives from also re-runs the classifier against real stalled
 # transcripts (its section A); those files are private and stay there.
 # Alarms and pokes are redirected into files with OHB_ALARM_SINK / OHB_POKE_SINK; section D
@@ -348,6 +349,86 @@ is "D5 tick unit carries the config dir"   "$(grep -c '^Environment=CLAUDE_CONFI
 is "D5 alarm unit carries the config dir"  "$(grep -c '^Environment=CLAUDE_CONFIG_DIR=/tmp/cfg$' "$ENVDIR/unit-failure-alarm@.service")" 1
 is "D5 tick unit runs the copied script"   "$(grep -c '^ExecStart=/tmp/hb/orch-heartbeat.sh$' "$ENVDIR/orch-heartbeat.service")" 1
 is "D5 timer starts the tick unit"         "$(grep -c '^Unit=orch-heartbeat.service$' "$ENVDIR/orch-heartbeat.timer")" 1
+
+# ------------------------------------------------- E. the poke sender's envelope ------------
+# The real poke-session.py against a fake socket. C and D only COUNT pokes (the sender is
+# stubbed out there), so nothing above would notice the envelope losing a field - and a peer
+# message whose from-mode does not match the receiver is held for approval, silently.
+echo "E. the poke sender's envelope, against a fake socket"
+POKE=$HB/poke-session.py
+PDIR=$TMP/poke; mkdir -p "$PDIR/reg" "$PDIR/cfg"
+PSID=99999999-8888-7777-6666-555555555555
+printf 'the body, verbatim\n' > "$PDIR/body.md"
+TARGETS=""
+
+# The sender reads the TARGET's own argv, so a fake target must really carry those words.
+# The trailing `; :` keeps bash from exec'ing sleep over itself, which would take the argv along.
+# TPID is set in THIS shell, not echoed: a command substitution would lose the bookkeeping.
+target() { bash -c 'sleep 60; :' fake-claude "$@" >/dev/null 2>&1 </dev/null & TPID=$!; TARGETS="$TARGETS $TPID"; }
+
+# poke <tag> <target pid> [VAR=value ...] -> frames land in $PDIR/<tag>.bin, echoes the exit code.
+# One socket and one registry entry per case: every entry carries the same sessionId, so a
+# leftover would make the lookup order decide the result.
+poke() {
+  local tag=$1 pid=$2 sock cap srv rc i=0; shift 2
+  sock=$PDIR/$tag.sock; cap=$PDIR/$tag.bin
+  python3 -c 'import socket,sys
+p,out=sys.argv[1],sys.argv[2]
+s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(10); s.bind(p); s.listen(1)
+open(out+".ready","w").close()
+c,_=s.accept(); buf=b""
+while True:
+    chunk=c.recv(4096)
+    if not chunk: break
+    buf+=chunk
+open(out,"wb").write(buf)' "$sock" "$cap" &
+  srv=$!
+  while [ ! -e "$cap.ready" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done
+  rm -f "$PDIR"/reg/*.json "$PDIR"/reg/*.key
+  printf '{"pid":%s,"sessionId":"%s","name":"faketarget","kind":"interactive","peerProtocol":1,"messagingSocketPath":"%s"}\n' \
+    "$pid" "$PSID" "$sock" > "$PDIR/reg/$pid.json"
+  printf '{"peerToken":"fake-token"}\n' > "$PDIR/reg/$pid.$(printf '%s' "$sock" | sha256sum | cut -d' ' -f1).key"
+  env "$@" OHB_REG="$PDIR/reg" CLAUDE_CONFIG_DIR="$PDIR/cfg" python3 "$POKE" "$PSID" "$PDIR/body.md" >/dev/null 2>&1
+  rc=$?
+  wait $srv 2>/dev/null
+  echo $rc
+}
+line() { jq -r 'select(.type=="user") | .message.content' "$PDIR/$1.bin" 2>/dev/null | sed -n "$2p"; }
+
+# E1 a target started with --permission-mode bypassPermissions gets "bypass" mirrored back.
+# The opening tag is asserted whole: attribute ORDER is load-bearing, the receiver re-serialises
+# what it parsed and drops the metadata if the string differs.
+target --permission-mode bypassPermissions
+is "E1 sender exit 0"           "$(poke argv-space "$TPID")" 0
+is "E1 auth frame comes first"  "$(head -1 "$PDIR/argv-space.bin" | jq -r .type)" auth
+is "E1 envelope opening tag"    "$(line argv-space 1)" '<cross-session-message from-name="heartbeat" from-mode="bypass">'
+is "E1 body arrives intact"     "$(line argv-space 2)" 'the body, verbatim'
+is "E1 envelope closed"         "$(line argv-space 3)" '</cross-session-message>'
+
+# E2 the other argv spelling the CLI accepts
+target --permission-mode=bypassPermissions
+poke argv-equals "$TPID" >/dev/null
+is "E2 --permission-mode= spelling" "$(line argv-equals 1)" '<cross-session-message from-name="heartbeat" from-mode="bypass">'
+
+# E3 nothing in the target's argv -> the config dir's settings.json decides
+target
+printf '{"permissions":{"defaultMode":"bypassPermissions"}}\n' > "$PDIR/cfg/settings.json"
+poke settings-bypass "$TPID" >/dev/null
+is "E3 settings.json default mirrored" "$(line settings-bypass 1)" '<cross-session-message from-name="heartbeat" from-mode="bypass">'
+
+# E4 nothing declares bypass -> "prompting"; and POKE_FROM_NAME reaches the receiver, sanitised
+# because it lands inside an attribute value
+rm -f "$PDIR/cfg/settings.json"
+target
+poke prompting "$TPID" POKE_FROM_NAME='telegram-manu"evil' >/dev/null
+is "E4 prompting + sender name" "$(line prompting 1)" '<cross-session-message from-name="telegram-manuevil" from-mode="prompting">'
+
+# E5 the debug override drops the attribute instead of asserting a mode
+target
+poke mode-none "$TPID" POKE_FROM_MODE=none >/dev/null
+is "E5 from-mode omitted on none" "$(line mode-none 1)" '<cross-session-message from-name="heartbeat">'
+# the sleep is a CHILD of the target: it outlives a kill of the parent alone
+for p in $TARGETS; do pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; done
 
 echo
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
