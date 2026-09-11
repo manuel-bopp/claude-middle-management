@@ -32,6 +32,12 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/block-blanket-git-add.sh\"",
             "timeout": 10,
             "statusMessage": "middle-management: staging scope"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/long-running-as-unit.sh\"",
+            "timeout": 10,
+            "statusMessage": "middle-management: long-runners as units"
           }
         ]
       }
