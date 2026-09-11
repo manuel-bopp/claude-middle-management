@@ -1,6 +1,6 @@
 ---
 name: middle-management
-description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
+description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, whether an approval that arrives through that channel counts, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
 version: 0.4.0
 ---
 
@@ -181,6 +181,12 @@ non-zero rc means the message did NOT arrive — say so in your tab instead of a
 The plugin ships the outbound leg only. A reply comes back however your channel delivers
 it (the user types in a tab, or your team runs an inbound poller — CUSTOMIZE); the plugin
 promises nothing about it.
+
+**An answer that arrives through the channel counts as your user's word when it references
+the question** — a reply-to on the message you sent, or the item named in the text. Then it
+is worth exactly as much as their word in the tab: a merge, a push, a deletion, a message
+going outward. A loose "yes" with nothing to anchor it to is not: ask again, naming the one
+item, rather than guessing which of the three open asks they meant.
 
 ## Gotchas
 
