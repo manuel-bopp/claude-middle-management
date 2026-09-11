@@ -22,11 +22,25 @@ drawn in detail under [How the roles work](#how-the-roles-work).
 
 ```
 /plugin marketplace add manuel-bopp/claude-middle-management
-/plugin install middle-management@bopp-plugins
+/plugin install middle-management@dr-bopp
 ```
 
 Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
 `/middle-management-setup` once to configure the optional worktree part.
+
+**Installed from `bopp-plugins` before?** The marketplace is now called `dr-bopp`, and a
+rename migrates nothing — re-register it once:
+
+```
+/plugin uninstall middle-management@bopp-plugins
+/plugin marketplace remove bopp-plugins
+/plugin marketplace add manuel-bopp/claude-middle-management
+/plugin install middle-management@dr-bopp
+```
+
+**After every plugin update, re-run `/middle-management-setup` step 5** if you installed the
+heartbeat — its units run a copy of the scripts, because the plugin's own cache path is
+versioned and goes stale with each update.
 
 ## What you get
 

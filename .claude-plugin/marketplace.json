@@ -1,5 +1,5 @@
 {
-  "name": "bopp-plugins",
+  "name": "dr-bopp",
   "description": "Manu's Claude Code plugins — currently middle-management: coordination for many parallel sessions on one machine.",
   "owner": { "name": "Manu" },
   "plugins": [
