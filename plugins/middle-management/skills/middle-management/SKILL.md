@@ -1,6 +1,6 @@
 ---
 name: middle-management
-description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
+description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
 version: 0.4.0
 ---
 
@@ -206,6 +206,19 @@ brief, no work, nothing in its transcript beyond the hook context — is free fo
 coordinator to take for a lane without asking; say in your next message which session took
 which lane. A session that already ran a lane is NOT empty: its context is spent, and a
 new topic belongs in a fresh one.
+
+**One lane = one session.** A new lane gets a fresh session: ask your user to open one and
+name the model it should run — for them that is one click. Never stack a second lane silently
+into a running session. The one exception is around half an hour of silence from your user,
+and then only for safe, reversible work: a second lane in a session that already has one, or
+sub-agents in your own.
+
+**A wrapped session is closed for good.** After every wrap, tell your user unprompted which
+tabs they can close, and send each of those sessions its own peer message so it answers in
+its own tab with "close this tab" and nothing else. Your user cannot map peer names to editor
+tabs — naming the peer name alone has closed the wrong tabs twice. Send it only to sessions
+you can identify, and never reuse a wrapped session for a new lane: its context is spent and
+the wrap already told your user it is finished.
 
 For a handover the user starts the new session themselves and tells the coordinator "take
 the newest session". The coordinator finds it through the session registry instead of by
