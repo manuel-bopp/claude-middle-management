@@ -43,7 +43,7 @@ validate() {
     and ((.longRunningAsUnit // false) | type == "boolean")
     and ((.reaperMaxHours // 0) | type == "number")
     and ((.reaperOwnerlessMinutes // 0) | type == "number")
-    and ((.reaperDigestHour // 0) | type == "number")
+    and ((.reaperDigestHour // 7) | (type == "number" and . == (. | floor) and . >= 0 and . <= 23))
     and ((.protectedCheckouts // []) | (type == "array") and all(
           (type == "object")
           and (.name | (type == "string") and (test("^[^[:space:]]+$")))  # a column of `wt list`

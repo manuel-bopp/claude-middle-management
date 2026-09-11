@@ -110,7 +110,7 @@ act() {  # act <lane> <key> <why> -- <cmd...>
        # about again every 30 minutes.
        local pids
        pids=$(printf '%s' "$out" | grep -oE 'pid [0-9]+' | head -3 | tr '\n' ' ' || true)
-       row "busy:$key" "listed" "$key" "refused, ${pids:-a process} still works inside $key" \
+       row "busy-cwd:$key" "listed" "$key" "refused, ${pids:-a process} still works inside $key" \
            "$why — the worktree stays; stop it by explicit pid, never by pattern" ;;
     *) RC=1; ACTIONS+=("FAILED on $key: ${*} → $(printf '%s' "$out" | tail -2 | tr '\n' ' ')") ;;
   esac

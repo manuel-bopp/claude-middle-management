@@ -1,6 +1,6 @@
 ---
 description: Per-topic git worktrees for a configured checkout — create, list, run the lane's server, hold it against the reaper, remove it
-argument-hint: <name> new|list|run|stop|hold|done [topic] — or list | cap -- <cmd>
+argument-hint: <name> new|list|run|stop|hold|chown|done [topic] — or list | cap -- <cmd>
 allowed-tools: ["Bash"]
 ---
 
@@ -35,6 +35,7 @@ config (it lists the configured names when it does not recognise one):
 | `<name> run <topic> [-- <cmd>]` | start `<cmd>`, or the checkout's configured `serve` command, in the lane's worktree as a memory-capped systemd user unit |
 | `<name> stop <topic>` | stop that unit, verified |
 | `<name> hold <topic> <hours>` | keep the lane reaper off this lane; `0` clears the hold |
+| `<name> chown <topic> <owner>` | hand the lane over: write `<owner>` into its owner marker, so it does not count as ownerless when the session that started it ends |
 | `<name> done <topic>` | remove the worktree and delete its branch once it is merged |
 | `list` | every configured checkout in one view |
 | `cap -- <cmd>` | run one heavy command (test run, build) memory-capped, in the foreground |
