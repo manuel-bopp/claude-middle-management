@@ -283,9 +283,29 @@ assert_rc "wt done with an unpushed commit -> refused" 1 "$RC"
 assert_has "refusal names the branch" "branch topic1 has commits" "$OUT"
 # a slash topic lands in a dash directory; `done` by the directory name must still name the real branch
 HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new 'feat/slash' >/dev/null 2>&1
+OUT="$(cd "$W/.worktrees-app/feat-slash" && HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done feat-slash 2>&1)"; RC=$?
+assert_rc "wt done from a cwd inside the worktree -> refused" 1 "$RC"
+assert_has "refusal names the cwd" "cwd is inside" "$OUT"
+[ -d "$W/.worktrees-app/feat-slash" ] && ok "refused done left the worktree alone" || bad "refused done left the worktree alone"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done feat-slash 2>&1)"; RC=$?
 assert_rc "wt done by directory name succeeds" 0 "$RC"
-assert_has "done hint names the real branch, not the directory" "branch -D 'feat/slash'" "$OUT"
+assert_has "merged branch deleted under its real name, not the directory" "branch feat/slash deleted" "$OUT"
+assert_has "deletion prints the way back" "restore with: git -C $W/app branch feat/slash" "$OUT"
+git -C "$W/app" rev-parse --verify --quiet 'refs/heads/feat/slash' >/dev/null \
+  && bad "merged branch ref really gone" || ok "merged branch ref really gone"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done feat-slash 2>&1)"; RC=$?
+assert_rc "wt done on an already removed worktree -> rc 0" 0 "$RC"
+assert_has "second done says already removed" "already removed" "$OUT"
+# pushed but not merged: the branch survives, and the hint is update-ref (branch -D is deny-listed)
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app new pushed1 >/dev/null 2>&1
+git -C "$W/.worktrees-app/pushed1" -c user.email=t@t -c user.name=t commit -q --allow-empty -m c2
+git -C "$W/.worktrees-app/pushed1" push -q -u origin pushed1 2>/dev/null
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$WT" app done pushed1 2>&1)"; RC=$?
+assert_rc "wt done on a pushed, unmerged branch succeeds" 0 "$RC"
+assert_has "unmerged branch kept" "branch pushed1 kept" "$OUT"
+assert_has "delete hint uses update-ref" "update-ref -d refs/heads/pushed1" "$OUT"
+git -C "$W/app" rev-parse --verify --quiet refs/heads/pushed1 >/dev/null \
+  && ok "unmerged branch ref still there" || bad "unmerged branch ref still there"
 # local-only repo, base = local branch
 git -C "$W" init -qb main solo 2>/dev/null
 git -C "$W/solo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init

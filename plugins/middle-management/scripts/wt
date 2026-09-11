@@ -7,7 +7,8 @@
 # Usage:
 #   wt <name> new <topic>    worktree <worktreeDir>/<topic>, branch <topic> off <base>
 #   wt <name> list           list the checkout's worktrees
-#   wt <name> done <topic>   remove the worktree (refuses if dirty or unpushed)
+#   wt <name> done <topic>   remove the worktree (refuses if dirty or unpushed) and
+#                            delete its branch once it is merged into <base>
 #
 # One lane = one branch = one small pull request. <name>, root, base, install
 # command and worktree directory all come from the config; create or change it
@@ -76,17 +77,51 @@ case "$CMD" in
     [ -n "$TOPIC" ] || die "topic missing: wt $NAME done <topic>"
     check_base
     DEST="$WTDIR/${TOPIC//\//-}"
-    [ -d "$DEST" ] || die "no worktree at $DEST"
+    # idempotent: cleanup routines call `done` on lanes that may already be gone
+    if [ ! -d "$DEST" ]; then
+      git -C "$ROOT" worktree prune 2>/dev/null || true
+      echo "already removed: $DEST (nothing to do)"
+      exit 0
+    fi
+    # A cwd inside the worktree survives its removal as a "(deleted)" path and breaks every
+    # later command in that shell.
+    # ponytail: only THIS shell's cwd — scanning every process for it needs /proc and buys
+    # little, since the caller's own shell is the case that actually happens.
+    case "$PWD/" in "$DEST"/*) die "your shell's cwd is inside $DEST — cd out of it first (e.g. cd $ROOT), then retry" ;; esac
     BRANCH=$(git -C "$DEST" rev-parse --abbrev-ref HEAD)  # real branch: <topic> may be the dir name (sec-step0 vs sec/step0)
     [ -z "$(git -C "$DEST" status --porcelain)" ] || die "$DEST has uncommitted changes — commit, stash or clean up first"
     # refuse to drop commits that exist nowhere else
-    if ! git -C "$DEST" merge-base --is-ancestor HEAD "$BASE" 2>/dev/null; then
+    MERGED=""
+    if git -C "$DEST" merge-base --is-ancestor HEAD "$BASE" 2>/dev/null; then
+      MERGED=1
+    else
       git -C "$DEST" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1 \
         && [ -z "$(git -C "$DEST" log '@{upstream}..HEAD' --oneline)" ] \
         || die "branch $BRANCH has commits that are neither on $BASE nor pushed — push or merge first"
     fi
+    TIP=$(git -C "$ROOT" rev-parse "$BRANCH" 2>/dev/null || true)
     git -C "$ROOT" worktree remove --force "$DEST"
-    echo "removed $DEST (branch $BRANCH kept; delete it after the merge with: git -C $ROOT branch -D '$BRANCH')"
+    echo "removed $DEST"
+    # Deleting the branch of merged work is cleanup, not destruction — but `git branch -D` is
+    # deny-listed in careful setups and `branch -d` refuses squash-merged branches. So: record
+    # the tip, make sure no other worktree still has the branch checked out, then update-ref -d
+    # with the expected old value, which makes the delete atomic and prints the way back.
+    if [ -z "$BRANCH" ] || [ "$BRANCH" = HEAD ]; then
+      echo "branch kept — $DEST was on a detached HEAD (tip $TIP)"
+    elif [ -z "$MERGED" ]; then
+      echo "branch $BRANCH kept — it is not merged into $BASE yet. Delete it after the merge with:"
+      echo "  git -C $ROOT update-ref -d refs/heads/$BRANCH   # tip is $TIP, restore with: git -C $ROOT branch $BRANCH $TIP"
+    else
+      # a failure to list must KEEP the branch, never fall through to the delete
+      WTL=$(git -C "$ROOT" worktree list --porcelain) \
+        || die "cannot list worktrees — branch $BRANCH kept (merged), tip $TIP"
+      if grep -qxF "branch refs/heads/$BRANCH" <<<"$WTL"; then
+        echo "branch $BRANCH kept — it is merged into $BASE, but another worktree still has it checked out"
+      else
+        git -C "$ROOT" update-ref -d "refs/heads/$BRANCH" "$TIP"
+        echo "branch $BRANCH deleted (merged into $BASE), tip was $TIP — restore with: git -C $ROOT branch $BRANCH $TIP"
+      fi
+    fi
     ;;
   *) die "usage: wt <name> <new|list|done> [topic]" ;;
 esac
