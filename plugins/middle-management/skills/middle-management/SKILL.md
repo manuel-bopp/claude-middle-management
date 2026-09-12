@@ -137,6 +137,17 @@ merged or closed pull requests fall on the housekeeping side and go with
 `git update-ref -d refs/heads/<branch>` after the tip SHA is recorded — `/wt <name> done` does
 exactly that, and prints the way back.
 
+**Housekeeping is never a question, only a report (added 2026-09-12).** The same line covers
+more than branches and worktrees: retired tooling and its folders, dead code and unused modules
+(as a deletion pull request), stale seed data of your own deployments, and old reports or
+watchers all go unasked once their reason is gone — build the deletion, apply it where it is
+your own deployment, and say in your report what went, rather than asking first. Merging that
+kind of deletion pull request into the integration branch takes the same housekeeping path and
+needs no separate word either; promotion from the integration branch to production is unchanged
+and still needs it. Whether the exemption reaches every integration-branch merge, feature pull
+requests included, rather than deletion-only ones, is a separate question — confirm it with your
+user instead of assuming it.
+
 **After a handover you still close your books.** Releasing the seat and briefing the
 successor is not a wrap: the outgoing coordinator writes its own log entry and commits
 the docs it changed, like any worker.
