@@ -144,9 +144,18 @@ watchers all go unasked once their reason is gone — build the deletion, apply 
 your own deployment, and say in your report what went, rather than asking first. Merging that
 kind of deletion pull request into the integration branch takes the same housekeeping path and
 needs no separate word either; promotion from the integration branch to production is unchanged
-and still needs it. Whether the exemption reaches every integration-branch merge, feature pull
-requests included, rather than deletion-only ones, is a separate question — confirm it with your
-user instead of assuming it.
+and still needs it. **The auto-merge exemption stays scoped to cleanup/deletion pull requests
+only** — a feature pull request into the integration branch still needs your user's word, even
+once this exemption is in place.
+
+**Deny-listed deletions move, they don't get routed around.** Sometimes the housekeeping is an
+untracked leftover (a stale log folder, a `node_modules` from a retired tool) that a machine-wide
+deny-list stops you from deleting outright. That is not a reason to reach for another deletion
+command instead — `find -delete`, a script that shells out to `rm`, or anything else that
+achieves the same end around the block. Move it: `mkdir -p /tmp/cleanup-trash/<YYYY-MM-DD>/`
+then `mv` the leftover there, and let the system's own temp-file cleaner clear it on its normal
+retention (check and state what that retention is on the machine you're on — it is usually an
+age-based daily sweep, not a boot-time wipe). Report the move like any other housekeeping action.
 
 **After a handover you still close your books.** Releasing the seat and briefing the
 successor is not a wrap: the outgoing coordinator writes its own log entry and commits
