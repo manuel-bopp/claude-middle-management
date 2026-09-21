@@ -25,6 +25,20 @@ holder is not visibly alive AND it passes the holder's sessionId, `/orchestrator
 `/orchestrator status`. All three run
 `bash "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh" <subcommand>`.
 
+**A seat left behind by a wrapped holder.** A coordinator that wrapped last night and simply
+never had its tab closed still holds the marker. `claim` takes such a seat instead of waking
+the holder — but only on **two independent signals that agree**: the holder's own closing line
+in its transcript *and* its last session-log entry reading `Status: completed`, plus an idle age
+past `MM_STALE_SEAT_MIN` (default 60 minutes, the prompt-cache TTL) on top of both. The tab list
+below runs on the closing line alone, and that is right for a list: its false positive costs your
+user one glance at a tab. The seat is held to the stricter bar, because the sentence that decides
+it — "you can close this tab" — is one a *working* coordinator writes about somebody else's tab
+after every wrap, and two coordinators at once is the worst state this plugin can produce. One
+signal short, an unreadable state, a reader that cannot run: no takeover, and `claim` says which
+signal was missing. The route for a holder that is live and still working, or idle less than the
+threshold, stays what it was — ask it to release the seat; its cache is warm, so that costs it
+almost nothing. `claim` prints the evidence it read off disk; the holder is never messaged.
+
 **By name (fallback).** A living session whose peer name starts with `orch`, started as
 `claude -n orchestrator`. This is the route for terminal sessions. A marker always wins
 over a name; two `orch*` sessions without a marker make the roles undefined, and the hook
@@ -238,11 +252,46 @@ and then only for safe, reversible work: a second lane in a session that already
 sub-agents in your own.
 
 **A wrapped session is closed for good.** After every wrap, tell your user unprompted which
-tabs they can close, and send each of those sessions its own peer message so it answers in
-its own tab with "close this tab" and nothing else. Your user cannot map peer names to editor
-tabs — naming the peer name alone has closed the wrong tabs twice. Send it only to sessions
-you can identify, and never reuse a wrapped session for a new lane — the wrap already told
-your user that session is finished.
+tabs they can close — and read that list off disk instead of waking the sessions to ask:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/peer-state.py" --wrapped
+```
+
+Per session it prints name, sessionId, whether it is live, how long it has been idle, roughly
+how much context it holds, whether it reads as wrapped and on what evidence, its topic, and
+**its own last line** — the last non-empty line of its last message, which is the text at the
+bottom of that editor tab, so your user finds the tab by what is on screen in it (naming the
+peer name alone has closed the wrong tabs twice). Run it **unfiltered, exactly as above**: a
+lane's worktree is a sibling of the checkout — often not even under the same parent — so
+`--cwd <repo root>` returns an empty list for precisely the workers the list exists for. A
+couple of finished tabs from another project on the list is a non-problem: your user wants
+those closed too, and every row carries its own topic and last line, so nothing is ambiguous.
+`--cwd <path>` stays available (a path-prefix match on segment boundaries) for when you
+deliberately narrow to one tree — never as the reflex. Without arguments the script prints the
+live sessions as a table; `--all`, `--json`, `--name <name>` and `--session-id <uuid>` narrow
+or widen it. Reading costs those sessions nothing.
+
+**Never send a peer message to a session that reads as wrapped, and check the state on disk
+before messaging any session that has been idle a while.** A message to a session idle for
+more than about an hour costs that session its ENTIRE conversation again as fresh input
+tokens — its prompt cache has gone cold. Measured on one machine on 2026-09-21: 2,369,094
+fresh input tokens over 8 wakes, 144,750 to 726,003 per wake, each 92–99 % of that session's
+own context. Seven of the eight existed only to tell an already-wrapped lane to close its tab.
+Under the hour the cache is usually still warm and a message is cheap — that is a rule of
+thumb, not a guarantee.
+
+The reader is deliberately conservative: `unknown` means "may be messaged". It never
+suppresses a message it is unsure about, because a lane that never hears from you is the
+worse failure. Idle time alone proves nothing either — a session parked mid-work and a
+session that wrapped two hours ago look identical from the outside; only its own closing
+line tells them apart. That is why the signal is the **last assistant text block** of the
+transcript (measured over 18 sessions) and not a grep over the whole file: the role hook
+injects the coordinator instruction containing the closing phrase into every transcript, so
+a grep matches every currently working session too.
+
+Never reuse a wrapped session for a new lane — the wrap already told your user that session
+is finished.
 
 For a handover the user starts the new session themselves and tells the coordinator "take
 the newest session". The coordinator finds it through the session registry instead of by
@@ -289,9 +338,22 @@ survives plugin updates and uninstalls.
 A coordinator whose turn dies — an exhausted retry budget, a crashed turn, a spend limit —
 sits silent with no error anyone sees, and every worker waits on it. Three layers cover it.
 
-**Before you close the coordinator tab, release the seat** (`/orchestrator release`). A
-released marker means "regime off", which every watcher understands; a closed tab with the
-marker still set looks exactly like a death.
+**Release the seat at wrap time, while you are still warm** (`/orchestrator release`), and end
+that last warm message with exactly one sentence, on its own last line:
+
+> **You can close this tab.**
+
+Write it verbatim. The reader matches a fixed list of closing phrases (`CLOSING` in
+`scripts/peer-state.py`) in the *end* of your last message, so a near-variant of your own
+invention — "you can close it now", "closing out here" — reads as a session still at work, and
+your user is told to wait for a tab that will never answer. Paired with your own session-log
+entry saying `Status: completed`, that one sentence is also what lets a later session take the
+seat off disk instead of waking you.
+
+Do not leave it to be woken hours later and told. A released marker means "regime off", which
+every watcher understands; a closed tab with the marker still set looks exactly like a death.
+**An empty marker is a perfectly good state**: the next coordinator simply claims it, and nobody
+has to be woken to hand the seat over.
 
 **The heartbeat** (optional, Linux, installed by `/middle-management-setup` step 5) is a
 systemd user timer that ticks every 10 minutes. Who coordinates: the marker, else a live

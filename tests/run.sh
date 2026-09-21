@@ -111,7 +111,14 @@ assert_has "claimer sees ORCHESTRATOR" "ORCHESTRATOR" "$OUT"
 assert_has "orchestrator banner: sub-agents return ten lines" "at most ten lines" "$OUT"
 assert_has "orchestrator banner: model choice announced" "whether the strongest model was" "$OUT"
 assert_has "orchestrator banner: one lane one session" "One lane = one session" "$OUT"
-assert_has "orchestrator banner: closable tabs get their own message" "close this tab" "$OUT"
+assert_has "orchestrator banner: wrapped tabs are read off disk, not asked" 'scripts/peer-state.py" --wrapped' "$OUT"
+# The printed command has to be runnable as printed: a plugin root with a space in it used to
+# produce a command line that breaks at the space.
+assert_has "orchestrator banner: the reader path is quoted" 'python3 "' "$OUT"
+# ...and never narrowed by --cwd: a lane worktree is a SIBLING of the checkout, so filtering by
+# the repo root hides exactly the workers the list exists for.
+assert_lacks "orchestrator banner: the tab list is not narrowed by --cwd" "--cwd" "$OUT"
+assert_has "orchestrator banner: a wrapped session is never peer-messaged" "NEVER peer-message a session" "$OUT"
 assert_has "orchestrator banner: waiting items carry their link" "in the SAME" "$OUT"
 assert_has "orchestrator banner: housekeeping vs destruction" "housekeeping, not" "$OUT"
 # no config file at all (roles-only install): the off-keyboard line must stay away, and the
@@ -172,6 +179,220 @@ OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
 assert_rc "claim over a dead holder succeeds" 0 "$RC"
 assert_has "claim says the marker was taken over" "taken over" "$OUT"
 kill "$PEER" 2>/dev/null
+
+say "== stale seat: claim over a holder that WRAPPED but left its tab open =="
+# Everything the route needs is on disk — a registry entry (add_peer), a transcript, and that
+# transcript's mtime as the idle age. The holder is never messaged, so no peer is started here.
+H="$(new_home)"; PEER="$(add_peer "$H" beta)"
+mkdir -p "$H/.claude/projects/-tmp-x"
+TR="$H/.claude/projects/-tmp-x/sess-beta.jsonl"
+holder_wrote() {  # $1 = the holder's last line, $2 = minutes since it wrote it,
+                  # $3 = the Status: of its last session-log entry (default completed, "none" = no entry)
+  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}],"usage":{"input_tokens":7,"cache_read_input_tokens":123000}}}\n' \
+    "$1" > "$TR"
+  touch -d "$2 minutes ago" "$TR"
+  mkdir -p "$H/logs"                       # peer-state.py reads ~/logs/session-log.md — the fake HOME's
+  case "${3:-completed}" in
+    none) : > "$H/logs/session-log.md" ;;
+    *)    printf '### 09:10 – [beta / Opus 5, KOORDINATOR] – Lane W1\n- Status: %s\n' "${3:-completed}" \
+            > "$H/logs/session-log.md" ;;
+  esac
+  printf 'sess-beta\n' > "$H/.claude/state/orchestrator"
+}
+claim_alpha() { HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1; }
+held() { head -1 "$H/.claude/state/orchestrator"; }
+holder_wrote 'Lane W1 gelandet — you can close this tab.' 90
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "wrapped holder, idle past the threshold -> the seat is taken" 0 "$RC"
+assert_has "the takeover names itself" "STALE SEAT" "$OUT"
+assert_has "the evidence names holder and idle age" '"beta" (sess-beta), idle 1h30m' "$OUT"
+assert_has "the evidence carries the price of the wake it avoided" "ctx 123007 tokens" "$OUT"
+assert_has "the evidence names the signal that decided it" 'closing phrase "close this tab"' "$OUT"
+assert_has "the evidence quotes the holder's own last line" "Lane W1 gelandet" "$OUT"
+assert_has "the evidence says the holder was not woken" "NOT messaged" "$OUT"
+[ "$(head -1 "$H/.claude/state/orchestrator")" = "sess-alpha" ] \
+  && ok "the marker now points at the claimer" || bad "the marker now points at the claimer"
+holder_wrote 'Fertig — you can close this tab.' 5
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "wrapped but idle UNDER the threshold -> still refused" 1 "$RC"
+assert_has "the refusal names the idle age it measured" "idle only 5m" "$OUT"
+assert_has "the refusal says the appeal is the cheap move right now" "cache is probably still warm" "$OUT"
+
+# The seat needs TWO agreeing signals, the tab list only one. The single session most likely to
+# write a closing line is a WORKING coordinator — about somebody else's tab, after every wrap.
+# Same transcript, same idle age, only the session log differs, so nothing but the log can be
+# what decides these three.
+STILL_WORKING='Lane W1 ist gelandet — der Worker hat gewrapped. Den Tab kannst du schließen. Als Nächstes: HYP-231?'
+holder_wrote "$STILL_WORKING" 95 in-progress
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "closing line but the session log says in-progress -> refused" 1 "$RC"
+# The reader settles this one itself (a contradicted closing line is "no", not "yes"), so the
+# refusal arrives as "still working". The seat's own second gate — a reader that DOES say yes
+# while the log says otherwise — is pinned against a stub further down, where log_completed is
+# the only field that moves.
+assert_has "the refusal says the holder is still working" "still working" "$OUT"
+[ "$(held)" = "sess-beta" ] && ok "the working coordinator keeps its seat" || bad "the working coordinator keeps its seat"
+holder_wrote "$STILL_WORKING" 95 none
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "closing line but no session log entry at all -> refused" 1 "$RC"
+assert_has "the refusal says there is no entry under its name" "no session log entry under its name" "$OUT"
+[ "$(held)" = "sess-beta" ] && ok "no log entry -> the seat stays put" || bad "no log entry -> the seat stays put"
+holder_wrote "$STILL_WORKING" 95 completed
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "the same line and idle age with the log completed -> the seat IS taken" 0 "$RC"
+assert_has "the takeover says both signals agreed" "closing line AND session log agree" "$OUT"
+
+holder_wrote 'Fertig — you can close this tab.' 5
+# Same wrapped, 5-minutes-idle holder: a threshold that silently evaluated to 0 would take it.
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_STALE_SEAT_MIN=abc bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "a non-numeric MM_STALE_SEAT_MIN -> aborted, not a takeover at threshold 0" 1 "$RC"
+assert_has "the abort names the variable" "MM_STALE_SEAT_MIN" "$OUT"
+[ "$(held)" = "sess-beta" ] \
+  && ok "the holder keeps its seat through the aborted claim" || bad "the holder keeps its seat through the aborted claim"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_STALE_SEAT_MIN=0 bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "MM_STALE_SEAT_MIN=0 (every seat is stale) -> refused" 1 "$RC"
+# A huge value is someone switching the route OFF. STALE_MIN*60 is int64: past ~1.5e17 it wrapped
+# NEGATIVE, every idle age cleared the threshold, and the seat was taken from a holder idle 5m.
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_STALE_SEAT_MIN=999999999999999999999 bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "an MM_STALE_SEAT_MIN that overflows int64 -> refused, not an instant takeover" 1 "$RC"
+assert_has "the refusal names the range it wants" "525600" "$OUT"
+[ "$(held)" = "sess-beta" ] && ok "the overflow value leaves the seat alone" || bad "the overflow value leaves the seat alone"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_STALE_SEAT_MIN=153722867280912931 bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "the exact int64 wrap point -> refused too" 1 "$RC"
+# Emergency paths must not care what that variable contains (it is only used by claim).
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_STALE_SEAT_MIN=abc bash "$ORCH" status 2>&1)"; RC=$?
+assert_rc "status works whatever MM_STALE_SEAT_MIN contains" 0 "$RC"
+assert_has "status still names the holder" "beta" "$OUT"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_STALE_SEAT_MIN=abc bash "$ORCH" release 2>&1)"; RC=$?
+assert_lacks "release is never blocked by MM_STALE_SEAT_MIN" "MM_STALE_SEAT_MIN" "$OUT"
+assert_has "release gives its own refusal instead" "REFUSED" "$OUT"
+holder_wrote 'Lane W1 gelandet — you can close this tab.' 90
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_STALE_SEAT_MIN=1 bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "MM_STALE_SEAT_MIN lowers the threshold -> the same seat is taken" 0 "$RC"
+assert_has "the takeover names the threshold it applied" "Threshold: 1 min" "$OUT"
+# 08 is eight minutes to a human and octal to bash: $((08*60)) aborted the whole script with a
+# raw "value too great for base", no refusal and no explanation.
+holder_wrote 'Lane W1 gelandet — you can close this tab.' 90
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_STALE_SEAT_MIN=08 bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "a leading-zero MM_STALE_SEAT_MIN -> read as decimal, not octal" 0 "$RC"
+assert_has "the leading zero is gone from the threshold it reports" "Threshold: 8 min" "$OUT"
+assert_lacks "no raw bash arithmetic error reaches the user" "value too great for base" "$OUT"
+holder_wrote 'Der Render läuft noch, ich melde mich mit den Zahlen.' 90 in-progress
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "a holder that has NOT wrapped -> refused however long it has been idle" 1 "$RC"
+assert_has "the refusal says it is alive and working" "still working" "$OUT"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" status 2>&1)"; RC=$?
+assert_rc "status with a live foreign holder still exits 0" 0 "$RC"
+assert_has "status answers appeal-or-take without a second command" "idle 1h30m, wrapped no" "$OUT"
+
+say "== stale seat: fail closed when the reader cannot be trusted =="
+# A copy of the scripts dir so the reader can be removed/broken without touching the real one.
+# Two coordinators at once is a worse failure than one expensive wake: no answer -> no takeover.
+COPY="$(mktemp -d -p "$TMPBASE")"; cp -r "$P/scripts" "$COPY/scripts"
+stub_reader() { cat > "$COPY/scripts/peer-state.py"; }   # body on stdin
+copy_claim() { HOME="$H" CLAUDE_CONFIG_DIR="" bash "$COPY/scripts/orchestrator.sh" claim 2>&1; }
+holder_wrote 'Alles erledigt — you can close this tab.' 90
+rm -f "$COPY/scripts/peer-state.py"
+OUT="$(copy_claim)"; RC=$?
+assert_rc "reader missing -> refused even over a wrapped, long-idle holder" 1 "$RC"
+assert_has "the refusal admits it could not judge" "no usable answer" "$OUT"
+stub_reader <<'PY'
+import sys
+sys.exit(3)
+PY
+OUT="$(copy_claim)"; RC=$?
+assert_rc "reader exits non-zero -> refused" 1 "$RC"
+stub_reader <<'PY'
+print("this is not json")
+PY
+OUT="$(copy_claim)"; RC=$?
+assert_rc "reader prints unparseable output -> refused" 1 "$RC"
+stub_reader <<'PY'
+print('[{"wrapped": "unknown", "idle_seconds": null, "evidence": ["no transcript on disk"]}]')
+PY
+OUT="$(copy_claim)"; RC=$?
+assert_rc "reader gives no idle age at all -> refused" 1 "$RC"
+# ...and the same verdict WITH a usable idle age: without this the jq select rejects the row on
+# idle_seconds and .wrapped is never read, so the case above proves nothing about "unknown".
+stub_reader <<'PY'
+print('[{"wrapped": "unknown", "log_completed": true, "idle_seconds": 99999, "idle": "27h",'
+      ' "ctx": 200000, "evidence": ["no assistant text read"], "last": "-"}]')
+PY
+OUT="$(copy_claim)"; RC=$?
+assert_rc "reader says wrapped=unknown past the threshold -> refused" 1 "$RC"
+assert_has "unknown counts as working" "counts as working" "$OUT"
+# The seat's second signal, straight from the reader's answer: everything else agrees and says
+# take it, and log_completed alone holds it back.
+stub_reader <<'PY'
+print('[{"wrapped": "yes", "log_completed": false, "idle_seconds": 99999, "idle": "27h",'
+      ' "ctx": 200000, "evidence": ["closing phrase; session log says in-progress"],'
+      ' "last": "Den Tab kannst du schließen."}]')
+PY
+OUT="$(copy_claim)"; RC=$?
+assert_rc "reader says wrapped=yes but log_completed=false -> refused however long it is idle" 1 "$RC"
+assert_has "the refusal names the log signal" "session log entry is not completed" "$OUT"
+stub_reader <<'PY'
+print('[{"wrapped": "yes", "log_completed": true, "idle_seconds": 99999, "idle": "27h",'
+      ' "ctx": 200000, "evidence": ["closing phrase; session log says completed"],'
+      ' "last": "Den Tab kannst du schließen."}]')
+PY
+OUT="$(copy_claim)"; RC=$?
+assert_rc "same row with log_completed=true -> the seat IS taken (so the refusal was that key)" 0 "$RC"
+assert_has "the takeover quotes the reader's evidence" "session log says completed" "$OUT"
+# Read-check-write is not one operation: three concurrent claims over the same stale holder each
+# announced the takeover and each declared itself the coordinator. The reader is made slow here so
+# another session can win the marker inside that gap — the claim must notice and step back.
+stub_reader <<'PY'
+import time
+time.sleep(1)
+print('[{"wrapped": "yes", "log_completed": true, "idle_seconds": 99999, "idle": "27h",'
+      ' "ctx": 200000, "evidence": ["closing phrase"], "last": "-"}]')
+PY
+holder_wrote 'Alles erledigt — you can close this tab.' 90
+( sleep 0.3; printf 'sess-gamma\n' > "$H/.claude/state/orchestrator" ) & RACER=$!
+OUT="$(copy_claim)"; RC=$?
+wait "$RACER" 2>/dev/null
+assert_rc "another session wins the marker mid-claim -> refused, not a second coordinator" 1 "$RC"
+assert_has "the loser says plainly that it is not the coordinator" "NOT the coordinator" "$OUT"
+[ "$(held)" = "sess-gamma" ] && ok "the winner's marker is left alone" || bad "the winner's marker is left alone" "$(held)"
+
+holder_wrote 'Alles erledigt — you can close this tab.' 90      # marker back to the holder
+cp "$P/scripts/peer-state.py" "$COPY/scripts/peer-state.py"
+OUT="$(copy_claim)"; RC=$?
+assert_rc "the real reader back in the same copy -> the seat IS taken (the refusals were the stub)" 0 "$RC"
+# The holder's process is GONE: that is the old route and the reader must not get in its way.
+printf '{"pid":999998,"name":"ghost2","sessionId":"sess-ghost2","kind":"interactive"}\n' > "$H/.claude/sessions/999998.json"
+cp "$TR" "$H/.claude/projects/-tmp-x/sess-ghost2.jsonl"
+printf 'sess-ghost2\n' > "$H/.claude/state/orchestrator"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "holder process gone -> the old take-over path, unchanged" 0 "$RC"
+assert_has "the dead-holder note is what fires" "taken over" "$OUT"
+assert_lacks "a dead holder is not routed through the stale-seat evidence" "STALE SEAT" "$OUT"
+kill "$PEER" 2>/dev/null
+
+say "== claim: a marker write that fails is not a claim =="
+# Announcing a successful claim after a failed write leaves a session believing it holds a seat it
+# does not — the same two-coordinator state, reached from the other end.
+H2="$(new_home)"
+rm -f "$H2/.claude/state/orchestrator"; mkdir -p "$H2/.claude/state/orchestrator"
+OUT="$(HOME="$H2" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "the marker path is a directory -> claim fails" 1 "$RC"
+assert_has "the failed write says this session is NOT the coordinator" "NOT the coordinator" "$OUT"
+assert_lacks "a failed write is never reported as a successful claim" "coordinator from now on" "$OUT"
+
+say "== --cwd, when used deliberately, matches by path prefix =="
+# A lane's worktree is a SIBLING of the checkout (<parent>/.worktrees-<name>/<topic>, elsewhere a
+# cache dir), so an exact --cwd match returned an empty tab list for exactly the sessions the list
+# exists for. That is why the banner and the skill instruct --wrapped UNFILTERED (asserted above);
+# the flag itself stays, and it has to match by prefix when someone does narrow on purpose.
+H3="$(new_home)"
+mkdir -p "$H3/.claude/projects/-tmp-x" "$H3/app" "$H3/.worktrees-app/T3"
+printf '{"pid":999997,"name":"lane-t3","sessionId":"sess-lane","cwd":"%s/.worktrees-app/T3","kind":"interactive","updatedAt":5}\n' \
+  "$H3" > "$H3/.claude/sessions/999997.json"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"Lane T3 gelandet. You can close this tab."}]}}\n' \
+  > "$H3/.claude/projects/-tmp-x/sess-lane.jsonl"
+OUT="$(HOME="$H3" CLAUDE_CONFIG_DIR="" python3 "$P/scripts/peer-state.py" --wrapped --cwd "$H3" 2>&1)"
+assert_has "--cwd matches by prefix, so a lane worktree beside the checkout is listed" "lane-t3" "$OUT"
 
 say "== liveness rule (F1): identity by sessionId, kind interactive =="
 H="$(new_home)"
@@ -606,6 +827,14 @@ git -C "$W2/app" rev-parse --verify --quiet refs/heads/fresh >/dev/null \
   && ok "the fresh branch is still there" || bad "the fresh branch is still there" "$OUT"
 
 say ""
+say "== peer-state (tests/peer-state.sh) =="
+PS_OUT="$(bash "$ROOT/tests/peer-state.sh" 2>&1)"; PS_RC=$?
+printf '%s\n' "$PS_OUT" | grep -E '^\s+(FAIL|skip)' || true
+PS_LINE="$(printf '%s\n' "$PS_OUT" | grep -E '^RESULT:' | tail -1)"
+say "  ${PS_LINE:-peer-state matrix did not report}"
+[ "$PS_RC" -eq 0 ] || FAIL=$((FAIL+1))
+
+say ""
 say "== heartbeat (tests/heartbeat.sh) =="
 HB_OUT="$(bash "$ROOT/tests/heartbeat.sh" 2>&1)"; HB_RC=$?
 printf '%s\n' "$HB_OUT" | grep -E '^\s+(FAIL|skip)' || true
@@ -614,5 +843,5 @@ say "  ${HB_LINE:-heartbeat matrix did not report}"
 [ "$HB_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
 say ""
-say "RESULT: $PASS passed, $FAIL failed (plus heartbeat: ${HB_LINE:-FAILED TO RUN})"
+say "RESULT: $PASS passed, $FAIL failed (plus peer-state: ${PS_LINE:-FAILED TO RUN}; heartbeat: ${HB_LINE:-FAILED TO RUN})"
 [ "$FAIL" -eq 0 ]

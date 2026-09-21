@@ -1,6 +1,6 @@
 {
   "name": "middle-management",
   "description": "Coordinator/worker roles, per-topic worktree discipline, and surgical git staging for many parallel Claude Code sessions on one machine.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": { "name": "Manu" }
 }

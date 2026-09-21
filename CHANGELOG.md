@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.6.0 — 2026-09-21
+
+**Nobody is woken to be told they are finished.** A cross-session peer message to a session whose
+prompt cache has gone cold makes that session re-read its entire conversation as fresh input.
+Measured on one machine on 2026-09-21: eight sessions idle 15.5-17.3 h, messaged once each,
+**2,369,094 fresh input tokens — 144,750 to 726,003 per session, 92-99 % of each one's own
+context**. Seven of those messages said nothing but "close this tab"; the eighth asked a
+coordinator that had wrapped the night before to hand over the seat. A second message to the same
+session within the hour cost nothing extra — the cache was still warm. So the rule of thumb is:
+**a message to a session idle for more than about an hour costs that session its whole context;
+under an hour it is cheap.**
+
+This reverses the part of 0.5.0 that told the coordinator to send each closable session its own
+peer message. The reason behind that rule stands — users cannot map peer names to editor tabs and
+have closed the wrong ones — but the answer is not a model turn in every tab. **A session's state
+is on disk.** New `scripts/peer-state.py` (stdlib only, read-only) reports for every session its
+name, sessionId, liveness, idle age, rough context size, whether it has **wrapped**, its topic and
+**its own last line** — at zero cost to the session it describes. `--wrapped` prints the list the
+coordinator now hands to its user instead of messaging anyone: each entry carries the last line
+that session wrote, which is the text visible at the bottom of that tab, so the tab is found by
+what is on screen in it.
+
+What the detection had to learn: grepping a transcript for the closing phrase does **not** work,
+because the coordinator instruction containing that phrase is injected into every transcript by
+the role hook — every working session matches. Only the **last assistant text block** counts, and
+only its last 200 characters (a live session was caught *quoting* a closing line out of a test).
+Idle time on its own proves nothing either: sessions idle mid-work look identical from outside,
+and `unknown` always means "may be messaged" — the reader never suppresses a message it is not
+sure about.
+
+`orchestrator.sh claim` gains the case that cost the 726,003 tokens. A holder whose **process is
+gone** was already taken over; a holder that is **still running but has wrapped** could only be
+appealed to, and the appeal is the wake. `claim` now takes the seat when the holder reads as
+wrapped on disk, **its session-log entry agrees**, and it has been idle past `MM_STALE_SEAT_MIN`
+(default 60 minutes — the regular prompt-cache TTL, not a politeness delay: below it the appeal is
+cheap, above it the appeal costs the holder everything; under usage overage the TTL drops to five
+minutes, so the threshold is an upper bound on "cheap", which is why it is configurable).
+
+**The tab list runs on one signal, the seat needs two**, and the reason is a case the review
+caught: a closing phrase cannot tell "I am finished" from "you are finished". A live coordinator
+writing "Lane W1 ist gelandet — den Tab kannst du schließen" about a *worker's* tab reads as
+wrapped by phrase alone — and the banner tells it to write exactly that after every wrap. Its
+session log still says `in-progress`, so a disagreement between the two signals now counts as
+**not** wrapped, everywhere, and the seat additionally requires the log entry to exist and say
+completed. The takeover prints the evidence it used, and **fails closed** on every uncertainty: no
+reader, a reader error, a timeout, unparseable output, `wrapped` anything but `yes`, a missing or
+disagreeing log entry, an unusable idle age, or a threshold that is not a sane number all keep the
+old refusal. Two coordinators are worse than one expensive wake. When it does refuse, it now says
+whether the holder is live and working or merely warm enough to appeal to cheaply, and `status`
+shows the holder's idle age and wrapped state.
+
+The wrap side moves the cost to zero rather than reducing it: a session releases the seat **at
+wrap time, while it is still warm**, and writes its own "this tab can close" line then, instead of
+being woken hours later to be told. An empty marker is a perfectly good state — the successor
+simply claims it.
+
 ## 0.5.0 — 2026-09-11
 
 Synced from the master setup (2026-09-11, round 4): **a lane runs itself and ends clean**. The
