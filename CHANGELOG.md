@@ -1,5 +1,108 @@
 # Changelog
 
+## 0.7.0 — 2026-09-22
+
+**The plugin now ships the wrap it has always depended on.** Since 0.6.1 the tab list decides
+whether a session is finished by reading a session-log line that no file in this repo produced:
+`peer-state.py` parsed the marker, the `middle-management` skill described it in prose, and the
+routine that actually writes it lived on the author's machine. `middle-management:wrap` closes
+that gap — nine steps from resolving your own name and sessionId to the three closing lines,
+with the log format quoted as the frozen contract it is, including the `## YYYY-MM-DD` day
+heading a marker needs in order to be checkable for staleness at all: the one part of the
+contract no previous text stated, and the easiest way to file a perfectly formed marker that is
+then discarded in silence. A personal `~/.claude/skills/wrap` still wins the bare `/wrap`.
+
+**Reading the tab list and writing it are one dependency, and it is now declared.** The wrap says
+which of its output the coordinator reads and why both halves must come from the same session: a
+closing phrase whose entry says anything but `Status: completed` reads as a coordinator writing
+about someone else's tab, and a display name is never the machine identity — that stays the
+sessionId. Everything the routine needs beyond this plugin — a knowledge-graph server, a ticket
+tracker, a formatter — is optional and names its fallback in the step itself, so a stranger
+without any of them gets a complete wrap and one line saying what was skipped.
+
+**The session log has a path a reader can look up, and a format it can be held to.**
+`~/logs/session-log.md` was hard-coded in one python file and mentioned in no README section, no
+skill, no setup step and no config key. It resolves in three steps now — `$MM_SESSION_LOG`, the
+new `sessionLog` config key (`~` expanded), then that default — implemented once in
+`scripts/config-check.sh session-log` for shell callers and once in `peer-state.py` for itself,
+with the same fallbacks on both sides down to what a non-string value does. README §"The session
+log" carries the shape the reader accepts — the day heading `## YYYY-MM-DD`, the entry header
+`### HH:MM – [name] – topic`, a `Status:` line, the marker `- Session: closed · <sessionId>` —
+as a worked example with who writes it, who reads it, and why a marker under no day heading is
+ignored: its age cannot be checked. Anything else parses as zero entries, which is
+indistinguishable from an absent file. The parser did not change; it was described. Setup now
+asks about the path and writes the key **only** when you name a different one, so a config
+without it behaves exactly as before, byte for byte.
+
+**A `sessionLog` must be an absolute path, and a relative one is rejected instead of silently
+meaning two different files.** The value was taken as any string and handed to `open()` on one
+side and `[ -f ]` on the other, so `"logs/session-log.md"` resolved against whatever directory
+the caller happened to run in — and the coordinator sits in the checkout root, a worker in its
+lane worktree, a wrap somewhere else again. Proven on one machine with one config: from one
+directory `/orchestrator claim` took the seat over, from another it refused with "this machine
+has no session log at all" — two coordinators at once is the exact failure the reader exists to
+prevent. A value that is not absolute (after `~` expansion) now makes the config invalid, which
+the role hook announces like every other shape error, and both resolvers answer with the
+built-in default instead of naming a file that depends on a cwd.
+
+**The stale-seat takeover could never fire on a machine that had no session log — and now it
+says so instead.** `claim` needs two agreeing signals, and the second one is the holder's session
+log entry. With no log anywhere `peer-state.py` reports `log_completed: null`, which the seat read
+as "no entry under its name" — the same message whether the holder had simply not wrapped yet or
+the machine had no such file at all. The two states are told apart now: an absent log still
+refuses the takeover (the two-signal rule is untouched), but the refusal names the resolved path,
+names `middle-management:wrap` as the thing that files the entry, and names `release <id>` for the
+case where that tab is simply gone. Proven in a fake HOME: no log → refusal, one entry in the
+documented shape → the seat moves.
+
+**And the banner stops asking for something a session cannot file.** `Your wrap entry in the
+session log ends with one line: - Session: closed · <id>` fired in every session on every message,
+for both roles, on machines that had no session log and no way to learn where one goes. It now
+prints where a log exists or a path was configured, and where neither is true a single line takes
+its place: `No session log yet — the middle-management:wrap skill creates it at <path> (or set
+sessionLog via /middle-management-setup).` Beside it the banner carries one half-sentence for the
+sessions that never open a skill — *When finished: name yourself, your topic, then the closing
+line (middle-management:wrap).* — outside both role branches, because the tab list reads
+coordinator and worker tabs with the same regex.
+
+**And a documentation structure to wrap into.** `templates/docs/` holds the skeletons a fresh
+project is missing on its first wrap: a `CLAUDE.md` with the pointer table and the session ritual,
+`docs/architecture.md`, `docs/lessons.md`, and README conventions for `docs/runbooks/` and
+`docs/handoffs/`. Step 1 of the wrap scaffolds from them when a project has no `docs/` at all,
+which turns "the log does not exist yet" from a dead end into a first entry. The session log is
+the one file that is not per project: its skeleton sits beside them as `templates/session-log.md`
+and belongs at the machine-wide path.
+
+**Fixes from an audit read on a machine that is not the author's.** *macOS*: `peer-state.py` falls
+back to `kill(pid, 0)` where there is no `/proc`, so the session table reads live sessions as live
+instead of silently showing nothing; the morning ritual's `ss -ltnp` and `free -m` carry CUSTOMIZE
+markers with their macOS equivalents, so the machine-cleanup step no longer dies mid-ritual.
+*The staging guard* matches in command position now, like the long-runner hook: `echo "git add
+-A"` or a commit message about it no longer trips the plugin's own guard, while `git add -A`,
+`cd x && git add .` and `git commit -a` still deny — and the awk that strips the command drops
+heredoc bodies without mistaking a `<<<` herestring for one, which used to swallow every following
+line of a command unseen. *GNU `date`*: `/wt <name> hold` and the lane reaper detect a non-GNU
+`date` once and refuse with the fix, instead of quietly computing ages from timestamps they could
+not parse (`/wt list` degrades its date columns to `-`); Requirements now says `python3` and GNU
+`date` are core, not heartbeat-only, because `peer-state.py` runs on every coordinator message.
+*And the README says what is true*: with no config file the roles **and** the staging guard are
+on — only the worktree part is silent — and a "First five minutes" smoke test (two tabs, claim,
+banner, status, release) says what a working install looks like. `plugin.json` carries `homepage`
+and `repository`, so an installed plugin points at its issue tracker, and the session-name
+examples in the `middle-management` skill are neutral placeholders instead of the author's own.
+
+**The pictures show what the plugin does today.** New `docs/journey.svg` draws a day from your
+side of the table: you appoint one session as today's coordinator, it reports once with what the
+day looks like and which sessions it needs, you open those tabs, and you act when it reports
+back — close these, open one more, decide this one thing. Between the second step and the fourth
+there is nothing for you to do; the one thing a coordinator cannot do is open a tab. `docs/flow.svg`
+was redrawn for 0.4–0.6 behaviour — the wrap and the session log, the tab list read off disk
+instead of messaged into existence, a worker running its own lane through sub-agents, and peer
+messaging marked as the thing you spend on live sessions only; `docs/overview.svg` got the
+clearance pass that goes with it.
+
+tests/run.sh 313 passed, tests/peer-state.sh 118 passed, tests/heartbeat.sh 110 passed, 0 failed.
+
 ## 0.6.2 — 2026-09-22
 
 **A closing session says which session it is.** Two editor tabs, both holding a session named

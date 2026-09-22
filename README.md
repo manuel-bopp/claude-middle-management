@@ -18,6 +18,20 @@ The picture says *middle manager*; the commands say `orchestrator` (`/orchestrat
 Same tab. How the plugin knows who is who (marker file, session registry, hand-over) is
 drawn in detail under [How the roles work](#how-the-roles-work).
 
+## Your day with it
+
+![A day with the coordinator, in two lanes: you open one session and appoint today's coordinator, it reports once what today looks like and which sessions it needs, you open those tabs, and your next move only comes when it reports back. The top lane is empty in the second column — between step two and step four there is nothing for you to do.](docs/journey.svg)
+
+*solid grey = you act · solid blue = the coordinator reports to you · dashed outline = nothing for you to do*
+
+1. You open one session and say: "You are today's coordinator. Run the morning ritual."
+2. It reports **once**: what today looks like, what it wants to run, and which sessions it needs you to open.
+3. You open those tabs — one lane per session. From there it runs by itself: workers build in their own worktrees, review themselves, and report to the coordinator, not to you.
+4. Your next move only comes when it reports back: which tabs to close, whether it needs another session, and the one or two things only you can decide.
+
+The empty cell in the top lane is the point: the coordinator cannot open a tab, and that is
+the only thing it needs you for.
+
 ## Install
 
 ```
@@ -75,7 +89,32 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 
 ## How the roles work
 
-![The session-role flow: one orchestrator claims a marker, the human starts workers manually, work routes through the middle, workers wrap themselves, the seat is handed over or released](docs/flow.svg)
+![The session-role flow: one orchestrator claims a marker, the human starts workers manually, work routes through the middle lane, a worker runs its lane through sub-agents and then wraps itself — the wrap writes a three-line closing block and a `- Session: closed · <sessionId>` line into the session log, which peer-state.py --wrapped reads back as the coordinator's tab list; four hooks announce each session's role, and the seat is handed over or released](docs/flow.svg)
+
+<details>
+<summary>Key to the numbered badges 1–15 in the picture</summary>
+
+*solid grey = an action · dashed blue = a file read or written · fine dashes = read-only ·
+thick = you, by hand · gold = what a finishing session writes down · orange = the seat
+changing hands · red = never.*
+
+1. You tell one session it is the coordinator.
+2. `claim` writes that session's id into the marker.
+3. Four hooks announce the role in every session, on every message — or say nothing when no seat is taken.
+4. You start every worker session yourself, by hand. One lane = one session; a new lane gets a fresh session with the model named.
+5. The coordinator plans with you and writes a handoff doc.
+6. It sends the worker the doc's *path*, never the content — and only to live sessions: a session idle for an hour re-pays its whole context when you wake it.
+7. The worker reads the doc off disk.
+8. Workers never message each other; anything Worker B needs arrives via the middle lane.
+9. The worker reports done or blocked, unprompted — its lane runs through its own sub-agents (plan, build, review, report) and it reads their reports, not their diffs.
+10. The coordinator is the sole writer of the board; workers read it.
+11. The lane ends with its unit stopped and its worktree gone, and the session wraps itself.
+12. The seat is handed over to a fresh tab, or `release`d — best at wrap time, while still warm. An empty marker is a good state.
+13. The wrap ends on three lines and nothing after them: the session's name, its topic, and one closing line in the chat's language ("You can close this tab." *or* "Tab schließen") — never both, never a near-variant.
+14. The same wrap appends `- Session: closed · <sessionId>` to its session-log entry — keyed by id, because session names get recycled.
+15. The coordinator runs `peer-state.py --wrapped` and gets the tab list, each row carrying that session's own last line so you find the tab by what is on screen in it. Nobody is woken. The same JSON is what lets `claim` take a stale seat off disk (wrapped **and** the log says completed **and** idle past `MM_STALE_SEAT_MIN`).
+
+</details>
 
 1. Your user tells one session "you are the coordinator"; that session runs
    `/orchestrator claim`, which records its session id in
@@ -89,6 +128,12 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
    `release <id>` (the id from `status`) — never without it.
 4. Terminal fallback without the marker: start a session named `orchestrator`
    (`claude -n orchestrator`) — a living session whose name starts with `orch` counts.
+5. Finishing is written down, not asked about: each session's wrap ends on a three-line
+   closing block and appends `- Session: closed · <sessionId>` to the session log,
+   and the coordinator reads both back with `scripts/peer-state.py --wrapped` to tell you
+   which tabs to close — nobody is messaged, and those same two signals are what let
+   `claim` take over a seat whose holder wrapped last night. The plugin ships that wrap as
+   the `middle-management:wrap` skill; a personal `~/.claude/skills/wrap` still wins on `/wrap`.
 
 Solo user with a single session? You do not need `claim` at all — install, configure
 the worktree part if you like it, and ignore the roles.
@@ -130,7 +175,9 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   form is rejected) lives inside this one command, so an alarm never dies of formatting. Keep
   tokens in a mode-600 env file the command sources — setup prints this file back to you.
 - `sessionLog` (optional, default `~/logs/session-log.md`): the machine's session log — see
-  [The session log](#the-session-log). `~` is expanded; `$MM_SESSION_LOG` overrides it.
+  [The session log](#the-session-log). Must be absolute (`~` is expanded); a relative path makes
+  the config invalid, because it would name a different file per caller. `$MM_SESSION_LOG`
+  overrides it.
 - `longRunningAsUnit` (optional, default `false`): arms the hook that rewrites hand-started
   dev servers and heavy builds into `wt run` / `wt cap`.
 - `unitMemoryMax` / `capMemoryMax` / `maxUnits` (optional, defaults `3G` / `5G` / `2`): the
@@ -160,7 +207,9 @@ order:
 
 1. `$MM_SESSION_LOG`
 2. `"sessionLog"` in `<config-dir>/middle-management.json` (`~` is expanded)
-3. `~/logs/session-log.md` — the default, when neither is set
+3. `~/logs/session-log.md` — the default, when neither is set, and when the value is not
+   absolute: a relative path would resolve against whatever directory the reader happens to run
+   in, so both resolvers refuse it (and the config counts as invalid)
 
 Rotated days may sit beside it as `<log dir>/archive/YYYY-MM-DD.md`; those are read too, for
 closed markers only.
@@ -274,10 +323,12 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
 - `jq`, `bash`, `python3`, GNU `date` (`date -d`), POSIX `ps`/`kill`. Linux tested; macOS
   expected-compatible but untested; Windows via WSL. `python3` is not heartbeat-only: it runs
   `peer-state.py`, which the coordinator is pointed at on every message and which
-  `/orchestrator claim` needs to judge a stale seat. GNU `date` is what `/wt list`,
-  `/wt <name> hold` and the lane reaper do their timestamp and age math with — they refuse
+  `/orchestrator claim` needs to judge a stale seat. GNU `date` is what `/wt <name> hold
+  <topic> <hours>` and the lane reaper do their timestamp and age math with — they refuse
   rather than answer wrongly where `date` is not GNU (macOS: `brew install coreutils`, then
-  `gdate` on `PATH` as `date`). `/wt run`, `/wt stop`, `/wt cap`, the long-runner hook and the
+  `gdate` on `PATH` as `date`); `/wt list` degrades its date columns to `-` instead, and
+  clearing a hold (`hold <topic> 0`) formats nothing and works either way. `/wt run`,
+  `/wt stop`, `/wt cap`, the long-runner hook and the
   reaper need a systemd user manager and refuse where there is none; `gh` is optional and only
   fills the `pr` column of `/wt list`.
 - For the heartbeat additionally: Linux with a systemd user manager

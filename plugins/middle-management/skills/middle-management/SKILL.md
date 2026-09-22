@@ -64,7 +64,9 @@ finish or block, YOU report to the coordinator; it should not have to poll you. 
 (when one is configured) is read-only for you, so parallel sessions cannot overwrite each
 other's status. When your lane is done, the report and closing your own books (your team's
 wrap convention: touched docs, log entry, local commit) are ONE motion — nobody has to
-remind you.
+remind you. This plugin ships one as the `middle-management:wrap` skill, so a team without
+its own has a routine that writes what the tab list reads; a personal `~/.claude/skills/wrap`
+takes precedence on the bare `/wrap`.
 
 **You are the sub-orchestrator of your own lane.** Plan review, build, diff review,
 screenshots and report writing run in sub-agents with fresh context, and every sub-agent

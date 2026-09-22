@@ -146,7 +146,9 @@ repositories; the user names them.
     read it back (README, "The session log"). Write `sessionLog` **only when the
     user names a different path**: an unchanged answer must leave the config
     byte-identical, because the default is what every machine without the key
-    already uses. `~` is allowed in the value.
+    already uses. `~` is allowed in the value; the path must be absolute — a
+    relative one is rejected as invalid config, since it names a different file
+    from every directory.
 
 11. **Long-runners as units** (Linux with systemd only). Ask whether hand-started
     dev servers and heavy builds should be rewritten into `wt run` / `wt cap`

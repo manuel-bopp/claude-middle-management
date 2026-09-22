@@ -58,7 +58,9 @@ re-register sessions under NEW names; map names via the session registry,
   `kind != "interactive"` (bg/daemon) are not sessions your user sits in front of; skip them.
 - Yesterday's block in your team's session log, if you keep one — CUSTOMIZE: this
   plugin ships the roles, your team ships the wrap convention; if you have none,
-  skip the audit or start keeping one.
+  skip the audit or start keeping one. The entries and `- Session: closed · <sessionId>`
+  markers this audit reads are what the shipped `middle-management:wrap` skill writes, so a
+  team without its own convention gets one by pointing every session at that skill.
 - Transcripts: `ls -t ~/.claude/projects/<project-slug>/*.jsonl` — anything modified
   yesterday needs an explanation.
 
