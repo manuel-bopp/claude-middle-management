@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.2 — 2026-09-22
+
+**A closing session says which session it is.** Two editor tabs, both holding a session named
+`hyperreel-68`, both ending on the identical prescribed sentence: their user could not tell which
+of the two was finished. The rule prescribed the closing *sentence* and never asked the session to
+say its own name — and the tab list built on that sentence (`peer-state.py --wrapped`, which
+prints each session's last line so the tab can be found by what is on screen in it) inherited the
+same blind spot. A wrap now ends on three lines and nothing after them: the session's own name,
+its topic in a handful of words, then the closing line. Names are derived and recycled, so this is
+a human-facing label only — the machine identity stays the sessionId in the session-log line, and
+the skill says so, so nobody harmonises the two.
+
+**And exactly one closing line, in the language of the chat.** The skill demanded the English
+sentence *verbatim*; a session whose chat ran in German read that as a requirement it could only
+satisfy twice and emitted both variants. It never had to: `CLOSING` in `peer-state.py` carries the
+German alternative (`Tab … schließen`) right beside the English one and has since 0.6.0 — the
+instruction was stricter than its own reader. It now points at both branches, so the next reader
+can check rather than trust. What still does not match is a near-variant of one's own invention;
+the example the old text used for that ("you can close it now") had meanwhile been added to the
+pattern, so it is replaced with two that genuinely miss.
+
+Documentation only — no script, hook or command changed. tests/run.sh 271 passed,
+tests/peer-state.sh 106 passed, tests/heartbeat.sh 110 passed, 0 failed.
+
 ## 0.6.1 — 2026-09-22
 
 **A finishing session says so, instead of leaving the next one to infer it.** 0.6.0 reads whether a

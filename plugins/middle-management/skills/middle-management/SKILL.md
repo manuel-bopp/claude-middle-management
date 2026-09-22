@@ -366,16 +366,36 @@ A coordinator whose turn dies — an exhausted retry budget, a crashed turn, a s
 sits silent with no error anyone sees, and every worker waits on it. Three layers cover it.
 
 **Release the seat at wrap time, while you are still warm** (`/orchestrator release`), and end
-that last warm message with exactly one sentence, on its own last line:
+that last warm message with three lines, and nothing after them:
 
+> I am session **\<your name\>**.
+> Our topic was: \<a handful of words\>.
 > **You can close this tab.**
 
-Write it verbatim. The reader matches a fixed list of closing phrases (`CLOSING` in
-`scripts/peer-state.py`) in the *end* of your last message, so a near-variant of your own
-invention — "you can close it now", "closing out here" — reads as a session still at work, and
-your user is told to wait for a tab that will never answer. Paired with your own session-log
-entry saying `Status: completed`, that one sentence is also what lets a later session take the
-seat off disk instead of waking you.
+Every session that finishes ends this way, not only the coordinator — the tab list reads a
+worker's last line by the same rule; a coordinator just releases the seat first.
+
+**The last line is what the reader matches; the two above it are what make it usable.** A user
+with two tabs open whose sessions carry the same name — which happens, names are derived and
+recycled — finds the identical closing sentence at the bottom of both and cannot tell which one is
+done. Naming yourself costs about seventy characters and settles it. It also fixes the tab list:
+`peer-state.py --wrapped` prints each session's own last line precisely so your user can find the
+tab by what is on screen in it, and a last line that names its session makes that list
+self-identifying. `/orchestrator status` prints your name and your sessionId; the **name is for
+your user's eyes only** — the machine identity stays the sessionId, in the session-log line below.
+
+**Exactly one closing line, in the language of the chat — never both.** The reader knows German
+and English as equals (the `CLOSING` branches in `scripts/peer-state.py`: `Tab … schließen` is its
+own alternative, right beside `close this tab`), so a session whose chat runs in German writes
+`Diesen Tab kannst du schließen.` and stops there. Writing the German line and then the English one
+"to be safe" is not safer — it is one line of noise for your user, and the wrap that produced it
+read the old "write it verbatim [in English]" as a demand it could only satisfy twice. What the
+reader does *not* know is a near-variant of your own invention — "closing out here", "I'm done
+here": that reads as a session still at work, and your user is told to wait for a tab that will
+never answer. Keep the block last for the same reason nothing may follow it: the match runs in the
+last 200 characters of your message. Paired with your own session-log entry saying
+`Status: completed`, that closing line is also what lets a later session take the seat off disk
+instead of waking you.
 
 **And declare it in that session-log entry**, one line in the entry body:
 
