@@ -104,6 +104,9 @@ rmdir "$H/.claude/state/allow-main-checkout-edits"
 
 say "== roles: claim/release/status =="
 H="$(new_home)"; PEER="$(add_peer "$H")"
+# The banner asks for the closed-marker line only where a session log exists or a path was chosen
+# for one (its own section below) — so this home gets one, like the machine the regime came from.
+mkdir -p "$H/logs"; : > "$H/logs/session-log.md"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
 assert_rc "claim succeeds" 0 "$RC"
 OUT="$(role "$H" "sess-alpha")"
@@ -187,6 +190,62 @@ assert_rc "claim over a dead holder succeeds" 0 "$RC"
 assert_has "claim says the marker was taken over" "taken over" "$OUT"
 kill "$PEER" 2>/dev/null
 
+say "== the session log: path resolution (config-check.sh session-log) =="
+# One rule, three steps, and scripts/peer-state.py implements the same one in python. The exit
+# code is the second fact the hook needs: was this path CHOSEN, or is it just the default?
+CC="$P/scripts/config-check.sh"
+H="$(new_home)"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" bash "$CC" session-log)"; RC=$?
+assert_has "no env, no key -> the documented default" "$H/logs/session-log.md" "$OUT"
+assert_rc "a defaulted path says so" 1 "$RC"
+printf '{"sessionLog":"~/notes/log.md"}' > "$H/.claude/middle-management.json"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" bash "$CC" session-log)"; RC=$?
+assert_has "the config key wins over the default, with ~ expanded" "$H/notes/log.md" "$OUT"
+assert_rc "a chosen path says so" 0 "$RC"
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$CC" validate; RC=$?
+assert_rc "a string sessionLog passes the shape filter" 0 "$RC"
+printf '{"sessionLog":5}' > "$H/.claude/middle-management.json"
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$CC" validate; RC=$?
+assert_rc "a sessionLog that is not a string is invalid config" 1 "$RC"
+# ...and it must not become a PATH either: peer-state.py takes the default for a non-string, and
+# a refusal naming a file the reader never read is worse than no detail at all.
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" bash "$CC" session-log)"; RC=$?
+assert_has "a non-string sessionLog resolves to the default, like the python side" "$H/logs/session-log.md" "$OUT"
+assert_rc "...and reports itself as defaulted" 1 "$RC"
+printf '{"sessionLog":"%s/from-config.md"}' "$H" > "$H/.claude/middle-management.json"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="$H/from-env.md" bash "$CC" session-log)"; RC=$?
+assert_has "MM_SESSION_LOG wins over the config key" "$H/from-env.md" "$OUT"
+assert_rc "an env-chosen path says so too" 0 "$RC"
+rm -f "$H/.claude/middle-management.json"
+
+say "== the banner asks for the closed-marker line only where it can be filed =="
+# It fires in EVERY session on EVERY message, for both roles. With no log and no path for one it
+# named a file the user did not have and no way to get it — permanent, unactionable noise.
+H="$(new_home)"; PEER="$(add_peer "$H")"
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim >/dev/null 2>&1
+OUT="$(role "$H" "sess-alpha")"
+assert_has "no log, no key -> one hint line instead" "No session log yet" "$OUT"
+assert_has "the hint names the path it would be created at" "$H/logs/session-log.md" "$OUT"
+assert_has "the hint names what creates it" "middle-management:wrap" "$OUT"
+assert_has "the hint names the config key for another path" "sessionLog" "$OUT"
+assert_lacks "no log, no key -> no unfileable closed-marker line" "Session: closed" "$OUT"
+mkdir -p "$H/logs"; : > "$H/logs/session-log.md"
+OUT="$(role "$H" "sess-alpha")"
+assert_has "a log at the default path -> the closed-marker line is back" "- Session: closed · sess-alpha" "$OUT"
+assert_has "...followed by how a wrap ends" "name yourself, your topic" "$OUT"
+assert_lacks "...and no hint line" "No session log yet" "$OUT"
+OUT="$(role "$H" "sess-beta")"
+assert_has "the worker gets the same instruction, keyed by its own id" "- Session: closed · sess-beta" "$OUT"
+assert_has "the worker is pointed at the same skill" "(middle-management:wrap)" "$OUT"
+rm -f "$H/logs/session-log.md"
+printf '{"sessionLog":"%s/elsewhere/log.md"}' "$H" > "$H/.claude/middle-management.json"
+OUT="$(role "$H" "sess-alpha")"
+assert_has "a configured path that does not exist yet still gets the instruction" "- Session: closed · sess-alpha" "$OUT"
+assert_lacks "a chosen path is never reported as missing" "No session log yet" "$OUT"
+assert_lacks "sessionLog does not make the config invalid" "is invalid" "$OUT"
+rm -f "$H/.claude/middle-management.json"
+kill "$PEER" 2>/dev/null
+
 say "== stale seat: claim over a holder that WRAPPED but left its tab open =="
 # Everything the route needs is on disk — a registry entry (add_peer), a transcript, and that
 # transcript's mtime as the idle age. The holder is never messaged, so no peer is started here.
@@ -248,6 +307,32 @@ holder_wrote "$STILL_WORKING" 95 completed
 OUT="$(claim_alpha)"; RC=$?
 assert_rc "the same line and idle age with the log completed -> the seat IS taken" 0 "$RC"
 assert_has "the takeover says both signals agreed" "closing line AND session log agree" "$OUT"
+
+# "No entry under its name" and "no session log on this machine at all" read identically inside
+# the reader — log_completed is null for both — and are different problems: the first waits for
+# that session's next wrap, the second cannot be solved by the holder at all. A stranger with no
+# log was told to look for an entry in a file that does not exist, and the takeover the README
+# describes could never fire on their machine. The pair below is that fix, both halves.
+holder_wrote 'Lane W1 gelandet — you can close this tab.' 90 completed
+rm -f "$H/logs/session-log.md"
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "no session log file at all -> the seat is still NOT taken" 1 "$RC"
+assert_has "the refusal says the log itself is missing" "no session log at all" "$OUT"
+assert_lacks "...and does not blame a missing entry under its name" "no session log entry under its name" "$OUT"
+assert_has "the refusal names the resolved path" "$H/logs/session-log.md" "$OUT"
+assert_has "the refusal names what writes the entry" "middle-management:wrap" "$OUT"
+assert_has "the refusal names release <id> for a session that is gone" "release sess-beta" "$OUT"
+[ "$(held)" = "sess-beta" ] && ok "no log -> the seat stays put" || bad "no log -> the seat stays put"
+# ...and the same holder, same transcript, after ONE wrap in the documented shape: day heading,
+# entry header, Status, closed marker. (The marker line is inert in this fixture — CLOSED_MARK
+# wants a hex sessionId and these fakes are "sess-beta" — so what decides here is the pair the
+# seat actually needs: the holder's closing line and its entry reading completed.)
+printf '## %s\n\n### %s – [beta / Opus 5, KOORDINATOR] – Lane W1\n- Status: completed\n- Session: closed · sess-beta — wrapped, the tab can be closed\n' \
+  "$(date -d '90 minutes ago' +%F)" "$(date -d '90 minutes ago' +%H:%M)" > "$H/logs/session-log.md"
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "one wrap entry in the documented format -> the seat IS taken" 0 "$RC"
+assert_has "the takeover names the two signals it read" "closing line AND session log agree" "$OUT"
+[ "$(held)" = "sess-alpha" ] && ok "after the wrap the seat moves" || bad "after the wrap the seat moves"
 
 holder_wrote 'Fertig — you can close this tab.' 5
 # Same wrapped, 5-minutes-idle holder: a threshold that silently evaluated to 0 would take it.

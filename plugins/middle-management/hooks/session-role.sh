@@ -158,6 +158,16 @@ else
   printf '<topic>), the /wt list line proving it in your wrap. Need the slot longer? /wt <name> hold.\n'
   [ -n "$BOARD" ] && printf 'The board %s is read-only for you — the coordinator is its only writer.\n' "$BOARD"
 fi
-# Both roles wrap, so this line lives outside the branches — one copy, no drift.
-printf 'Your wrap entry in the session log ends with one line: - Session: closed · %s\n' "${MY_ID:-<your sessionId>}"
+# Both roles wrap, so these lines live outside the branches — one copy, no drift.
+# The closed-marker instruction is only actionable where a log exists or the user picked a path
+# for one; on a machine with neither it was permanent noise (nothing says where to write it).
+# Exit 0 from `session-log` = the path was CHOSEN ($MM_SESSION_LOG or the sessionLog key), so a
+# configured-but-not-yet-created log still gets the instruction — that file is one wrap away.
+SESSION_LOG="$(bash "$CHECK" session-log)"; LOG_CHOSEN=$?
+if [ -f "$SESSION_LOG" ] || [ "$LOG_CHOSEN" -eq 0 ]; then
+  printf 'Your wrap entry in the session log ends with one line: - Session: closed · %s\n' "${MY_ID:-<your sessionId>}"
+  printf 'When finished: name yourself, your topic, then the closing line (middle-management:wrap).\n'
+else
+  printf 'No session log yet — the middle-management:wrap skill creates it at %s (or set sessionLog via /middle-management-setup).\n' "$SESSION_LOG"
+fi
 exit 0

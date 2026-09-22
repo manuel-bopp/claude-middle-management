@@ -35,7 +35,9 @@ user one glance at a tab. The seat is held to the stricter bar, because the sent
 it — "you can close this tab" — is one a *working* coordinator writes about somebody else's tab
 after every wrap, and two coordinators at once is the worst state this plugin can produce. One
 signal short, an unreadable state, a reader that cannot run: no takeover, and `claim` says which
-signal was missing. The route for a holder that is live and still working, or idle less than the
+signal was missing. The log it reads is `$MM_SESSION_LOG`, else the `sessionLog` config key, else
+`~/logs/session-log.md` — with none of them on disk the second signal cannot exist at all, and
+`claim` names that path and the wrap that creates it instead of blaming a missing entry. The route for a holder that is live and still working, or idle less than the
 threshold, stays what it was — ask it to release the seat; its cache is warm, so that costs it
 almost nothing. `claim` prints the evidence it read off disk; the holder is never messaged.
 

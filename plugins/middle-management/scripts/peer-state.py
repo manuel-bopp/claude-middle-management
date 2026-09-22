@@ -20,15 +20,36 @@ Usage: peer-state.py [--all|--wrapped] [--name N] [--session-id ID] [--cwd PATH]
   --cwd PATH        only sessions working in PATH **or anywhere below it** (prefix match on whole
                     path segments, so /x/Repo does not match /x/RepoOther)
   --json            every field, for shell consumers
-Env: CLAUDE_CONFIG_DIR (default ~/.claude), MM_SESSION_LOG (default ~/logs/session-log.md); the
-  rotated days next to it (<log dir>/archive/YYYY-MM-DD.md) are read too, for closed markers only.
+Env: CLAUDE_CONFIG_DIR (default ~/.claude). The session log is resolved in three steps -
+  $MM_SESSION_LOG, then "sessionLog" in <config dir>/middle-management.json (~ allowed), then
+  ~/logs/session-log.md; scripts/config-check.sh session-log answers the same for shell callers.
+  The rotated days next to it (<log dir>/archive/YYYY-MM-DD.md) are read too, for closed markers
+  only. Its format is the frozen contract documented in the README, section "The session log".
 """
 import argparse, datetime, glob, json, os, re, sys, time
 
 CFG = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 REG_DIR = os.path.join(CFG, "sessions")
 PROJ_DIR = os.path.join(CFG, "projects")
-SESSION_LOG = os.environ.get("MM_SESSION_LOG") or os.path.expanduser("~/logs/session-log.md")
+
+
+def resolve_session_log():
+    """$MM_SESSION_LOG > the config key sessionLog > ~/logs/session-log.md.
+
+    A machine with no config, a config that is not an object, a non-string value: all mean
+    "nobody chose one", and the default answers. Never raises - this runs at import, and a
+    reader that dies on a typo in someone's config takes the whole session table with it."""
+    p = os.environ.get("MM_SESSION_LOG")
+    if not p:
+        try:
+            p = json.load(open(os.path.join(CFG, "middle-management.json"),
+                               encoding="utf-8"))["sessionLog"]
+        except (OSError, ValueError, TypeError, KeyError):
+            p = None
+    return os.path.expanduser(p if isinstance(p, str) and p else "~/logs/session-log.md")
+
+
+SESSION_LOG = resolve_session_log()
 
 # The signal that holds (measured over 18 sessions with known state): a closing phrase in the
 # LAST ONE OR TWO assistant TEXT blocks. Edit this ONE pattern; matched lowercased.

@@ -69,6 +69,7 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 | Staging guard | PreToolUse hook | Blocks `git add -A` / `git add .` / `git commit -a` so parallel sessions stage only their own files. Off-switch for solo users: `surgicalStaging: false`. |
 | `/middle-management-setup` | command | Shows the current config, then interviews you and writes/edits it — with validation. |
 | `middle-management` skill | skill | Extended reference: appointment, handover between sessions, troubleshooting. |
+| `wrap` skill | skill | The end-of-session routine: touched docs, the session-log entry with its `Session: closed · <id>` marker, open items, the closing lines. The tab list and the stale-seat takeover both read what it writes — see [The session log](#the-session-log). Addressed `/middle-management:wrap`; a personal `~/.claude/skills/wrap` wins the bare `/wrap`. |
 | `morning-ritual` skill | skill | The coordinator’s day-opener: messages delta, repo state, wrap audit, board sweep, machine cleanup, day plan. Coordinator sessions only; carries CUSTOMIZE markers for your team’s stack. |
 | Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. Installed by setup step 5. |
 
@@ -102,6 +103,7 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   "board": "/abs/path/to/your-status-board.md",
   "surgicalStaging": true,
   "notifyCommand": ". ~/.claude/secrets/telegram.env && curl -sS -m 15 -X POST \"https://api.telegram.org/bot$BOT_TOKEN/sendMessage\" --data-urlencode \"chat_id=$CHAT_ID\" --data-urlencode \"text=$1\"",
+  "sessionLog": "/home/you/logs/session-log.md",
   "longRunningAsUnit": false,
   "unitMemoryMax": "3G",
   "capMemoryMax": "5G",
@@ -127,6 +129,8 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   text; any decoration (a bold first line, a parse mode, the fallback to plain when the rich
   form is rejected) lives inside this one command, so an alarm never dies of formatting. Keep
   tokens in a mode-600 env file the command sources — setup prints this file back to you.
+- `sessionLog` (optional, default `~/logs/session-log.md`): the machine's session log — see
+  [The session log](#the-session-log). `~` is expanded; `$MM_SESSION_LOG` overrides it.
 - `longRunningAsUnit` (optional, default `false`): arms the hook that rewrites hand-started
   dev servers and heavy builds into `wt run` / `wt cap`.
 - `unitMemoryMax` / `capMemoryMax` / `maxUnits` (optional, defaults `3G` / `5G` / `2`): the
@@ -144,6 +148,75 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   stays completely silent. Working solo? `surgicalStaging: false` turns the guard off.
 - User-global on purpose: the coordinator seat is per machine, and protected checkouts
   are absolute paths independent of any one project. One board per machine for now.
+
+## The session log
+
+One markdown file per machine in which **every session writes what it did** when it finishes.
+It is not decoration: the coordinator's tab list and the stale-seat takeover are read out of it.
+
+**Where it is** — resolved in three steps, by `scripts/peer-state.py` and by
+`scripts/config-check.sh session-log` (the hook and `/orchestrator` use the latter), in this
+order:
+
+1. `$MM_SESSION_LOG`
+2. `"sessionLog"` in `<config-dir>/middle-management.json` (`~` is expanded)
+3. `~/logs/session-log.md` — the default, when neither is set
+
+Rotated days may sit beside it as `<log dir>/archive/YYYY-MM-DD.md`; those are read too, for
+closed markers only.
+
+**Who writes it** — every session, at the end of its own work: the shipped `middle-management:wrap`
+skill, or your own wrap routine as long as it produces the shape below. Nothing writes this file
+behind your back.
+
+**Who reads it** — `scripts/peer-state.py`, for two things: the coordinator's tab list
+(`peer-state.py --wrapped`, which sessions are finished and can be closed instead of messaged),
+and `/orchestrator claim` over a seat whose holder wrapped last night — that takeover needs the
+holder's own closing line **and** its log entry reading `completed`, so with no log there is no
+takeover, and `claim` says so and names this path.
+
+**The format is frozen** — the reader matches it literally. En dash `–` between the parts of the
+entry header, middle dot `·` in the closed line:
+
+```markdown
+## 2026-01-15
+
+### 09:12 – [session-name] – Topic in a handful of words
+- What was done, one bullet per step
+- Files modified: `path/to/file`
+- Status: completed
+- Session: closed · 0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9
+```
+
+- `## YYYY-MM-DD` — a day heading, and nothing else on that line. Entries under no day heading
+  still count as entries, but a closed marker under none is ignored: its age cannot be checked.
+- `### HH:MM – [name] – topic` — the session's **display name** in brackets (anything after a
+  `/` inside them, `[name / Opus 5, WORKER]`, is free text), then the topic. `-`, `–` and `—` all
+  parse.
+- `- Status: completed` — `completed`, `in-progress`, `blocked`, whatever you use; only
+  `completed` corroborates a wrap. It describes **the entry's work**, not the session's life.
+- `- Session: closed · <sessionId>` — written only by the entry that ends the session, keyed by
+  the **sessionId** (`/orchestrator status` prints it), because display names are recycled and
+  change across a resume. Free text may follow the id. This line is what makes a session
+  *declared* finished rather than inferred.
+
+Entries are appended, so the last entry naming a session is the one that counts; an entry whose
+day heading is not the day of that session's last turn is disregarded rather than believed.
+Nothing here is validated on write — a wrong shape parses as "no entry", which is
+indistinguishable from an absent file, which is why it is written out here.
+
+Until a log exists the role hook says so on every message instead of asking for the closed line,
+and `plugins/middle-management/templates/session-log.md` is a skeleton to start one from — copy
+it to the resolved path. One file per machine, never one per repository.
+
+## Starting a project from the templates
+
+`plugins/middle-management/templates/docs/` holds the minimum a project needs before its first
+wrap: a `CLAUDE.md` and a `docs/` skeleton (`architecture.md`, `lessons.md`, README conventions
+for `runbooks/` and `handoffs/`). Copy what you want into a new repository and fill it in —
+nothing reads these as templates at runtime, they are a starting point, not a framework. The
+session log is the one file that is NOT per project: its skeleton sits beside them as
+`templates/session-log.md` and belongs at the machine-wide path above.
 
 ## Failure policy (loud, not silent)
 

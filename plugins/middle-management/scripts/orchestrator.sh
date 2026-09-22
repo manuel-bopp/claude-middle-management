@@ -15,6 +15,10 @@ SELF="$DIR/orchestrator.sh"
 CFG_DIR="$(bash "$DIR/config-check.sh" dir)"
 MARKER="$CFG_DIR/state/orchestrator"
 REG="$CFG_DIR/sessions"
+# The file peer-state.py reads the seat's second signal out of, resolved the same way it does
+# ($MM_SESSION_LOG > the sessionLog config key > ~/logs/session-log.md). Named, not assumed: a
+# refusal that cannot say WHICH file is missing leaves the user with nothing to create.
+SESSION_LOG="$(bash "$DIR/config-check.sh" session-log)"
 command -v jq >/dev/null 2>&1 || { echo "jq is not installed — aborted."; exit 1; }
 
 # Identify this session: walk up the process tree until a registry file matches.
@@ -150,16 +154,33 @@ case "${1:-status}" in
         echo "  last line: $LAST"
         echo "  (Read off disk by peer-state.py; the holder was NOT messaged. Threshold: ${STALE_MIN} min.)"
       else
+        # "No entry for this session" and "no log on this machine at all" read identically in the
+        # reader (log_completed stays null for both) and are completely different problems: the
+        # first waits for that session's wrap, the second means nothing will EVER produce the
+        # signal until a log exists. A stranger hitting the second one got told to look for an
+        # entry in a file that was not there. So the file itself is tested here, and the refusal
+        # names it, who writes it, and the way out when the holder is dead.
+        NOLOG=""
         case "$W" in
           yes) case "$LOGOK" in
                  true)  why="it wrapped, but has been idle only $IDLE (threshold ${STALE_MIN} min) — its prompt cache is probably still warm, so appealing there is cheap" ;;
                  false) why="its last line reads as wrapped, but its own session log entry is not completed (idle $IDLE) — that is one of the two signals the seat needs, so this stays an appeal" ;;
-                 *)     why="its last line reads as wrapped, but there is no session log entry under its name (idle $IDLE) — that is one of the two signals the seat needs, so this stays an appeal" ;;
+                 *)     if [ -f "$SESSION_LOG" ]; then
+                          why="its last line reads as wrapped, but there is no session log entry under its name (idle $IDLE) — that is one of the two signals the seat needs, so this stays an appeal"
+                        else
+                          NOLOG=1
+                          why="its last line reads as wrapped, but this machine has no session log at all (idle $IDLE) — the second signal the seat needs cannot exist yet, so this stays an appeal"
+                        fi ;;
                esac ;;
           no)  why="it is alive and still working (last activity $IDLE ago) — waking it costs it its whole context" ;;
           *)   why="peer-state.py gave no usable answer about it (${NOREAD:-no usable row in its output}), so it counts as working" ;;
         esac
         echo "BUSY: the coordinator is already \"$HNAME\" — $why."
+        if [ -n "$NOLOG" ]; then
+          echo "  the log it reads: $SESSION_LOG   (set another path with sessionLog via /middle-management-setup)"
+          echo "  who writes it   : the middle-management:wrap skill — ONE wrap in \"$HNAME\" files the entry, and this claim works"
+          echo "  session is dead : bash $SELF release $HID   (only when your user says that tab is gone)"
+        fi
         echo "Release it there (bash $SELF release) or ask your user, then claim again here."
         exit 1
       fi

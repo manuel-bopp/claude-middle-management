@@ -35,7 +35,10 @@ the marker that decides which one.
      reading completed — plus an idle age past `MM_STALE_SEAT_MIN` (default 60 minutes), and
      prints the evidence it read off disk. Relay that evidence. A `BUSY` here names the signal
      that was missing; one signal is never enough, because two coordinators at once is worse
-     than one expensive wake. Asking the holder to release the seat stays the route for one that
+     than one expensive wake. That second signal comes from the machine's session log
+     (`$MM_SESSION_LOG`, else the `sessionLog` config key, else `~/logs/session-log.md`), so on a
+     machine that has none yet the refusal says exactly that and names the path — one wrap
+     (`/middle-management:wrap`) in the holder's session creates it; README, "The session log". Asking the holder to release the seat stays the route for one that
      is live and still working, and for one idle less than that: its prompt cache is warm, so the
      message costs it almost nothing.
    - on `RACE LOST` or `FAILED`: the seat was NOT taken — another session claimed it a moment

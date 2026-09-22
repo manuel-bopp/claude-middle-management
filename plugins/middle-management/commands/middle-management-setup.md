@@ -18,6 +18,7 @@ Schema (nothing else is valid):
   "board": "/abs/path/to/board.md",
   "surgicalStaging": true,
   "notifyCommand": ". ~/.claude/secrets/telegram.env && curl -sS -m 15 -X POST \"https://api.telegram.org/bot$BOT_TOKEN/sendMessage\" --data-urlencode \"chat_id=$CHAT_ID\" --data-urlencode \"text=$1\"",
+  "sessionLog": "/abs/path/to/logs/session-log.md",
   "longRunningAsUnit": false,
   "unitMemoryMax": "3G",
   "capMemoryMax": "5G",
@@ -45,6 +46,8 @@ CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG="$(bash "$CHECK" file)"; echo "config file: $CFG"
 bash "$CHECK" validate; echo "validate status: $?"
 [ -f "$CFG" ] && cat "$CFG"
+LOG="$(bash "$CHECK" session-log)"; CHOSEN=$?
+echo "session log: $LOG ($([ "$CHOSEN" -eq 0 ] && echo configured || echo default), $([ -f "$LOG" ] && echo exists || echo "does not exist yet"))"
 ```
 
 Status codes: `0` valid · `1` invalid (unparseable or wrong shape) · `2` no
@@ -56,9 +59,10 @@ cannot validate anything without it.
 Otherwise report to the user, in plain text: the config path, the status, and —
 for each configured checkout — name, root, base, install command, and the
 effective worktree directory (the configured `worktreeDir`, or the sibling
-default `<parent of root>/.worktrees-<name>`). Also report the board path and
-whether `surgicalStaging` is on. With no config yet, say "none yet" instead of
-inventing defaults.
+default `<parent of root>/.worktrees-<name>`). Also report the board path,
+whether `surgicalStaging` is on, and the session-log line the block printed —
+its path, whether it was configured or defaulted, and whether the file is
+there. With no config yet, say "none yet" instead of inventing defaults.
 
 Done when the user has seen the current state. Never skip this: step 3 rewrites
 the whole file, so entries you did not read here would be lost.
@@ -136,7 +140,15 @@ repositories; the user names them.
    when the user wants neither the heartbeat alarm nor the coordinator's
    off-keyboard asks; step 5 then refuses to arm.
 
-10. **Long-runners as units** (Linux with systemd only). Ask whether hand-started
+10. **Session log.** Show the path step 1 resolved and ask only whether the user
+    wants a different one — Enter keeps it. Every session's wrap appends its
+    entry there, and the coordinator's tab list plus the stale-seat takeover
+    read it back (README, "The session log"). Write `sessionLog` **only when the
+    user names a different path**: an unchanged answer must leave the config
+    byte-identical, because the default is what every machine without the key
+    already uses. `~` is allowed in the value.
+
+11. **Long-runners as units** (Linux with systemd only). Ask whether hand-started
     dev servers and heavy builds should be rewritten into `wt run` / `wt cap`
     automatically. Yes means `longRunningAsUnit: true`; the default is `false` and
     the hook then exits without doing anything. Explain what it costs: a matched

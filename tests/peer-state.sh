@@ -345,6 +345,39 @@ OUT="$(ps_ --all --cwd /tmp/Repo)"
 assert_has "--cwd matches a directory BELOW it (the lane worktree)" "in-worktree" "$OUT"
 assert_lacks "--cwd stops at a path segment: /tmp/Repo is not /tmp/RepoOther" "next-door" "$OUT"
 assert_has "--cwd still matches the directory itself" "in-worktree" "$(ps_ --all --cwd /tmp/Repo/.worktrees-app/T3)"
+
+say "== which session log gets read: env, config key, default =="
+# Three steps, and scripts/config-check.sh answers the same for shell callers. Every ps_ above
+# pins MM_SESSION_LOG, so the config route needs its own calls with that variable empty.
+entry 80 999980 80000000-1 log-route 5
+text 'Lane R1 fertig, den Tab kannst du schließen.' > "$T/80000000-1.jsonl"
+log_at() { printf '### 13:00 – [log-route / Opus 5, Worker] – Lane R1\n- Status: completed\n' > "$1"; }
+log_at "$H/from-config.md"
+printf '{"sessionLog":"%s/from-config.md"}' "$H" > "$H/.claude/middle-management.json"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" python3 "$PS" --name log-route 2>&1)"
+assert_has "the sessionLog config key is read when the env var is empty" "session log says completed" "$OUT"
+printf '{"sessionLog":"~/from-tilde.md"}' > "$H/.claude/middle-management.json"
+log_at "$H/from-tilde.md"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" python3 "$PS" --name log-route 2>&1)"
+assert_has "a ~ in the config key is expanded" "session log says completed" "$OUT"
+: > "$H/empty.md"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="$H/empty.md" python3 "$PS" --name log-route 2>&1)"
+assert_lacks "MM_SESSION_LOG wins over the config key" "session log says" "$OUT"
+mkdir -p "$H/logs"; log_at "$H/logs/session-log.md"      # the built-in default, ~/logs/session-log.md
+rm -f "$H/.claude/middle-management.json"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" python3 "$PS" --name log-route 2>&1)"
+assert_has "no env, no config -> ~/logs/session-log.md" "session log says completed" "$OUT"
+printf '{"sessionLog":5}' > "$H/.claude/middle-management.json"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" python3 "$PS" --name log-route 2>&1)"; RC=$?
+assert_rc "a sessionLog that is not a string -> exit 0, no traceback" 0 "$RC"
+assert_has "...and the built-in default answers instead" "session log says completed" "$OUT"
+assert_lacks "no traceback from a broken config" "Traceback" "$OUT"
+printf 'not json at all' > "$H/.claude/middle-management.json"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" python3 "$PS" --name log-route 2>&1)"; RC=$?
+assert_rc "an unparseable config -> exit 0" 0 "$RC"
+assert_has "...and the built-in default answers there too" "session log says completed" "$OUT"
+rm -f "$H/.claude/middle-management.json" "$H/logs/session-log.md"
+
 # The keys orchestrator.sh and the tab list read. Renaming one silently breaks a sibling script.
 CONTRACT="$(ps_ --all --json | python3 -c '
 import json, sys
