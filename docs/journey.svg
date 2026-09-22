@@ -1,0 +1,93 @@
+<!-- middle-management: a day with it (the owner's journey picture).
+     Created: 2026-09-22 13:20 · claude-opus-5 · sub-agent
+     Last updated: 2026-09-22 13:20 · claude-opus-5
+     Hand-authored SVG: edit coordinates directly. Dark card baked in so it reads on light and dark GitHub themes.
+     The message is the empty cell: column 2 of the YOU lane is deliberately a hole. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="560" viewBox="0 0 1120 560" role="img"
+     font-family="Helvetica Neue, Helvetica, Arial, sans-serif" style="max-width:100%;height:auto;display:block"
+     aria-label="Two swimlanes across four columns of one day. Top lane YOU: you open a session and appoint today's coordinator; the second column is empty — nothing to do, one message to read; then you open the sessions it asked for; then you act when it reports back. Bottom lane YOUR SESSIONS: the coordinator claims the seat and runs the morning ritual, reports once, the workers run their own lanes, and a finished lane wraps itself so the coordinator can hand you the tab list. Between step two and step four there is nothing for you to do.">
+  <rect x="0" y="0" width="1120" height="560" rx="16" fill="#14181d"/>
+  <defs>
+    <marker id="j-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#c9d2d9"/></marker>
+    <marker id="j-arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#7fb8d9"/></marker>
+  </defs>
+
+  <!-- title + legend (header row, above every lane) -->
+  <text x="28" y="32" font-size="11.5" fill="#8b949c" font-family="monospace" letter-spacing="2">A DAY WITH THE COORDINATOR</text>
+  <text x="1092" y="32" font-size="10.5" fill="#8b949c" text-anchor="end">solid grey = you act · solid blue = it reports to you · dashed outline = nothing for you to do</text>
+
+  <!-- ===== lane 1: YOU ===== -->
+  <rect x="28" y="52" width="1064" height="188" rx="10" fill="rgba(255,255,255,.025)" stroke="#4a5158"/>
+  <text x="44" y="74" font-size="11" fill="#aab3ba" font-family="monospace" letter-spacing="2">YOU</text>
+
+  <!-- C1 -->
+  <rect x="68" y="96" width="222" height="120" rx="8" fill="rgba(255,255,255,.04)" stroke="#c9d2d9"/>
+  <circle cx="179" cy="130" r="10" fill="#0d8ecf"/><text x="179" y="134" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">1</text>
+  <text x="179" y="160" font-size="11.5" fill="#e6ebef" text-anchor="middle">You open one session and say:</text>
+  <text x="179" y="175" font-size="11.5" fill="#e6ebef" text-anchor="middle">“You are today’s coordinator.</text>
+  <text x="179" y="190" font-size="11.5" fill="#e6ebef" text-anchor="middle">Run the morning ritual.”</text>
+
+  <!-- column 2: deliberately empty -->
+  <rect x="322" y="128" width="222" height="68" rx="8" fill="none" stroke="#3a4046" stroke-dasharray="4 5"/>
+  <text x="433" y="158.5" font-size="11.5" fill="#6b7379" text-anchor="middle" font-style="italic">nothing to do —</text>
+  <text x="433" y="173.5" font-size="11.5" fill="#6b7379" text-anchor="middle" font-style="italic">one message to read</text>
+
+  <!-- C3 -->
+  <rect x="576" y="96" width="222" height="120" rx="8" fill="rgba(255,255,255,.04)" stroke="#c9d2d9"/>
+  <circle cx="687" cy="130" r="10" fill="#0d8ecf"/><text x="687" y="134" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">3</text>
+  <text x="687" y="160" font-size="11.5" fill="#e6ebef" text-anchor="middle">You open the sessions it</text>
+  <text x="687" y="175" font-size="11.5" fill="#e6ebef" text-anchor="middle">asked for — one tab each.</text>
+  <text x="687" y="190" font-size="11.5" fill="#e6ebef" text-anchor="middle">From here it runs itself.</text>
+
+  <!-- C4 -->
+  <rect x="830" y="96" width="222" height="120" rx="8" fill="rgba(255,255,255,.04)" stroke="#c9d2d9"/>
+  <circle cx="941" cy="130" r="10" fill="#0d8ecf"/><text x="941" y="134" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">4</text>
+  <text x="941" y="160" font-size="11.5" fill="#e6ebef" text-anchor="middle">You act when it reports back:</text>
+  <text x="941" y="175" font-size="11.5" fill="#e6ebef" text-anchor="middle">close these tabs · open one</text>
+  <text x="941" y="190" font-size="11.5" fill="#e6ebef" text-anchor="middle">more · decide this one thing.</text>
+
+  <!-- ===== lane 2: YOUR SESSIONS ===== -->
+  <rect x="28" y="276" width="1064" height="200" rx="10" fill="rgba(13,142,207,.05)" stroke="#3e7ea0"/>
+  <text x="44" y="298" font-size="11" fill="#8fd0ef" font-family="monospace" letter-spacing="2">YOUR SESSIONS</text>
+
+  <!-- M1 -->
+  <rect x="68" y="312" width="222" height="124" rx="8" fill="rgba(13,142,207,.12)" stroke="#8fd0ef"/>
+  <text x="179" y="355.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">claims the seat and runs the</text>
+  <text x="179" y="370.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">morning ritual: messages,</text>
+  <text x="179" y="385.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">repo state, yesterday’s wraps,</text>
+  <text x="179" y="400.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">the board</text>
+
+  <!-- M2 -->
+  <rect x="322" y="312" width="222" height="124" rx="8" fill="rgba(13,142,207,.12)" stroke="#8fd0ef"/>
+  <circle cx="433" cy="341" r="10" fill="#0d8ecf"/><text x="433" y="345" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">2</text>
+  <text x="433" y="370.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">reports ONCE: what today</text>
+  <text x="433" y="385.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">looks like, what it wants</text>
+  <text x="433" y="400.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">to run, and which sessions</text>
+  <text x="433" y="415.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">it needs you to open</text>
+
+  <!-- M3 -->
+  <rect x="576" y="312" width="222" height="124" rx="8" fill="rgba(13,142,207,.12)" stroke="#8fd0ef"/>
+  <text x="687" y="355.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">workers run their own lanes</text>
+  <text x="687" y="370.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">in their own worktrees,</text>
+  <text x="687" y="385.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">review themselves, and report</text>
+  <text x="687" y="400.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">to the coordinator, not you</text>
+
+  <!-- M4 -->
+  <rect x="830" y="312" width="222" height="124" rx="8" fill="rgba(13,142,207,.12)" stroke="#8fd0ef"/>
+  <text x="941" y="355.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">a finished lane wraps itself</text>
+  <text x="941" y="370.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">and says so; the coordinator</text>
+  <text x="941" y="385.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">reads who is done off disk</text>
+  <text x="941" y="400.5" font-size="11.5" fill="#e6ebef" text-anchor="middle">and hands you the tab list</text>
+
+  <!-- ===== edges: four, all in the 36px inter-lane channel, one per side = centre slot ===== -->
+  <line x1="179" y1="216" x2="179" y2="308" stroke="#c9d2d9" stroke-width="1.4" marker-end="url(#j-ar)"/>
+  <line x1="433" y1="312" x2="433" y2="200" stroke="#7fb8d9" stroke-width="1.4" marker-end="url(#j-arb)"/>
+  <line x1="687" y1="216" x2="687" y2="308" stroke="#c9d2d9" stroke-width="1.4" marker-end="url(#j-ar)"/>
+  <line x1="941" y1="312" x2="941" y2="220" stroke="#7fb8d9" stroke-width="1.4" marker-end="url(#j-arb)"/>
+
+  <!-- ===== the punchline ===== -->
+  <text x="560" y="516" font-size="13" fill="#e6ebef" text-anchor="middle">Between ② and ④ there is nothing for you to do.</text>
+  <text x="560" y="536" font-size="11.5" fill="#8b949c" text-anchor="middle">The coordinator cannot open a tab. That is the one thing it needs you for.</text>
+</svg>

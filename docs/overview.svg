@@ -1,11 +1,11 @@
 <!-- middle-management: the overview picture (end-user version).
      Created: 2026-09-02 19:36 · claude-fable-5-1 · direct
-     Last updated: 2026-09-02 19:54 · claude-fable-5-1 (text-clearance rule: label and badge moved off the lines)
+     Last updated: 2026-09-22 14:05 · claude-opus-5 (ambient band: 2-head clearance for the badge and the second text line)
      Hand-authored SVG: edit coordinates directly. Dark card baked in so it reads on light and dark GitHub themes.
      Wording: the picture says "middle manager"; the commands say "orchestrator" (same tab). -->
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="602" viewBox="0 0 900 602" role="img" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="618" viewBox="0 0 900 618" role="img" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
      aria-label="Org chart: the boss on top, one middle-manager tab in the middle listing its duties, three worker tabs below; light arrows down for task sheets, blue arrows up for reports, a dashed grey one-way line from the boss to a worker for stepping in directly; a red X between workers; a band at the bottom for the plugin's role reminder.">
-  <rect x="0" y="0" width="900" height="602" rx="16" fill="#14181d"/>
+  <rect x="0" y="0" width="900" height="618" rx="16" fill="#14181d"/>
   <defs>
     <marker id="c-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10z" fill="#c9d2d9"/></marker>
@@ -102,8 +102,8 @@
   <text x="695" y="38" font-size="12" fill="#8b949c" text-anchor="middle" font-style="italic">whenever you like</text>
 
   <!-- ⑥ ambient band -->
-  <rect x="30" y="542" width="840" height="44" rx="8" fill="rgba(13,142,207,.05)" stroke="#3e7ea0" stroke-dasharray="3 4"/>
-  <circle cx="58" cy="564" r="10" fill="#0d8ecf"/><text x="58" y="568" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">6</text>
-  <text x="80" y="560" font-size="10.5" fill="#8fd0ef" font-family="monospace" letter-spacing="1.5">⟳ ON EVERY MESSAGE, IN EVERY TAB</text>
-  <text x="80" y="577" font-size="12" fill="#c9d2d9">the plugin tells the tab its role: middle manager or worker. No manager picked? Nothing changes.</text>
+  <rect x="30" y="536" width="840" height="66" rx="8" fill="rgba(13,142,207,.05)" stroke="#3e7ea0" stroke-dasharray="3 4"/>
+  <circle cx="58" cy="571" r="10" fill="#0d8ecf"/><text x="58" y="575" font-size="11" fill="#04161f" text-anchor="middle" font-family="monospace" font-weight="bold">6</text>
+  <text x="80" y="562" font-size="10.5" fill="#8fd0ef" font-family="monospace" letter-spacing="1.5">⟳ ON EVERY MESSAGE, IN EVERY TAB</text>
+  <text x="80" y="582" font-size="12" fill="#c9d2d9">the plugin tells the tab its role: middle manager or worker. No manager picked? Nothing changes.</text>
 </svg>

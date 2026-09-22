@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 910" role="img" style="max-width:100%;height:auto;display:block"
-       aria-label="Swimlane flowchart: the human appoints one orchestrator session, which claims a marker file; the human starts worker sessions manually; the orchestrator distributes handoff docs by path; inside a worker the result loops through a review subagent until clean, then the worker reports back and wraps itself; a hook announces each session's role on every message; the seat can be handed over or released.">
-    <rect x="0" y="0" width="1180" height="910" rx="16" fill="#14181d"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 1100" role="img" style="max-width:100%;height:auto;display:block"
+       aria-label="Swimlane flowchart: the human appoints one orchestrator session, which claims a marker file; the human starts worker sessions manually; the orchestrator distributes handoff docs by path; inside a worker the result loops through a review subagent until clean, then the worker reports back and wraps itself; the wrap writes a three-line closing block and a session-log line, which peer-state.py reads to hand the coordinator a tab list; hooks announce each session's role on every message; the seat can be handed over or released.">
+    <rect x="0" y="0" width="1180" height="1100" rx="16" fill="#14181d"/>
     <defs>
       <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M0 0L10 5L0 10z" fill="#c9d2d9"/></marker>
@@ -11,7 +11,7 @@
     </defs>
 
     <!-- outer machine frame -->
-    <rect x="8" y="8" width="1164" height="888" rx="14" fill="none" stroke="#3a4046" stroke-dasharray="7 5"/>
+    <rect x="8" y="8" width="1164" height="1084" rx="14" fill="none" stroke="#3a4046" stroke-dasharray="7 5"/>
     <text x="26" y="30" font-size="11.5" fill="#8b949c" font-family="monospace" letter-spacing="2">THE MACHINE — ONE USER, MANY PARALLEL SESSIONS</text>
 
     <!-- ===== HUMAN lane ===== -->
@@ -43,15 +43,14 @@
     <rect x="820" y="238" width="160" height="52" rx="8" fill="rgba(224,166,63,.10)" stroke="#8fd0ef"/>
     <text x="900" y="260" font-size="12.5" fill="#e6ebef" text-anchor="middle" font-family="monospace">release</text>
     <text x="900" y="277" font-size="11" fill="#aab3ba" text-anchor="middle">gives the seat back</text>
-    <rect x="1010" y="238" width="130" height="52" rx="26" fill="rgba(255,255,255,.03)" stroke="#6b7379"/>
-    <text x="1075" y="260" font-size="12" fill="#aab3ba" text-anchor="middle">regime OFF</text>
-    <text x="1075" y="276" font-size="10.5" fill="#8b949c" text-anchor="middle">hook goes silent</text>
-    <text x="60" y="376" font-size="11.5" fill="#8b949c" font-style="italic">small clear jobs run as sub-agents inside this session</text>
+    <rect x="1006" y="238" width="130" height="52" rx="26" fill="rgba(255,255,255,.03)" stroke="#6b7379"/>
+    <text x="1071" y="260" font-size="12" fill="#aab3ba" text-anchor="middle">regime OFF</text>
+    <text x="1071" y="276" font-size="10.5" fill="#8b949c" text-anchor="middle">hook goes silent</text>
 
     <!-- ===== WORKER lane ===== -->
     <rect x="28" y="430" width="1124" height="210" rx="10" fill="rgba(255,255,255,.025)" stroke="#4a5158"/>
-    <text x="44" y="452" font-size="11" fill="#aab3ba" font-family="monospace" letter-spacing="2">WORKER SESSIONS</text>
-    <text x="1136" y="452" font-size="10.5" fill="#8b949c" font-family="monospace" text-anchor="end">every other living session</text>
+    <text x="60" y="452" font-size="11" fill="#aab3ba" font-family="monospace" letter-spacing="2">WORKERS</text>
+    <text x="1066" y="452" font-size="10.5" fill="#8b949c" font-family="monospace" text-anchor="end">every other living session</text>
     <!-- Worker A -->
     <rect x="110" y="466" width="628" height="134" rx="8" fill="rgba(255,255,255,.03)" stroke="#9aa3aa"/>
     <text x="126" y="486" font-size="11" fill="#aab3ba" font-family="monospace">WORKER A</text>
@@ -59,8 +58,8 @@
     <text x="190" y="516" font-size="11.5" fill="#e6ebef" text-anchor="middle">reads the doc,</text>
     <text x="190" y="531" font-size="11.5" fill="#e6ebef" text-anchor="middle">does the work</text>
     <rect x="286" y="498" width="120" height="44" rx="7" fill="rgba(255,255,255,.04)" stroke="#c9d2d9"/>
-    <text x="346" y="516" font-size="11.5" fill="#e6ebef" text-anchor="middle">spawns a review</text>
-    <text x="346" y="531" font-size="11.5" fill="#e6ebef" text-anchor="middle">subagent</text>
+    <text x="346" y="516" font-size="11.5" fill="#e6ebef" text-anchor="middle">runs its lane</text>
+    <text x="346" y="531" font-size="11.5" fill="#e6ebef" text-anchor="middle">through sub-agents</text>
     <rect x="442" y="498" width="120" height="44" rx="7" fill="rgba(255,255,255,.04)" stroke="#c9d2d9"/>
     <text x="502" y="516" font-size="11.5" fill="#e6ebef" text-anchor="middle">reports done/blocked</text>
     <text x="502" y="531" font-size="10" fill="#aab3ba" text-anchor="middle">unprompted, no polling</text>
@@ -82,17 +81,18 @@
     <line x1="738" y1="530" x2="800" y2="530" stroke="#e05f5f" stroke-width="1.6"/>
     <line x1="762" y1="519" x2="776" y2="541" stroke="#e05f5f" stroke-width="2.2"/>
     <line x1="776" y1="519" x2="762" y2="541" stroke="#e05f5f" stroke-width="2.2"/>
-    <text x="769" y="560" font-size="11" fill="#e08585" text-anchor="middle">never directly</text>
-    <text x="590" y="626" font-size="11.5" fill="#8b949c" text-anchor="middle">workers never message each other — everything routes through the middle lane</text>
+    <text x="769" y="560" font-size="11" fill="#e08585" text-anchor="middle">never</text>
+    <text x="385" y="610" font-size="11.5" fill="#8b949c" text-anchor="middle">workers never message each other —</text>
+    <text x="385" y="626" font-size="11.5" fill="#8b949c" text-anchor="middle">everything routes through the middle lane</text>
 
     <!-- ===== hook band ===== -->
     <rect x="28" y="676" width="1124" height="64" rx="10" fill="rgba(13,142,207,.045)" stroke="#3e7ea0" stroke-dasharray="3 4"/>
-    <text x="590" y="702" font-size="12" fill="#8fd0ef" text-anchor="middle" font-family="monospace">⟳  ON EVERY USER MESSAGE, INSIDE EVERY SESSION</text>
-    <text x="590" y="722" font-size="12" fill="#c9d2d9" text-anchor="middle">the plugin’s hook reads marker + registry and prints that session’s role and rules — orchestrator, worker, or (no seat) nothing</text>
+    <text x="424" y="702" font-size="12" fill="#8fd0ef" text-anchor="middle" font-family="monospace">⟳  EVERY MESSAGE, EVERY SESSION</text>
+    <text x="424" y="722" font-size="11" fill="#c9d2d9" text-anchor="middle">four hooks announce each session’s role and rules</text>
 
     <!-- ===== stores ===== -->
-    <rect x="28" y="776" width="710" height="106" rx="10" fill="rgba(255,255,255,.02)" stroke="#4a5158"/>
-    <text x="44" y="798" font-size="11" fill="#aab3ba" font-family="monospace" letter-spacing="2">PLUGIN STATE</text>
+    <rect x="28" y="776" width="710" height="114" rx="10" fill="rgba(255,255,255,.02)" stroke="#4a5158"/>
+    <text x="60" y="798" font-size="11" fill="#aab3ba" font-family="monospace" letter-spacing="2">STATE ON DISK</text>
     <ellipse cx="126" cy="812" rx="58" ry="10" fill="rgba(224,166,63,.12)" stroke="#c9a25f"/>
     <rect x="68" y="812" width="116" height="34" fill="rgba(224,166,63,.12)" stroke="#c9a25f"/>
     <ellipse cx="126" cy="846" rx="58" ry="10" fill="rgba(224,166,63,.12)" stroke="#c9a25f"/>
@@ -104,22 +104,54 @@
     <rect x="505" y="810" width="150" height="48" rx="4" fill="rgba(255,255,255,.04)" stroke="#9aa3aa"/>
     <text x="580" y="830" font-size="11.5" fill="#e6ebef" text-anchor="middle">status board</text>
     <text x="580" y="846" font-size="10" fill="#8b949c" text-anchor="middle">orchestrator writes · workers read</text>
-    <rect x="768" y="776" width="384" height="106" rx="10" fill="none" stroke="#4a5158" stroke-dasharray="4 4" opacity=".85"/>
-    <text x="784" y="798" font-size="11" fill="#8b949c" font-family="monospace" letter-spacing="2">CLAUDE CODE ITSELF — NOT THE PLUGIN</text>
-    <ellipse cx="860" cy="812" rx="62" ry="10" fill="rgba(255,255,255,.03)" stroke="#6b7379"/>
-    <rect x="798" y="812" width="124" height="34" fill="rgba(255,255,255,.03)" stroke="#6b7379"/>
-    <ellipse cx="860" cy="846" rx="62" ry="10" fill="rgba(255,255,255,.03)" stroke="#6b7379"/>
-    <text x="860" y="836" font-size="11" fill="#aab3ba" text-anchor="middle" font-family="monospace">session registry</text>
-    <text x="860" y="871" font-size="10" fill="#8b949c" text-anchor="middle">who is alive right now</text>
-    <text x="1040" y="823" font-size="11.5" fill="#aab3ba" text-anchor="middle">peer messaging</text>
-    <text x="1040" y="839" font-size="10" fill="#8b949c" text-anchor="middle">carries steps 4·6·9</text>
+    <rect x="776" y="776" width="376" height="114" rx="10" fill="none" stroke="#4a5158" stroke-dasharray="4 4" opacity=".85"/>
+    <text x="792" y="798" font-size="11" fill="#8b949c" font-family="monospace" letter-spacing="2">CLAUDE CODE ITSELF — NOT THE PLUGIN</text>
+    <ellipse cx="868" cy="812" rx="62" ry="10" fill="rgba(255,255,255,.03)" stroke="#6b7379"/>
+    <rect x="806" y="812" width="124" height="34" fill="rgba(255,255,255,.03)" stroke="#6b7379"/>
+    <ellipse cx="868" cy="846" rx="62" ry="10" fill="rgba(255,255,255,.03)" stroke="#6b7379"/>
+    <text x="868" y="836" font-size="11" fill="#aab3ba" text-anchor="middle" font-family="monospace">session registry</text>
+    <text x="868" y="871" font-size="10" fill="#8b949c" text-anchor="middle">who is alive right now</text>
+    <text x="1041" y="815" font-size="11.5" fill="#aab3ba" text-anchor="middle">peer messaging</text>
+    <text x="1041" y="829" font-size="10" fill="#8b949c" text-anchor="middle">live sessions only —</text>
+    <text x="1041" y="843" font-size="10" fill="#8b949c" text-anchor="middle">a cold one re-pays its context</text>
+    <text x="1041" y="857" font-size="10" fill="#8b949c" text-anchor="middle">transcripts — the tab list reads them</text>
+
+    <!-- ===== WRAP strip: what a finishing session writes down ===== -->
+    <rect x="28" y="926" width="1124" height="150" rx="10" fill="rgba(201,162,95,.05)" stroke="#c9a25f" stroke-dasharray="6 5"/>
+    <text x="60" y="948" font-size="11" fill="#c9a25f" font-family="monospace" letter-spacing="2">THE WRAP</text>
+    <!-- A: the wrap itself -->
+    <rect x="68" y="966" width="196" height="86" rx="8" fill="rgba(255,255,255,.04)" stroke="#c9d2d9"/>
+    <text x="166" y="998" font-size="11" fill="#e6ebef" text-anchor="middle" font-family="monospace">middle-management:wrap</text>
+    <text x="166" y="1013" font-size="10.5" fill="#aab3ba" text-anchor="middle">your own /wrap wins</text>
+    <text x="166" y="1028" font-size="10.5" fill="#aab3ba" text-anchor="middle">docs · log · commit · lane down</text>
+    <!-- B: the closing block -->
+    <rect x="300" y="966" width="260" height="86" rx="8" fill="rgba(255,255,255,.04)" stroke="#c9d2d9"/>
+    <circle cx="326" cy="1009" r="10" fill="#22282d" stroke="#c9a25f"/><text x="326" y="1013" font-size="11" fill="#e0c07f" text-anchor="middle" font-family="monospace">13</text>
+    <text x="446" y="998" font-size="11.5" fill="#e6ebef" text-anchor="middle">the closing block</text>
+    <text x="446" y="1013" font-size="10.5" fill="#aab3ba" text-anchor="middle">its name · its topic ·</text>
+    <text x="446" y="1028" font-size="10.5" fill="#aab3ba" text-anchor="middle" font-family="monospace">“You can close this tab.”</text>
+    <!-- C: the session log -->
+    <rect x="596" y="966" width="270" height="86" rx="8" fill="rgba(255,255,255,.04)" stroke="#c9d2d9"/>
+    <circle cx="622" cy="1009" r="10" fill="#22282d" stroke="#c9a25f"/><text x="622" y="1013" font-size="11" fill="#e0c07f" text-anchor="middle" font-family="monospace">14</text>
+    <text x="747" y="998" font-size="11.5" fill="#e6ebef" text-anchor="middle">the session log</text>
+    <text x="747" y="1013" font-size="10" fill="#aab3ba" text-anchor="middle" font-family="monospace">- Session: closed · &lt;sessionId&gt;</text>
+    <text x="747" y="1028" font-size="10" fill="#8b949c" text-anchor="middle">keyed by id — names get recycled</text>
+    <!-- D: the tab list -->
+    <rect x="902" y="966" width="230" height="86" rx="8" fill="rgba(255,255,255,.04)" stroke="#c9d2d9"/>
+    <circle cx="928" cy="1009" r="10" fill="#22282d" stroke="#c9a25f"/><text x="928" y="1013" font-size="11" fill="#e0c07f" text-anchor="middle" font-family="monospace">15</text>
+    <text x="1033" y="998" font-size="10.5" fill="#e6ebef" text-anchor="middle" font-family="monospace">peer-state.py --wrapped</text>
+    <text x="1033" y="1013" font-size="10.5" fill="#aab3ba" text-anchor="middle">the coordinator reads the</text>
+    <text x="1033" y="1028" font-size="10.5" fill="#aab3ba" text-anchor="middle">tab list — nobody is woken</text>
+    <line x1="264" y1="1009" x2="296" y2="1009" stroke="#c9d2d9" marker-end="url(#ar)"/>
+    <line x1="560" y1="1009" x2="592" y2="1009" stroke="#c9d2d9" marker-end="url(#ar)"/>
+    <line x1="866" y1="1009" x2="898" y2="1009" stroke="#c9d2d9" marker-end="url(#ar)"/>
 
     <!-- ===== numbered edges (orthogonal, clearances >= 2x arrowhead) ===== -->
     <!-- 1 human -> claim (center to center) -->
     <line x1="160" y1="128" x2="160" y2="234" stroke="#c9d2d9" marker-end="url(#ar)"/>
     <circle cx="160" cy="170" r="10" fill="#22282d" stroke="#c9d2d9"/><text x="160" y="174" font-size="11" fill="#e6ebef" text-anchor="middle" font-family="monospace">1</text>
     <!-- 2 claim -> marker (left channel, 16px off every border) -->
-    <path d="M160 290 L160 330 L44 330 L44 829 L64 829" fill="none" stroke="#7fb8d9" stroke-dasharray="5 4" marker-end="url(#arb)"/>
+    <path d="M128 290 L128 330 L44 330 L44 829 L64 829" fill="none" stroke="#7fb8d9" stroke-dasharray="5 4" marker-end="url(#arb)"/>
     <circle cx="44" cy="412" r="10" fill="#22282d" stroke="#7fb8d9"/><text x="44" y="416" font-size="11" fill="#8fd0ef" text-anchor="middle" font-family="monospace">2</text>
     <text x="58" y="416" font-size="10.5" fill="#8b949c">writes its session id</text>
     <!-- 3 band -> lanes -->
@@ -127,38 +159,38 @@
     <line x1="1120" y1="676" x2="1120" y2="394" stroke="#7fb8d9" stroke-dasharray="5 4" marker-end="url(#arb)"/>
     <circle cx="1120" cy="560" r="10" fill="#22282d" stroke="#7fb8d9"/><text x="1120" y="564" font-size="11" fill="#8fd0ef" text-anchor="middle" font-family="monospace">3</text>
     <!-- 4 human -> workers (thick, manual) -->
-    <path d="M380 103 L300 103 L300 462" fill="none" stroke="#c9d2d9" stroke-width="2.5" marker-end="url(#ar)"/>
-    <path d="M560 128 L560 166 L930 166 L930 462" fill="none" stroke="#c9d2d9" stroke-width="2.5" marker-end="url(#ar)"/>
-    <circle cx="340" cy="103" r="10" fill="#22282d" stroke="#c9d2d9"/><text x="340" y="107" font-size="11" fill="#e6ebef" text-anchor="middle" font-family="monospace">4</text>
+    <path d="M460 128 L460 166 L288 166 L288 462" fill="none" stroke="#c9d2d9" stroke-width="2.5" marker-end="url(#ar)"/>
+    <path d="M540 128 L540 166 L800 166 L800 410 L930 410 L930 462" fill="none" stroke="#c9d2d9" stroke-width="2.5" marker-end="url(#ar)"/>
+    <circle cx="374" cy="166" r="10" fill="#22282d" stroke="#c9d2d9"/><text x="374" y="170" font-size="11" fill="#e6ebef" text-anchor="middle" font-family="monospace">4</text>
     <!-- 5 plan <-> human (straight: H4 quarter-left = plans top-center = x440) -->
     <line x1="440" y1="132" x2="440" y2="234" stroke="#c9d2d9" marker-end="url(#ar)" marker-start="url(#ar)"/>
     <circle cx="440" cy="180" r="10" fill="#22282d" stroke="#c9d2d9"/><text x="440" y="184" font-size="11" fill="#e6ebef" text-anchor="middle" font-family="monospace">5</text>
     <!-- dashed: orchestrator writes the handoff doc -->
-    <path d="M380 290 L380 414 L268 414 L268 806" fill="none" stroke="#7fb8d9" stroke-dasharray="5 4" marker-end="url(#arb)" opacity=".7"/>
+    <path d="M480 290 L480 414 L268 414 L268 806" fill="none" stroke="#7fb8d9" stroke-dasharray="5 4" marker-end="url(#arb)" opacity=".7"/>
     <!-- 6 orchestrator -> worker A: peer msg with PATH -->
-    <path d="M440 290 L440 406 L190 406 L190 462" fill="none" stroke="#c9d2d9" marker-end="url(#ar)"/>
+    <path d="M400 290 L400 406 L190 406 L190 462" fill="none" stroke="#c9d2d9" marker-end="url(#ar)"/>
     <circle cx="190" cy="436" r="10" fill="#22282d" stroke="#c9d2d9"/><text x="190" y="440" font-size="11" fill="#e6ebef" text-anchor="middle" font-family="monospace">6</text>
-    <text x="245" y="400" font-size="10.5" fill="#8b949c" text-anchor="middle">the doc’s PATH</text>
+    <text x="330" y="368" font-size="10.5" fill="#8b949c" text-anchor="middle">the doc’s PATH</text>
     <!-- 7 worker reads doc -->
     <path d="M190 600 L190 758 L231 758 L231 806" fill="none" stroke="#7fb8d9" stroke-dasharray="5 4" marker-end="url(#arb)" opacity=".7"/>
     <circle cx="190" cy="636" r="10" fill="#22282d" stroke="#7fb8d9"/><text x="190" y="640" font-size="11" fill="#8fd0ef" text-anchor="middle" font-family="monospace">7</text>
     <!-- 8 badge on forbidden edge -->
     <circle cx="769" cy="505" r="10" fill="#22282d" stroke="#e05f5f"/><text x="769" y="509" font-size="11" fill="#e08585" text-anchor="middle" font-family="monospace">8</text>
     <!-- 9 worker -> orchestrator (board card) -->
-    <path d="M502 466 L502 414 L645 414 L645 294" fill="none" stroke="#c9d2d9" marker-end="url(#ar)"/>
+    <path d="M502 466 L502 414 L720 414 L720 294" fill="none" stroke="#c9d2d9" marker-end="url(#ar)"/>
     <circle cx="502" cy="440" r="10" fill="#22282d" stroke="#c9d2d9"/><text x="502" y="444" font-size="11" fill="#e6ebef" text-anchor="middle" font-family="monospace">9</text>
     <!-- 10 board write + worker read -->
-    <path d="M690 290 L690 406 L580 406 L580 806" fill="none" stroke="#7fb8d9" stroke-dasharray="5 4" marker-end="url(#arb)" opacity=".7"/>
-    <circle cx="690" cy="368" r="10" fill="#22282d" stroke="#7fb8d9"/><text x="690" y="372" font-size="11" fill="#8fd0ef" text-anchor="middle" font-family="monospace">10</text>
+    <path d="M660 290 L660 406 L580 406 L580 806" fill="none" stroke="#7fb8d9" stroke-dasharray="5 4" marker-end="url(#arb)" opacity=".7"/>
+    <circle cx="660" cy="362" r="10" fill="#22282d" stroke="#7fb8d9"/><text x="660" y="366" font-size="11" fill="#8fd0ef" text-anchor="middle" font-family="monospace">10</text>
     <path d="M930 600 L930 758 L618 758 L618 806" fill="none" stroke="#7fb8d9" stroke-dasharray="2 5" marker-end="url(#arb)" opacity=".5"/>
-    <text x="700" y="750" font-size="10" fill="#8b949c">read-only</text>
-    <!-- 11 badge above wrap card -->
-    <circle cx="658" cy="487" r="10" fill="#22282d" stroke="#c9d2d9"/><text x="658" y="491" font-size="11" fill="#e6ebef" text-anchor="middle" font-family="monospace">11</text>
+    <!-- 11 the wrap leaves the worker and writes the strip below -->
+    <path d="M658 542 L658 658 L757 658 L757 908 L166 908 L166 962" fill="none" stroke="#c9a25f" stroke-width="1.4" marker-end="url(#arw)"/>
+    <circle cx="658" cy="620" r="10" fill="#22282d" stroke="#c9a25f"/><text x="658" y="624" font-size="11" fill="#e0c07f" text-anchor="middle" font-family="monospace">11</text>
     <!-- 12 handover -->
     <line x1="900" y1="128" x2="900" y2="234" stroke="#c9d2d9" marker-end="url(#ar)"/>
     <circle cx="900" cy="170" r="10" fill="#22282d" stroke="#c9d2d9"/><text x="900" y="174" font-size="11" fill="#e6ebef" text-anchor="middle" font-family="monospace">12</text>
-    <line x1="980" y1="264" x2="1006" y2="264" stroke="#6b7379" marker-end="url(#ar)"/>
+    <line x1="980" y1="264" x2="1002" y2="264" stroke="#6b7379" marker-end="url(#ar)"/>
     <text x="994" y="306" font-size="9.5" fill="#8b949c" text-anchor="middle">no successor</text>
-    <path d="M860 290 L860 336 L208 336 L208 294" fill="none" stroke="#e0a63f" stroke-width="1.8" marker-end="url(#arw)"/>
-    <text x="790" y="354" font-size="11" fill="#e0a63f" text-anchor="middle">or: the successor claims — cycle restarts at ②</text>
+    <path d="M860 290 L860 336 L192 336 L192 294" fill="none" stroke="#e0a63f" stroke-width="1.8" marker-end="url(#arw)"/>
+    <text x="880" y="360" font-size="11" fill="#e0a63f" text-anchor="middle">or: the successor claims — cycle restarts at ②</text>
   </svg>
