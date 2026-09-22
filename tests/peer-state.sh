@@ -250,6 +250,75 @@ assert_has "...its own completed entry is the one that counts" "session log says
 assert_lacks "...and no alias is claimed" "filed under" "$OUT"
 : > "$H/log.md"
 
+say "== the wrap's own \"Session: closed\" marker: declared, not inferred =="
+# The authoritative record the wrap files: "- Session: closed · <sessionId>" inside its entry.
+# It is keyed by sessionId, so the entry below is deliberately filed under a name this session
+# never carried AND says in-progress - the marker has to beat both, and no closing phrase exists.
+TODAY="$(date +%F)"; YDAY="$(date -d yesterday +%F)"; NOWHM="$(date +%H:%M)"
+entry 70 999970 7a000000-1 mk-plain 5
+text 'Der Render läuft, ich melde mich mit den Zahlen.' > "$T/7a000000-1.jsonl"
+printf '## %s\n### %s – [a-name-it-never-had / Opus 5, Worker] – Lane W1\n- Status: in-progress\n- Session: closed · 7a000000-1 — Tab kann zu\n' "$TODAY" "$NOWHM" > "$H/log.md"
+OUT="$(ps_ --name mk-plain)"
+assert_has "a marker wraps the session with no closing phrase anywhere" "wrapped : yes" "$OUT"
+assert_has "...naming the marker and its own timestamp" "closed at $NOWHM on $TODAY" "$OUT"
+assert_has "...and it outranks a Status: in-progress filed under another name" "authoritative" "$OUT"
+assert_has "...the JSON carries it, so a consumer sees DECLARED, not inferred" '"id": "7a000000-1"' "$(ps_ --session-id 7a000000-1 --json)"
+# A prefix is what a human pastes; >=8 characters, resolved against the ids actually present.
+entry 71 999971 7b000000-1 mk-prefix 5
+text 'Noch am Rechnen.' > "$T/7b000000-1.jsonl"
+printf '## %s\n### %s – [mk-prefix / Opus 5, Worker] – Lane W2\n- Session: closed · 7b000000\n' "$TODAY" "$NOWHM" > "$H/log.md"
+assert_has "an 8-character prefix resolves to the session" "wrapped : yes" "$(ps_ --name mk-prefix)"
+# ...but only while it names exactly one. Picking one of two would close the wrong tab silently.
+entry 72 999972 abcd0000-1 mk-ambig1 5
+entry 73 999973 abcd0000-2 mk-ambig2 5
+text 'Läuft noch.'      > "$T/abcd0000-1.jsonl"
+text 'Läuft auch noch.' > "$T/abcd0000-2.jsonl"
+printf '## %s\n### %s – [mk-ambig1 / Opus 5, Worker] – Lane W3\n- Session: closed · abcd0000\n' "$TODAY" "$NOWHM" > "$H/log.md"
+OUT="$(ps_ --name mk-ambig1)"
+assert_has "a prefix matching two sessionIds resolves to NEITHER" "wrapped : no" "$OUT"
+assert_has "...and says why, rather than dropping it silently" "matches 2 sessionIds" "$OUT"
+assert_has "...the second one is not closed by it either" "wrapped : no" "$(ps_ --name mk-ambig2)"
+assert_has "...and nothing is declared in the JSON" '"closed_marker": null' "$(ps_ --session-id abcd0000-1 --json)"
+# THE staleness guard: a session RESUMED after its wrap leaves the marker behind while it works
+# again. A stale yes here would let `orchestrator.sh claim` take a live coordinator's seat.
+entry 74 999974 7c000000-1 mk-stale 5
+text 'Ich bin wieder dran, die Lane läuft weiter.' > "$T/7c000000-1.jsonl"
+printf '## %s\n### %s – [mk-stale / Fable, KOORDINATOR] – Wrap\n- Session: closed · 7c000000-1\n' \
+  "$(date -d '-2 hours' +%F)" "$(date -d '-2 hours' +%H:%M)" > "$H/log.md"
+OUT="$(ps_ --name mk-stale)"
+assert_has "a marker the transcript kept working 2h past is ignored" "wrapped : no" "$OUT"
+assert_has "...named as stale, with the gap, so the fallback is auditable" "later - STALE" "$OUT"
+assert_has "...and nothing is declared in the JSON" '"closed_marker": null' "$(ps_ --session-id 7c000000-1 --json)"
+printf '## %s\n### %s – [mk-stale / Fable, KOORDINATOR] – Wrap\n- Session: closed · 7c000000-1\n' \
+  "$(date -d '-10 minutes' +%F)" "$(date -d '-10 minutes' +%H:%M)" > "$H/log.md"
+assert_has "...10 minutes later is just the wrap finishing: NOT stale" "wrapped : yes" "$(ps_ --name mk-stale)"
+# Yesterday's entries rotate out of the live log into archive/<day>.md. A session that wrapped
+# yesterday and never came back must still read as closed today.
+mkdir -p "$H/archive"
+entry 75 999975 7d000000-1 mk-archived 5
+text 'Bericht steht.' > "$T/7d000000-1.jsonl"
+touch -d "$YDAY 15:10" "$T/7d000000-1.jsonl"
+printf '## %s\n### 15:05 – [gone-name / Fable, Worker] – Lane W9\n- Status: in-progress\n- Session: closed · 7d000000-1 — Tab zu\n' "$YDAY" > "$H/archive/$YDAY.md"
+: > "$H/log.md"
+OUT="$(ps_ --name mk-archived)"
+assert_has "a marker in a rotated archive file counts too" "wrapped : yes" "$OUT"
+assert_has "...with that archived entry's own date, not today's" "closed at 15:05 on $YDAY" "$OUT"
+# The conclusion this marker exists BECAUSE of, pinned: `Status:` describes the ENTRY'S WORK, not
+# the session's life - hyperreel-5c filed completed and kept working for hours. Same session as
+# the first fixture, same transcript, marker removed: back to "no".
+printf '## %s\n### %s – [mk-plain / Opus 5, Worker] – Lane W1\n- Status: completed\n' "$TODAY" "$NOWHM" > "$H/log.md"
+OUT="$(ps_ --name mk-plain)"
+assert_has "Status: completed ALONE is still not a positive" "wrapped : no" "$OUT"
+assert_has "...it stays mere corroboration, and the disagreement stays visible" "DISAGREE" "$OUT"
+assert_has "...and declares nothing" '"closed_marker": null' "$(ps_ --session-id 7a000000-1 --json)"
+# A marker under no headings at all cannot be dated, so the staleness guard cannot run on it -
+# it is refused rather than trusted, and says so instead of vanishing.
+printf -- '- Session: closed · 7a000000-1\n' > "$H/log.md"
+OUT="$(ps_ --name mk-plain)"
+assert_has "an undatable marker does not count" "wrapped : no" "$OUT"
+assert_has "...and is named as refused, with the reason" "cannot be checked for staleness" "$OUT"
+: > "$H/log.md"                                # the archive fixture stays: later sections scan it
+
 say "== last vs topic, the two ages, --cwd prefix, the JSON contract =="
 entry 50 999950 50000000-1 reporter 5
 { text 'Lane B7 — Bildpipeline, ich fange an.'
@@ -280,7 +349,7 @@ assert_has "--cwd still matches the directory itself" "in-worktree" "$(ps_ --all
 CONTRACT="$(ps_ --all --json | python3 -c '
 import json, sys
 want = {"wrapped": str, "wrapped_evidence": str, "log_completed": bool, "idle_seconds": (int, float),
-        "ctx_tokens": (int, float), "last": str, "topic": str,
+        "ctx_tokens": (int, float), "last": str, "topic": str, "closed_marker": dict,
         "process_age_seconds": (int, float), "conversation_age_seconds": (int, float)}
 bad = []
 for r in json.load(sys.stdin):
