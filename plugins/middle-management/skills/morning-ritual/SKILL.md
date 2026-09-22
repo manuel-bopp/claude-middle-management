@@ -100,14 +100,16 @@ freed. Gather in one read-only pass, then act through ONE sub-agent with explici
   `git update-ref -d refs/heads/<branch>` after recording the tip SHA and checking that no
   worktree still has the branch checked out (`git branch -D` is deny-listed in careful setups,
   and `branch -d` refuses a squash-merged branch). `/wt <name> done` already does it this way.
-- **Dev servers outside a lane:** `ss -ltnp` over your dev-port range plus `pgrep -af` for your
-  dev-server commands — CUSTOMIZE both. A server whose lane is closed on the board is stale;
+- **Dev servers outside a lane:** `ss -ltnp` over your dev-port range (CUSTOMIZE — Linux only;
+  on macOS `lsof -iTCP -sTCP:LISTEN -n -P`) plus `pgrep -af` for your dev-server commands
+  (CUSTOMIZE — on macOS `pgrep -fl`). A server whose lane is closed on the board is stale;
   the shared ones (the main checkout's server, shared backends) always stay. Kill by verified
   PID lineage, never by pattern.
 - **Watchers:** long-running pollers your team runs (`pgrep -af <watcher>` — CUSTOMIZE)
   whose thread is answered or whose ask is moot (PR merged, decision taken) are killed by
   PID; the board names the live ones.
-- **Memory:** `free -m` before and after; both numbers go into the day plan.
+- **Memory:** `free -m` before and after — CUSTOMIZE, Linux only; on macOS `vm_stat` (pages, so
+  multiply by the page size) or `top -l 1 -s 0 | head -12`. Both numbers go into the day plan.
 
 Done when no listening port, worktree or watcher on the machine lacks a live owner on the
 board. Ownership below 75% certain → leave it, list it under "unclear" in the day plan.

@@ -139,8 +139,23 @@ def is_live(pid, procstart):
     """/proc/<pid>/stat field 22 (starttime) == the registry's procStart. The registry's own
     `status` is NOT liveness - entries from before a crash still claim "busy"."""
     try:
-        stat = open("/proc/%d/stat" % int(pid), encoding="utf-8", errors="replace").read()
-    except (OSError, TypeError, ValueError):
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if not os.path.isdir("/proc"):
+        # ponytail: no /proc (macOS, BSD) - kill(pid, 0) answers "a process with this pid exists"
+        # and nothing else, so the PID-reuse guard procStart gives us is DROPPED on those
+        # systems. Without this branch every session there read as dead and the table was empty.
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            pass                                    # PermissionError: it exists, just not ours
+        return True
+    try:
+        stat = open("/proc/%d/stat" % pid, encoding="utf-8", errors="replace").read()
+    except OSError:
         return False
     fields = stat.rsplit(") ", 1)[-1].split()   # comm may contain ") " - split at the LAST one
     return len(fields) > 19 and (not procstart or fields[19] == str(procstart))

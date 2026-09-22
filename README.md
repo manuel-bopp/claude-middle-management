@@ -42,6 +42,18 @@ rename migrates nothing — re-register it once:
 installed the heartbeat or the lane reaper — their units run a copy of the scripts, because the
 plugin's own cache path is versioned and goes stale with each update.
 
+### First five minutes
+
+1. Open two Claude Code tabs.
+2. First tab: `/orchestrator claim` — it answers `OK: this session (…) is the coordinator`.
+3. Second tab: send any message. It now starts with `Session role: WORKER` and the contract
+   that goes with it; the first tab's next message starts with `Session role: ORCHESTRATOR`.
+4. `/orchestrator status` in either tab names the holder and this session's own id.
+5. `/orchestrator release` in the first tab ends the regime — after it both tabs are silent again.
+
+No banner in step 3? The role hook is never silent about a problem (missing `jq`, no session
+registry) — if it says nothing at all, the hooks are not armed yet: restart the tab.
+
 ## What you get
 
 | Piece | Kind | What it does |
@@ -127,7 +139,9 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   work happens in worktrees under `worktreeDir`. `base` is the branch new worktree
   branches start from — setup always writes it explicitly, and `serve` is the dev-server
   command `/wt <name> run <topic>` starts when the caller passes none.
-- No config file = roles-only mode; the worktree part stays completely silent.
+- No config file = roles **plus the staging guard**: blanket staging is blocked out of the box,
+  because sessions share a checkout long before anyone configures one. The worktree part is what
+  stays completely silent. Working solo? `surgicalStaging: false` turns the guard off.
 - User-global on purpose: the coordinator seat is per machine, and protected checkouts
   are absolute paths independent of any one project. One board per machine for now.
 
@@ -184,12 +198,17 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
 
 - Claude Code recent enough to have the session registry (`<config-dir>/sessions/`)
   and cross-session peer messaging — the substrate the roles ride on.
-- `jq`, `bash`, POSIX `ps`/`kill`. Linux tested; macOS expected-compatible but
-  untested; Windows via WSL. `/wt run`, `/wt stop`, `/wt cap`, the long-runner hook and the
+- `jq`, `bash`, `python3`, GNU `date` (`date -d`), POSIX `ps`/`kill`. Linux tested; macOS
+  expected-compatible but untested; Windows via WSL. `python3` is not heartbeat-only: it runs
+  `peer-state.py`, which the coordinator is pointed at on every message and which
+  `/orchestrator claim` needs to judge a stale seat. GNU `date` is what `/wt list`,
+  `/wt <name> hold` and the lane reaper do their timestamp and age math with — they refuse
+  rather than answer wrongly where `date` is not GNU (macOS: `brew install coreutils`, then
+  `gdate` on `PATH` as `date`). `/wt run`, `/wt stop`, `/wt cap`, the long-runner hook and the
   reaper need a systemd user manager and refuse where there is none; `gh` is optional and only
   fills the `pr` column of `/wt list`.
-- For the heartbeat only: Linux with a systemd user manager (`loginctl enable-linger`),
-  `python3`, GNU `date`. macOS launchd is not supported.
+- For the heartbeat additionally: Linux with a systemd user manager
+  (`loginctl enable-linger`). macOS launchd is not supported.
 - For a private marketplace repo: working git credentials for the host on every
   installing machine (`/plugin marketplace add` clones over git).
 

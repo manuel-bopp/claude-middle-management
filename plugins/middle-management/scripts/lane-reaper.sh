@@ -53,6 +53,10 @@ CHECK="$HERE/config-check.sh"
 
 fail() { echo "lane-reaper: $*" >&2; exit 1; }
 usage() { sed -n '/^# Flags:/,/^# *MM_WT/p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
+# Every age below goes through `date -d`, which is GNU-only: on a BSD/macOS date each timestamp
+# would read 0 = "unknown" and the reaper would decide on wrong ages instead of refusing.
+date --version >/dev/null 2>&1 \
+  || fail "this needs GNU date ('date -d') for its age math — this machine's date is not GNU, so install coreutils (macOS: brew install coreutils) and put gdate on PATH as date"
 parse_now() {
   local v="$1" n
   case "$v" in

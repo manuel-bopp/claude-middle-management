@@ -410,8 +410,8 @@ message to a session that had in fact finished makes it re-pay its ENTIRE conver
 input.
 
 Keyed by **sessionId**, deliberately. Not by the session's display name: names are not stable —
-a resumed session comes back under a new derived one (`hyperreel-9b` → `hyperreel-0b`) — and they
-are recycled: `hyperreel-bc` was worn by two different sessions on one day, and following the
+a resumed session comes back under a new derived one (`sess-9b` → `sess-0b`) — and they
+are recycled: `sess-bc` was worn by two different sessions on one day, and following the
 rename chain misclassified four sessions. Not as a `Status:` value either: `Status:` describes the
 entry's WORK, not the session's life — a session filed `completed` for one task and then kept
 working for hours. Your own sessionId is in your registry entry under `~/.claude/sessions/`, and

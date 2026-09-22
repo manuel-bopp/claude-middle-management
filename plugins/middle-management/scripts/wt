@@ -53,7 +53,8 @@
 # command and worktree directory all come from the config; create or change it with
 # /middle-management-setup. worktreeDir defaults to the sibling directory
 # <parent of root>/.worktrees-<name>. Units, markers and the reaper need Linux with a systemd
-# user manager; everything else works anywhere.
+# user manager, and `list` and `hold` need GNU date (`date -d`) and refuse without it rather
+# than print a wrong timestamp; everything else works anywhere.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -83,6 +84,10 @@ MAXUNITS="$(jq -r '.maxUnits // 2' "$CFGFILE")"
 TIMEOUT="$(command -v timeout 2>/dev/null || true)"
 HAVE_SYSTEMD=no
 if command -v systemctl >/dev/null 2>&1 && systemctl --user --version >/dev/null 2>&1; then HAVE_SYSTEMD=yes; fi
+# `date -d` is GNU-only; BSD/macOS date would silently turn every timestamp into `-` instead of
+# a date, so the verbs that print one refuse rather than answer wrongly (--version: GNU only).
+HAVE_GNU_DATE=no
+if date --version >/dev/null 2>&1; then HAVE_GNU_DATE=yes; fi
 
 entry_of() { jq -c --arg n "$1" 'first((.protectedCheckouts // [])[] | select(.name == $n)) // empty' "$CFGFILE"; }
 names_of() { jq -r '[(.protectedCheckouts // [])[].name] | join(", ")' "$CFGFILE"; }
@@ -282,6 +287,7 @@ check_base() {
 }
 need_topic() { [ -n "${TOPIC:-}" ] || die "topic missing: wt $NAME $CMD <topic>"; }
 need_systemd() { [ "$HAVE_SYSTEMD" = yes ] || die "'wt $CMD' needs a systemd user manager (Linux) — it is not available here, so run the command yourself"; }
+need_gnu_date() { [ "$HAVE_GNU_DATE" = yes ] || die "'wt $CMD' needs GNU date ('date -d') to print its timestamps — this machine's date is not GNU, so install coreutils (macOS: brew install coreutils) and put gdate on PATH as date"; }
 
 case "$CMD" in
   new)
@@ -304,6 +310,7 @@ case "$CMD" in
     echo "when merged:    wt $NAME done '$TOPIC'"
     ;;
   list)
+    need_gnu_date
     list_header
     if [ -n "$NAME" ]; then list_one "$NAME"
     else
@@ -361,6 +368,7 @@ case "$CMD" in
   hold)
     [ -n "$NAME" ] || usage
     need_topic
+    need_gnu_date
     HOURS="${2:-}"
     [ -n "$HOURS" ] || die "usage: wt $NAME hold <topic> <hours>   (0 clears the hold)"
     case "$HOURS" in *[!0-9]*) die "hours must be a whole number (0 clears the hold)" ;; esac
