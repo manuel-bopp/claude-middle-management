@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.6.1 — 2026-09-22
+
+**A finishing session says so, instead of leaving the next one to infer it.** 0.6.0 reads whether a
+session has wrapped out of its transcript — a closing phrase in the last assistant text block. That
+works, but its recall rests on a phrase list, and a phrase list always has a tail: a session that
+ends with "Diese Session ist zu" rather than naming a tab was missed until the wording was added,
+and a miss is paid for in that session's whole context.
+
+The session log is already the table of every session, and the wrap routine already writes into it.
+So the wrap now appends one line to its entry:
+
+```
+- Session: closed · <sessionId> — <optional free text>
+```
+
+`peer-state.py` looks that up and reports the session as finished **authoritatively**, with no phrase
+matching at all. The transcript heuristic stays as the fallback for sessions that never get to wrap —
+a freeze, a crash, a closed tab — which is what it was built for.
+
+Two details are load-bearing, and both come from measurements rather than taste. The marker is keyed
+by **sessionId**, not by the session's display name: names are not stable across a resume
+(`hyperreel-9b` became `hyperreel-0b`) and they get recycled (`hyperreel-bc` was worn by two
+different sessions on one day; following the rename chain misclassified four sessions). And it is a
+**separate line**, not a `Status:` value: `Status:` describes the entry's work, not the session's
+life — a session filing `Status: completed` for one task and then working for hours is normal.
+
+A marker is **not** believed forever. A session can be resumed after it wrapped, and then the marker
+sits in the log while the session is alive again — believing it would let `claim` take the seat from
+a working coordinator, the very failure this line of work exists to prevent. So a marker whose
+session has a transcript turn more than `CLOSED_MARK_STALE_AFTER` (30 minutes) later is stale: it is
+ignored, the evidence says so, and the transcript decides instead.
+
+Rotated logs under the session log's `archive/` are read too, and `closed_marker` in the JSON is
+non-null only when the marker actually decided the verdict, so a caller can tell "declared finished"
+from "inferred finished" in one check.
+
+tests/peer-state.sh 86 -> 106 passed; tests/run.sh 270 passed (1 pre-existing failure,
+`lane reaper: the first run of a new day sends a digest anyway`, which fails identically on the
+untouched 0.5.0 tree — a date-dependent test, not from this work).
+
 ## 0.6.0 — 2026-09-21
 
 **Nobody is woken to be told they are finished.** A cross-session peer message to a session whose

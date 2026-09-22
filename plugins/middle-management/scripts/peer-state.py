@@ -20,7 +20,8 @@ Usage: peer-state.py [--all|--wrapped] [--name N] [--session-id ID] [--cwd PATH]
   --cwd PATH        only sessions working in PATH **or anywhere below it** (prefix match on whole
                     path segments, so /x/Repo does not match /x/RepoOther)
   --json            every field, for shell consumers
-Env: CLAUDE_CONFIG_DIR (default ~/.claude), MM_SESSION_LOG (default ~/logs/session-log.md).
+Env: CLAUDE_CONFIG_DIR (default ~/.claude), MM_SESSION_LOG (default ~/logs/session-log.md); the
+  rotated days next to it (<log dir>/archive/YYYY-MM-DD.md) are read too, for closed markers only.
 """
 import argparse, datetime, glob, json, os, re, sys, time
 
@@ -71,6 +72,30 @@ HEAD_LINES, HEAD_BYTES = 4000, 1_000_000  # only until the first assistant text,
 LOG_HEAD = re.compile(r"^###\s+\d{1,2}:\d{2}\s*[-–—]\s*\[([^\]]+)\]\s*[-–—]\s*(.*)")
 DAY_HEAD = re.compile(r"^##\s+(\d{4}-\d{2}-\d{2})\s*$")   # the log's day sections; other "## "
                                                           # headings (conventions, index) are not
+ENTRY_TIME = re.compile(r"^###\s+(\d{1,2}:\d{2})")        # the entry's own clock, name-agnostic
+
+# The DECLARED answer, as opposed to the inferred one above: the wrap routine appends
+#     - Session: closed · <sessionId> — <free text>
+# to its own session-log entry, and this reads it back. Keyed by sessionId and NOTHING else.
+# Measured, and the reason the log's other fields cannot carry this: display NAMES are not
+# identity (a resumed session gets a new derived one - hyperreel-9b -> -0b - and old ones get
+# recycled: hyperreel-bc was worn by two different sessions on 2026-09-21), and `Status:
+# completed` describes THE ENTRY'S WORK, not the session's life - hyperreel-5c filed completed
+# and kept working for hours. So: a separate marker, carrying the one identifier that cannot be
+# wrong. A prefix of >=8 characters is accepted (that is what humans paste), and is resolved
+# against the sessionIds actually on the machine - a prefix matching two of them names neither.
+# Tolerant about the bullet and the spacing, strict about the two tokens "Session:" and "closed".
+CLOSED_MARK = re.compile(r"^\s*[-*]\s*Session:\s*closed\b[\s·:,|–—-]*([0-9a-fA-F]{8}[0-9a-fA-F-]*)",
+                         re.I)
+ARCHIVE_GLOB = "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md"
+
+# How long a session may still be writing AFTER its own wrap entry before the marker stops
+# counting. The wrap files this line and then finishes within a few minutes, so a turn half an
+# hour later does not mean the wrap is still running - it means the session was RESUMED and is
+# working again, with its marker still sitting in the log. Without this, that stale "yes" would
+# let `orchestrator.sh claim` take the seat from an actively working coordinator, which is the
+# exact failure this whole reader exists to prevent. Fall back to the transcript and say so.
+CLOSED_MARK_STALE_AFTER = 30 * 60
 
 
 def updated_at(d):
@@ -257,6 +282,84 @@ def session_log():
     return out
 
 
+def marker_files():
+    """The rotated days first, the live log LAST, so the newest marker for an id wins.
+
+    The archive sits beside the log, so MM_SESSION_LOG moves both and a test never reads the real
+    one. Absent directory = no archive, silently. Cost measured on this machine: 146 files,
+    7.8 MB, ~30 ms - the whole --all run is 0.24 s, so the scan stays inside the noise."""
+    d = os.path.join(os.path.dirname(SESSION_LOG) or ".", "archive")
+    return sorted(glob.glob(os.path.join(d, ARCHIVE_GLOB))) + [SESSION_LOG]
+
+
+def closed_markers():
+    """Every "- Session: closed · <id>" line in the log and its archive, in file order.
+
+    [{"id": <full id or the >=8-char prefix as written>, "day": "YYYY-MM-DD", "time": "HH:MM"}].
+    day/time are the ENCLOSING entry's own stamp ("## 2026-09-21" + "### 15:05"), which is what
+    the staleness guard compares against; a marker sitting under neither is kept with None there
+    and refused at the use site, so it shows up in the evidence instead of vanishing. The archive
+    file name seeds the day, so a rotated file missing its heading still dates its markers."""
+    out = []
+    for path in marker_files():
+        f = re.match(r"(\d{4}-\d{2}-\d{2})\.md$", os.path.basename(path))
+        day, hhmm = (f.group(1) if f else None), None
+        try:
+            fh = open(path, encoding="utf-8", errors="replace")
+        except OSError:
+            continue                           # no log, or no archive: nothing to read, not fatal
+        with fh:
+            for line in fh:
+                if line.startswith("#"):       # headings only - keeps the scan to two cheap tests
+                    d = DAY_HEAD.match(line)
+                    if d:
+                        day = d.group(1)
+                    else:
+                        t = ENTRY_TIME.match(line)
+                        if t:
+                            hhmm = t.group(1)
+                    continue
+                if "Session:" not in line:     # substring first: the regex sees ~1 line in 10000
+                    continue
+                m = CLOSED_MARK.match(line)
+                if m:
+                    out.append({"id": m.group(1), "day": day, "time": hhmm})
+    return out
+
+
+def marker_epoch(m):
+    """The marker entry's own timestamp in seconds, or None when it has none."""
+    try:
+        return datetime.datetime.strptime("%s %s" % (m["day"], m["time"]),
+                                          "%Y-%m-%d %H:%M").timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def marker_for(sid, markers, known):
+    """(the newest marker naming THIS sessionId, notes about ones found and NOT used).
+
+    `known` is every sessionId this run can see. A written prefix that matches two of them names
+    neither, so it must not resolve - silently picking one would close the wrong tab. Same for a
+    marker with no entry timestamp: the staleness guard cannot run on it, so it does not count.
+    Both cases become a note, because "no marker" and "a marker I refused" are different facts."""
+    hit, notes = None, []
+    for m in markers:
+        if not sid.startswith(m["id"]):
+            continue
+        n = sum(1 for k in known if k.startswith(m["id"]))
+        if n > 1:
+            notes.append('a session-closed marker for "%s" was ignored: that prefix matches %d '
+                         "sessionIds on this machine, so it names none of them" % (m["id"], n))
+        elif not (m["day"] and m["time"]):
+            notes.append('a session-closed marker for "%s" was ignored: it sits under no "## day"'
+                         ' / "### HH:MM" heading, so it cannot be checked for staleness'
+                         % m["id"])
+        else:
+            hit = m
+    return hit, notes
+
+
 def log_entry_for(names, entries):
     """(this session's LAST session-log entry, every name it was filed under).
 
@@ -337,7 +440,7 @@ def apply_log(row, log):
     return status
 
 
-def read_session(sid, entry, logs, names=()):
+def read_session(sid, entry, logs, names=(), markers=(), known=()):
     """One row. Never raises: an unreadable transcript must not take the table down."""
     e = entry or {}
     started = e.get("startedAt")
@@ -357,6 +460,11 @@ def read_session(sid, entry, logs, names=()):
     log, row["names"] = log_entry_for([e.get("name")] + list(names or []), logs)
     status = apply_log(row, log)
     row["log_stale"] = None
+    # closed_marker is non-null ONLY when the marker actually decided the verdict, so a consumer
+    # tells "declared finished" from "inferred finished" with one check. A marker that was found
+    # and refused (stale, ambiguous, undated) is named in the evidence, not here.
+    row["closed_marker"] = None
+    turn = None
     if row["transcript"]:
         try:
             recs = tail_records(row["transcript"])
@@ -387,6 +495,24 @@ def read_session(sid, entry, logs, names=()):
                 row["conversation_age_seconds"] = int(time.time() - conv)
         except Exception as exc:               # noqa: BLE001 - one bad file, one degraded row
             row["evidence"] = ["transcript unreadable: %s" % exc]
+    # The DECLARED verdict, layered on top: it overrides the inferred one, in the "yes" direction
+    # only, and only while the transcript has not clearly gone on working past it. A session with
+    # no marker therefore behaves exactly as it did before this existed.
+    mark, notes = marker_for(sid, markers, known)
+    row["evidence"].extend(notes)
+    if mark:
+        at = "%s on %s" % (mark["time"], mark["day"])
+        when = marker_epoch(mark)
+        if turn and when and turn - when > CLOSED_MARK_STALE_AFTER:
+            row["evidence"].append(
+                "a session log marker closes this session at %s, but its transcript has a turn "
+                "%s later - STALE (resumed after its wrap, the marker is left over), ignored; "
+                "the verdict below is the transcript's" % (at, human(turn - when)))
+        else:
+            row["closed_marker"] = mark
+            row["wrapped"] = "yes"
+            row["evidence"].insert(0, "session log marks this session closed at %s (marker id "
+                                      "%s) - authoritative, filed by the wrap itself" % (at, mark["id"]))
     # Say that an entry was found and put aside. Dropping it silently would make the audit
     # trail claim there was no log entry at all, which is a different and much weaker fact.
     if row["log_stale"]:
@@ -472,7 +598,11 @@ def main():
             print("peer-state: %r matches %d sessions" % (a.session_id, len(set(hits))),
                   file=sys.stderr)
             return 1
-    rows = [read_session(s, reg.get(s), logs, regnames.get(s)) for s in ({sid} if sid else reg)]
+    # `known` is what an >=8-char marker prefix is resolved against: every sessionId in the
+    # registry, plus the one asked for (its entry may already be gone with the closed tab).
+    marks, known = closed_markers(), set(reg) | ({sid} if sid else set())
+    rows = [read_session(s, reg.get(s), logs, regnames.get(s), marks, known)
+            for s in ({sid} if sid else reg)]
     # An id with neither a registry entry nor a transcript is not a session, it is a typo.
     rows = [r for r in rows if r["registry"] or r["transcript"]]
 

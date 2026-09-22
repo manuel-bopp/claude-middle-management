@@ -121,6 +121,9 @@ assert_lacks "orchestrator banner: the tab list is not narrowed by --cwd" "--cwd
 assert_has "orchestrator banner: a wrapped session is never peer-messaged" "NEVER peer-message a session" "$OUT"
 assert_has "orchestrator banner: waiting items carry their link" "in the SAME" "$OUT"
 assert_has "orchestrator banner: housekeeping vs destruction" "housekeeping, not" "$OUT"
+# a coordinator wraps like anyone else, and its wake is the most expensive one there is
+assert_has "orchestrator banner: the wrap entry carries the closed marker too" \
+  "- Session: closed · sess-alpha" "$OUT"
 # no config file at all (roles-only install): the off-keyboard line must stay away, and the
 # hook must survive `set -u` with no config branch taken.
 assert_lacks "no config -> no off-keyboard line" "notifyCommand" "$OUT"
@@ -132,6 +135,10 @@ assert_has "worker banner: sub-agents return ten lines" "at most ten lines" "$OU
 assert_has "worker banner: report the context fill" "context fill" "$OUT"
 assert_has "worker banner: the lane ends with its resources released" "resources released" "$OUT"
 assert_has "worker banner: hold when the slot must stay" "/wt <name> hold" "$OUT"
+# the wrap declares the session finished by sessionId — the next coordinator looks that up
+# instead of inferring it from the transcript
+assert_has "worker banner: the wrap entry carries the closed marker, keyed by this sessionId" \
+  "- Session: closed · sess-beta" "$OUT"
 printf '{"board":"%s/board.md"}' "$H" > "$H/.claude/middle-management.json"
 OUT="$(role "$H" "sess-alpha")"
 assert_has "orchestrator banner: sole writer of the board" "sole writer of the board $H/board.md" "$OUT"

@@ -292,6 +292,13 @@ deliberately narrow to one tree — never as the reflex. Without arguments the s
 live sessions as a table; `--all`, `--json`, `--name <name>` and `--session-id <uuid>` narrow
 or widen it. Reading costs those sessions nothing.
 
+**A session that declared itself closed is reported as closed with no phrase matching at all** —
+the `Session: closed · <sessionId>` line its wrap left in the session log is that session's own
+word, and it is disregarded only when the transcript kept going more than 30 minutes past the
+entry, which means the session was resumed after wrapping. The phrase heuristic stays the
+fallback for everything that ended WITHOUT a wrap — a session killed by a freeze, a crash or a
+closed tab never files anything. Both paths run; neither replaces the other.
+
 **Never send a peer message to a session that reads as wrapped, and check the state on disk
 before messaging any session that has been idle a while.** A message to a session idle for
 more than about an hour costs that session its ENTIRE conversation again as fresh input
@@ -369,6 +376,26 @@ invention — "you can close it now", "closing out here" — reads as a session 
 your user is told to wait for a tab that will never answer. Paired with your own session-log
 entry saying `Status: completed`, that one sentence is also what lets a later session take the
 seat off disk instead of waking you.
+
+**And declare it in that session-log entry**, one line in the entry body:
+
+```
+- Session: closed · <sessionId> — <a few words, optional>
+```
+
+The session log is already the table of sessions and you are already writing the entry, so the
+line is free — and it turns the next coordinator's question from an inference into a lookup.
+Inference off a transcript has a recall tail, and a miss there is not a wasted grep: a peer
+message to a session that had in fact finished makes it re-pay its ENTIRE conversation as fresh
+input.
+
+Keyed by **sessionId**, deliberately. Not by the session's display name: names are not stable —
+a resumed session comes back under a new derived one (`hyperreel-9b` → `hyperreel-0b`) — and they
+are recycled: `hyperreel-bc` was worn by two different sessions on one day, and following the
+rename chain misclassified four sessions. Not as a `Status:` value either: `Status:` describes the
+entry's WORK, not the session's life — a session filed `completed` for one task and then kept
+working for hours. Your own sessionId is in your registry entry under `~/.claude/sessions/`, and
+`/orchestrator status` prints it.
 
 Do not leave it to be woken hours later and told. A released marker means "regime off", which
 every watcher understands; a closed tab with the marker still set looks exactly like a death.

@@ -158,4 +158,6 @@ else
   printf '<topic>), the /wt list line proving it in your wrap. Need the slot longer? /wt <name> hold.\n'
   [ -n "$BOARD" ] && printf 'The board %s is read-only for you — the coordinator is its only writer.\n' "$BOARD"
 fi
+# Both roles wrap, so this line lives outside the branches — one copy, no drift.
+printf 'Your wrap entry in the session log ends with one line: - Session: closed · %s\n' "${MY_ID:-<your sessionId>}"
 exit 0
