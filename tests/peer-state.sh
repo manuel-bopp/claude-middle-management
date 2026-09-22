@@ -376,6 +376,15 @@ printf 'not json at all' > "$H/.claude/middle-management.json"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" python3 "$PS" --name log-route 2>&1)"; RC=$?
 assert_rc "an unparseable config -> exit 0" 0 "$RC"
 assert_has "...and the built-in default answers there too" "session log says completed" "$OUT"
+# A RELATIVE value must never bind to this process's cwd — config-check.sh refuses it too, and a
+# machine where the two name different files has no reliable second signal for the seat. The bait:
+# $H/from-config.md holds the completed entry AND is the cwd, so a cwd-bound resolver reads it.
+printf '{"sessionLog":"from-config.md"}' > "$H/.claude/middle-management.json"
+rm -f "$H/logs/session-log.md"
+OUT="$(cd "$H" && HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" python3 "$PS" --name log-route 2>&1)"; RC=$?
+assert_rc "a relative sessionLog -> exit 0" 0 "$RC"
+assert_lacks "a relative sessionLog never binds to the caller's cwd" "session log says" "$OUT"
+assert_has "...and one stderr line names the rule" "not an absolute path" "$OUT"
 rm -f "$H/.claude/middle-management.json" "$H/logs/session-log.md"
 
 # The keys orchestrator.sh and the tab list read. Renaming one silently breaks a sibling script.

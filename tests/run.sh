@@ -212,6 +212,16 @@ assert_rc "a sessionLog that is not a string is invalid config" 1 "$RC"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" bash "$CC" session-log)"; RC=$?
 assert_has "a non-string sessionLog resolves to the default, like the python side" "$H/logs/session-log.md" "$OUT"
 assert_rc "...and reports itself as defaulted" 1 "$RC"
+# A RELATIVE value is the same class and the worse one: it would resolve against whatever
+# directory the caller happens to run in — the seat sits in the checkout root, a worker in its
+# lane worktree, the wrap somewhere else — so the two signals the seat needs come out of
+# different files. Invalid config (loud), and it names no file: the default answers.
+printf '{"sessionLog":"logs/session-log.md"}' > "$H/.claude/middle-management.json"
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$CC" validate; RC=$?
+assert_rc "a relative sessionLog is invalid config" 1 "$RC"
+OUT="$(cd /tmp && HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" bash "$CC" session-log)"; RC=$?
+assert_has "a relative sessionLog resolves to the default, never the caller's cwd" "$H/logs/session-log.md" "$OUT"
+assert_rc "...and reports itself as defaulted too" 1 "$RC"
 printf '{"sessionLog":"%s/from-config.md"}' "$H" > "$H/.claude/middle-management.json"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="$H/from-env.md" bash "$CC" session-log)"; RC=$?
 assert_has "MM_SESSION_LOG wins over the config key" "$H/from-env.md" "$OUT"
@@ -584,6 +594,12 @@ OUT="$(bash_json 'echo \"git add -A is blocked\"' | HOME="$H" CLAUDE_CONFIG_DIR=
 assert_empty "the phrase inside a quoted string -> allow" "" "$OUT"
 OUT="$(bash_json 'cd src && git add -A' | HOME="$H" CLAUDE_CONFIG_DIR="" bash "$GITADD" 2>&1)"
 assert_has "blanket staging after && -> deny" '"deny"' "$OUT"
+# `<<<word` is a herestring, not a heredoc: it must not turn heredoc mode on and swallow every
+# following line of a multi-line command — while a genuine heredoc body still has to stay data.
+OUT="$(bash_json 'cat <<<EOF\ngit add -A' | HOME="$H" CLAUDE_CONFIG_DIR="" bash "$GITADD" 2>&1)"
+assert_has "a herestring does not hide the next line -> deny" '"deny"' "$OUT"
+OUT="$(bash_json 'cat <<EOF\ngit add -A\nEOF' | HOME="$H" CLAUDE_CONFIG_DIR="" bash "$GITADD" 2>&1)"
+assert_empty "the same phrase inside a real heredoc body -> allow" "" "$OUT"
 printf '{"surgicalStaging":false}' > "$H/.claude/middle-management.json"
 OUT="$(bash_json 'git add -A' | HOME="$H" CLAUDE_CONFIG_DIR="" bash "$GITADD" 2>&1)"
 assert_empty "surgicalStaging=false -> allow" "" "$OUT"
@@ -598,6 +614,13 @@ OUT="$(bash_json 'git add -A' | HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$JQLESS" ba
 assert_has "blanket staging without jq -> still deny" '"deny"' "$OUT"
 OUT="$(bash_json 'git add src/main.ts' | HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$JQLESS" bash "$GITADD" 2>&1)"
 assert_empty "explicit paths without jq -> allow" "" "$OUT"
+# The stripper IS awk: without it the whole pipeline yields an empty command and the guard would
+# allow everything, silently. It has to fall into the no-jq branch (match anywhere) instead.
+AWKLESS="$(mktemp -d -p "$TMPBASE")"; ln -s /usr/bin/* /bin/* "$AWKLESS"/ 2>/dev/null; rm -f "$AWKLESS/awk"
+OUT="$(bash_json 'git add -A' | HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$AWKLESS" bash "$GITADD" 2>&1)"
+assert_has "blanket staging without awk -> still deny" '"deny"' "$OUT"
+OUT="$(bash_json 'echo \"git add -A is blocked\"' | HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$AWKLESS" bash "$GITADD" 2>&1)"
+assert_has "...and it is the match-anywhere branch, as without jq" '"deny"' "$OUT"
 
 say "== wt against throwaway repos =="
 H="$(new_home)"

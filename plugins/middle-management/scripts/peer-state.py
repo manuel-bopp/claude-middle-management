@@ -38,7 +38,13 @@ def resolve_session_log():
 
     A machine with no config, a config that is not an object, a non-string value: all mean
     "nobody chose one", and the default answers. Never raises - this runs at import, and a
-    reader that dies on a typo in someone's config takes the whole session table with it."""
+    reader that dies on a typo in someone's config takes the whole session table with it.
+
+    A RELATIVE value is invalid the same way: it would bind to this process's cwd, and the seat,
+    the wrap and this reader run from three different ones - the same config would then name
+    different files, which is how two sessions end up holding the coordinator seat at once. It
+    falls back to the default with one line on stderr. Only `~` and `~/` expand, because that is
+    all config-check.sh can expand; `~user/` is relative here too, so the two always agree."""
     p = os.environ.get("MM_SESSION_LOG")
     if not p:
         try:
@@ -46,7 +52,16 @@ def resolve_session_log():
                                encoding="utf-8"))["sessionLog"]
         except (OSError, ValueError, TypeError, KeyError):
             p = None
-    return os.path.expanduser(p if isinstance(p, str) and p else "~/logs/session-log.md")
+    default = os.path.expanduser("~/logs/session-log.md")
+    if not (isinstance(p, str) and p):
+        return default
+    if p == "~" or p.startswith("~/"):
+        p = os.path.expanduser(p)
+    if not p.startswith("/"):
+        print("peer-state.py: sessionLog %r is not an absolute path - reading %s instead"
+              % (p, default), file=sys.stderr)
+        return default
+    return p
 
 
 SESSION_LOG = resolve_session_log()
@@ -167,10 +182,12 @@ def is_live(pid, procstart):
         # ponytail: no /proc (macOS, BSD) - kill(pid, 0) answers "a process with this pid exists"
         # and nothing else, so the PID-reuse guard procStart gives us is DROPPED on those
         # systems. Without this branch every session there read as dead and the table was empty.
-        try:
+        if pid <= 0:
+            return False                            # kill(0, 0) / kill(-N, 0) address a process
+        try:                                        # GROUP and always succeed: never liveness
             os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
+        except (ProcessLookupError, OverflowError, ValueError):
+            return False                            # gone, or a number no pid can be (2**40)
         except OSError:
             pass                                    # PermissionError: it exists, just not ours
         return True

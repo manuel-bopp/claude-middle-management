@@ -53,8 +53,9 @@
 # command and worktree directory all come from the config; create or change it with
 # /middle-management-setup. worktreeDir defaults to the sibling directory
 # <parent of root>/.worktrees-<name>. Units, markers and the reaper need Linux with a systemd
-# user manager, and `list` and `hold` need GNU date (`date -d`) and refuse without it rather
-# than print a wrong timestamp; everything else works anywhere.
+# user manager, and SETTING a hold needs GNU date (`date -d`) and refuses without it rather
+# than print an empty timestamp; everything else works anywhere — `list` degrades its date
+# columns to `-`, and clearing a hold formats no date at all.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -84,8 +85,9 @@ MAXUNITS="$(jq -r '.maxUnits // 2' "$CFGFILE")"
 TIMEOUT="$(command -v timeout 2>/dev/null || true)"
 HAVE_SYSTEMD=no
 if command -v systemctl >/dev/null 2>&1 && systemctl --user --version >/dev/null 2>&1; then HAVE_SYSTEMD=yes; fi
-# `date -d` is GNU-only; BSD/macOS date would silently turn every timestamp into `-` instead of
-# a date, so the verbs that print one refuse rather than answer wrongly (--version: GNU only).
+# `date -d` is GNU-only; BSD/macOS date cannot format one, so `hold <topic> <hours>` — which has
+# nothing to print without it — refuses rather than answer wrongly (--version: GNU only). Read
+# paths degrade to `-` instead: an inventory with blank columns still beats no inventory.
 HAVE_GNU_DATE=no
 if date --version >/dev/null 2>&1; then HAVE_GNU_DATE=yes; fi
 
@@ -127,7 +129,7 @@ hold_until() {  # prints the epoch of a VALID hold (until > now), else nothing
   case "$u" in ''|*[!0-9]*) return 0 ;; esac
   [ "$u" -gt "$(date +%s)" ] && echo "$u" || true
 }
-hold_str() { local u; u=$(hold_until "$1" "$2"); [ -n "$u" ] && date -d "@$u" +%Y-%m-%dT%H:%M || echo -; }
+hold_str() { local u; u=$(hold_until "$1" "$2"); [ -n "$u" ] && date -d "@$u" +%Y-%m-%dT%H:%M 2>/dev/null || echo -; }
 
 # ─── systemd: everything below degrades to "-" / a refusal when there is no user manager ─────
 unit_active() { [ "$HAVE_SYSTEMD" = yes ] && systemctl --user is-active --quiet "$1"; }
@@ -310,7 +312,6 @@ case "$CMD" in
     echo "when merged:    wt $NAME done '$TOPIC'"
     ;;
   list)
-    need_gnu_date
     list_header
     if [ -n "$NAME" ]; then list_one "$NAME"
     else
@@ -368,7 +369,6 @@ case "$CMD" in
   hold)
     [ -n "$NAME" ] || usage
     need_topic
-    need_gnu_date
     HOURS="${2:-}"
     [ -n "$HOURS" ] || die "usage: wt $NAME hold <topic> <hours>   (0 clears the hold)"
     case "$HOURS" in *[!0-9]*) die "hours must be a whole number (0 clears the hold)" ;; esac
@@ -377,6 +377,7 @@ case "$CMD" in
       rm -f "$(hold_file "$NAME" "$TOPIC")"
       echo "hold cleared for $(key_of "$NAME" "$TOPIC")"
     else
+      need_gnu_date     # only this branch formats a date — clearing a hold must stay possible
       UNTIL=$(( $(date +%s) + HOURS*3600 ))
       echo "$UNTIL" > "$(hold_file "$NAME" "$TOPIC")"
       echo "hold for $(key_of "$NAME" "$TOPIC") until $(date -d "@$UNTIL" +%Y-%m-%dT%H:%M) — the reaper leaves this lane alone until then"

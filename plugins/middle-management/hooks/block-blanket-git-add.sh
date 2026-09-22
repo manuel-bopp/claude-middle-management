@@ -22,8 +22,9 @@
 #   - anything inside quotes, so `bash -lc 'git add -A'` is NOT matched;
 #   - a `<<` inside a quoted string turns on heredoc mode and the rest is dropped;
 #   - a blanket stage inside a script, alias or function the hook cannot read.
-# Without jq the command cannot be lifted out of the payload at all, so that path
-# keeps the old match-anywhere behaviour rather than going dark — loud over silent.
+# Without jq — or without awk, which does the stripping — the command cannot be lifted
+# out of the payload at all, so that path keeps the old match-anywhere behaviour
+# rather than going dark — loud over silent.
 # ponytail: a stripper instead of a parser, and the list above is the price.
 set -u
 
@@ -40,7 +41,7 @@ esac
 
 INPUT="$(cat)"
 AT='^'                    # command position — one stripped command per line (see the header)
-if command -v jq >/dev/null 2>&1; then
+if command -v jq >/dev/null 2>&1 && command -v awk >/dev/null 2>&1; then
   CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null | awk '
 BEGIN {
   q    = sprintf("%c", 39)                       # single quote, unquotable inline
@@ -56,7 +57,9 @@ BEGIN {
     if (t == hd) hd = ""
     next
   }
-  if (match(line, HDRE)) {                       # heredoc starts here
+  # `<<<word` is a herestring, not a heredoc: HDRE can match from its SECOND `<`, and turning
+  # heredoc mode on there swallows every following line of the command unseen.
+  if (match(line, HDRE) && substr(line, RSTART - 1, 1) != "<") {   # heredoc starts here
     d = substr(line, RSTART, RLENGTH); sub(/^<<-?[ \t]*/, "", d); gsub("[" q "\"]", "", d)
     hd = d
   }
@@ -92,7 +95,7 @@ END {
 }
 ' 2>/dev/null)"
 else
-  # No jq: match the raw payload rather than going dark. Quotes and commas
+  # No jq or no awk: match the raw payload rather than going dark. Quotes and commas
   # become spaces so the regex still sees command words at a word boundary —
   # and without the command itself there is no command position to anchor to.
   CMD="$(printf '%s' "$INPUT" | tr '",' '  ')"

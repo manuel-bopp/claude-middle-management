@@ -40,8 +40,13 @@ session_log() {
   # `strings` drops a non-string value, so a broken config falls back to the default here exactly
   # as it does in peer-state.py — the two must never name different files. No jq: empty, default.
   [ -n "$p" ] || p="$(jq -r '(.sessionLog | strings) // ""' "$(cfg_file)" 2>/dev/null)"
-  [ -n "$p" ] || { p="$HOME/logs/session-log.md"; chosen=1; }
   case "$p" in "~") p="$HOME" ;; "~/"*) p="$HOME/${p#\~/}" ;; esac
+  # Anything still not absolute — empty, relative, or a `~user/` form neither side expands — would
+  # bind to the CALLER's cwd, and the seat, the wrap and the reader run from three different ones.
+  # So it names no file: the shape filter calls it invalid (loudly) and the default answers here,
+  # exactly as peer-state.py does. A relative path is the one way the two could name DIFFERENT
+  # files on the same machine — which is how two sessions end up holding the seat at once.
+  case "$p" in /*) ;; *) p="$HOME/logs/session-log.md"; chosen=1 ;; esac
   printf '%s\n' "$p"
   return "$chosen"
 }
@@ -56,7 +61,7 @@ validate() {
     and ((.board // "") | type == "string")
     and ((.surgicalStaging // true) | type == "boolean")
     and ((.notifyCommand // "") | type == "string")
-    and ((.sessionLog // "") | type == "string")
+    and ((.sessionLog // "/") | (type == "string" and (startswith("/") or startswith("~"))))
     and ((.unitMemoryMax // "") | type == "string")
     and ((.capMemoryMax // "") | type == "string")
     and ((.maxUnits // 0) | type == "number")
