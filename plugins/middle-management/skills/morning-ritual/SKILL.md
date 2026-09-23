@@ -28,8 +28,12 @@ too: a poke into a session is a hand-over, not a delivery, so the inbox is the o
 reply arrived. Never print tokens/secrets into output — load them into shell vars from your
 secret store.
 
+Then walk the question ledger (one row per open question: who was asked, where, when sent,
+what waits on it, the default; see the middle-management skill): a row answered overnight is
+acted on and deleted, a row past its time gets its default and says so in the day plan.
+
 Done when every new message is routed: into the day plan, to a lane/worker, or
-explicitly irrelevant.
+explicitly irrelevant, and every ledger row is answered, defaulted or still open on purpose.
 
 ## 2. Repo state
 
@@ -83,6 +87,12 @@ writer): externally resolved items (merged PRs, answered threads, arrived report
 the wrap-audit result, new sessions your user started this morning. Dated morning
 block; if the board lives in a git repo, commit surgically — the board file plus
 coordinator-owned docs only.
+
+Close the step with the wave-end check from the middle-management skill, as if last night's
+landings were a wave: re-read the lane rules and the head of the latest handover, count the
+active lanes against your cap, re-scan the queue for packages the overnight landings unblocked,
+and put base-moved notes on the board (overnight, every lane session is idle past the hour, so
+none of them gets a message).
 
 ## 5. Machine cleanup
 

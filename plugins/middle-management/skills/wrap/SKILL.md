@@ -129,6 +129,13 @@ every kept doubt names the command that would settle it or is dropped, the cheap
 a confirmed defect acted on rather than narrated · "Your call" · the handoff prompt. Links
 absolute. Holding the coordinator seat? `/orchestrator release` now, while you are still warm.
 
+**A worker's ready claim ticks its criteria and names its commit.** Before the report calls a
+package ready (your team's word for it), re-read your kickoff and mark each success criterion
+`met` or `not met` with its evidence next to it: test number, link, screenshot path. A criterion
+without evidence is `not met`. The claim names the tip SHA the tests and blocker check ran on; a
+rebase or a new commit after that voids it until re-run on the new tip, and the landing refuses
+when the branch no longer points at the reported SHA.
+
 Then the block, last, with **nothing after it** — the match runs in the last 200 characters of
 your message. Lines 1 and 2 follow the language of the chat; **line 3 is always the literal
 `Close this tab.`, alone on the last line, in every language** (the user scans for that one

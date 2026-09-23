@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.7.2 — 2026-09-23
+
+**The tab list now shows which sessions are waiting on their user.** `peer-state.py` gains a
+`waiting` field, a WAITING column and a `--waiting` filter, read from the same bounded transcript
+tail as everything else, so the target pays nothing. `permission`: the session's last own record
+is a tool call with no result and it has been quiet for three minutes, which is what a session
+parked on a permission dialog looks like; the heartbeat reads exactly that as healthy. `question`:
+an AskUserQuestion is open, or the last text ends in a question mark or asks in so many words.
+Only live, unwrapped sessions qualify. A finished concept once sat 40 minutes unnoticed in a worker
+tab; the coordinator now has a cheap look instead of a guess, and the banner tells it the one
+thing to do with the answer: such a session is alive but will not move until its user acts, so
+do not message it, tell the user. The reading is a "may be" on purpose: a tool that simply runs
+long reads `permission` too, and nothing is ever sent on it.
+
+**A ready claim is bound to the commit it was tested on.** The report names the tip SHA the tests
+and the blocker check ran on; a rebase or a new commit voids it until re-run on the new tip, and
+the landing refuses when the branch no longer points at the reported SHA. A rebase that leaves
+the tree byte-identical keeps the claim, so nobody re-runs a suite on the same bytes. The
+autonomous merge in the skill, the worker section and the wrap's report step all say it now,
+because one lane was rebased twice before landing and the hold had to be written by hand into a
+handover.
+
+**Workers tick off their own success criteria before they call a package ready.** Kickoffs have
+always carried criteria; nothing made anyone read them again. The worker now re-reads its kickoff
+and marks each criterion met or not met with its evidence (test number, link, screenshot path),
+and a criterion without evidence is not met. The coordinator checks a list against the kickoff
+instead of re-deriving it from prose.
+
+**Open questions live in one ledger.** One row per question: who was asked, where, when it was
+sent, what waits on it, and the default with the time it applies. The coordinator walks it on
+every pass and the morning ritual walks it in step 1; an answered row is acted on and deleted in
+the same pass. A handover once listed eight open asks with no send time and no default, and two
+answers sat unread on pages nobody looked at again. The ledger is the same list the user already
+hears, not a second one.
+
+**A landing wave ends with a check of the coordinator itself.** Re-read the lane rules and the
+head of the latest handover, count lanes against the cap, re-scan the queue for what the landing
+unblocked, tell lanes whose base moved to rebase (by message only when live and idle under an
+hour, otherwise on the board), and hand over at three quarters of context. The banner keeps the
+plugin's rules in view on every message; it never kept the long project rules in view, and that
+is where the day's slips came from. The morning ritual runs the same check over the night's
+landings.
+
 ## 0.7.1 — 2026-09-23
 
 **The closing line is one fixed string again: `Close this tab.`, alone on the last line, in every

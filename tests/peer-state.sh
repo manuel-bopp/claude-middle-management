@@ -387,12 +387,58 @@ assert_lacks "a relative sessionLog never binds to the caller's cwd" "session lo
 assert_has "...and one stderr line names the rule" "not an absolute path" "$OUT"
 rm -f "$H/.claude/middle-management.json" "$H/logs/session-log.md"
 
+say "== waiting on its user: a permission prompt or a question, read from the tail =="
+# Alive but stuck until its user acts in THAT tab. Only a live process can be parked, so these
+# fixtures use this shell's own pid with its real procStart (the "me-real" pattern above).
+ME_START="$(awk '{print $20}' <<<"$(sed 's/.*) //' /proc/$$/stat)")"
+WN=0
+waiter() {   # waiter <name> <live|dead> <minutes idle>  < <(jsonl body)  - not a pipe: WN must count
+  WN=$((WN+1))
+  if [ "$2" = live ]; then entry "w$WN" "$$" "c1000$WN-1" "$1" 5 "$ME_START"
+  else entry "w$WN" "99920$WN" "c1000$WN-1" "$1" 5; fi
+  cat > "$T/c1000$WN-1.jsonl"
+  touch -d "-$3 minutes" "$T/c1000$WN-1.jsonl"
+}
+tool() { printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"%s","input":{}}]}}\n' "$1"; }
+result() { printf '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}\n'; }
+waiter wt-perm live 10 < <(text 'Ich pushe jetzt den Branch.'; tool Bash)
+waiter wt-running live 0 < <(text 'Ich starte den Build.'; tool Bash)
+waiter wt-askq live 0 < <(text 'Zwei Wege offen.'; tool AskUserQuestion)
+waiter wt-qmark live 2 < <(text 'Konzept steht unter /var/tmp/x/konzept.md. Passt die Reihenfolge so?')
+waiter wt-phrase live 2 < <(text 'Soll ich das jetzt mergen, oder erst den Review abwarten.')
+waiter wt-busy live 20 < <(text 'Der Render läuft, ich melde mich mit den Zahlen.')
+waiter wt-answered live 10 < <(text 'Ich pushe jetzt.'; tool Bash; result)
+waiter wt-dead dead 30 < <(text 'Passt die Reihenfolge so?')
+waiter wt-wrapped live 30 < <(text 'Alles gelandet. Soll ich noch etwas tun? Sonst: diesen Tab kannst du schließen.')
+waiter wt-sidechain live 10 < <(text 'Ich warte auf den Sub-Agenten.'
+  printf '{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"tool_use","id":"s1","name":"Bash","input":{}}]}}\n')
+assert_has "a tool call with no result, quiet 10 minutes -> permission" "waiting : permission" "$(ps_ --name wt-perm)"
+assert_lacks "the same call written just now is a tool still running" "waiting :" "$(ps_ --name wt-running)"
+assert_has "an open AskUserQuestion -> question at once" "waiting : question" "$(ps_ --name wt-askq)"
+assert_has "a last text ending in a question mark -> question" "waiting : question" "$(ps_ --name wt-qmark)"
+assert_has "a last text that asks in so many words -> question" "waiting : question" "$(ps_ --name wt-phrase)"
+assert_lacks "a statement is not a question" "waiting :" "$(ps_ --name wt-busy)"
+assert_lacks "a tool call that got its result is not parked" "waiting :" "$(ps_ --name wt-answered)"
+assert_lacks "a dead process waits on nobody" "waiting :" "$(ps_ --name wt-dead)"
+OUT="$(ps_ --name wt-wrapped)"
+assert_has "a wrapped session that asked on the way out..." "wrapped : yes" "$OUT"
+assert_lacks "...is finished, not waiting" "waiting :" "$OUT"
+assert_lacks "a sub-agent's open tool call is not the tab's" "waiting :" "$(ps_ --name wt-sidechain)"
+assert_has "the detail line says what the state means" "will not move until its user acts" "$(ps_ --name wt-perm)"
+OUT="$(ps_ --waiting)"
+assert_has "--waiting lists the permission prompt" "wt-perm" "$OUT"
+assert_has "--waiting lists the question" "wt-qmark" "$OUT"
+assert_lacks "--waiting leaves out the working session" "wt-busy" "$OUT"
+assert_has "the table carries a WAITING column" "WAITING" "$OUT"
+assert_has "the JSON carries the state" '"waiting": "permission"' "$(ps_ --name wt-perm --json)"
+
 # The keys orchestrator.sh and the tab list read. Renaming one silently breaks a sibling script.
 CONTRACT="$(ps_ --all --json | python3 -c '
 import json, sys
 want = {"wrapped": str, "wrapped_evidence": str, "log_completed": bool, "idle_seconds": (int, float),
         "ctx_tokens": (int, float), "last": str, "topic": str, "closed_marker": dict,
-        "process_age_seconds": (int, float), "conversation_age_seconds": (int, float)}
+        "process_age_seconds": (int, float), "conversation_age_seconds": (int, float),
+        "waiting": str}
 bad = []
 for r in json.load(sys.stdin):
     n = r.get("name")

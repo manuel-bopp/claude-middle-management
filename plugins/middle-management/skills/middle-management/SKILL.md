@@ -77,6 +77,18 @@ coordinator ends with your rough context fill (a quarter, a half, three quarters
 that reads everything itself is full within the hour and dies with its lane; a lean one picks
 up a second topic after the wrap.
 
+**Tick off your own success criteria before you call a package ready.** Re-read your kickoff and
+write each success criterion as `met` or `not met`, with the evidence next to it: the test
+number, the link, the screenshot path. A criterion without evidence is `not met`, however sure
+you are. One line per criterion; the list goes in your report file and the report itself says
+how many are met. The coordinator then checks your list against the kickoff instead of
+re-deriving it from prose.
+
+**"Ready" names the commit it was tested on.** Your ready report carries the tip SHA your tests
+and blocker check ran on. A rebase or a new commit voids the claim until you re-run on the new
+tip and report the new SHA; a rebase that leaves the tree byte-identical (same
+`git rev-parse <sha>^{tree}`) keeps it.
+
 **Your lane ends with its resources released.** The lane's server unit stopped, its worktree
 removed (`/wt <name> done <topic>`), and the `/wt list` line that proves both pasted into your
 wrap — a finished lane that keeps a worktree and a dev server alive is what fills the machine
@@ -130,6 +142,24 @@ points dropped, asks routed to whoever can actually grant them.
 AND the binding-input sections of the nearest planning docs. A question whose answer was
 recorded hours ago costs the user's trust, not just their time.
 
+**Every open question gets one row in a question ledger.** Whenever you ask somebody (your user,
+a worker, a person outside the sessions), add a row where you track lanes (the board, when one
+is configured): who was asked, where (tab, channel, thread, review page), when it was sent, what
+waits on it, and your default with the time it applies. Walk the ledger on every pass and in the
+morning ritual: an answered row is acted on and deleted in the same pass, a row past its time
+gets its default and says so. It is the same list you repeat to your user, not a second one. A
+question sent through the off-keyboard channel names where the answer should come back, because
+the plugin ships no inbound leg and a reply that lands nowhere reads as silence.
+
+**After every landing wave, check yourself before the next one.** In your own turn, no
+sub-agent: (1) re-read your team's lane rules and the head of the latest handover, because the
+banner keeps the plugin's rules in view but not the long project rules; (2) count the active
+lanes against your cap (CUSTOMIZE; three to four on one shared subscription); (3) re-scan the
+package queue for items the landing just unblocked; (4) tell every lane whose base moved to
+rebase, but by message only when `peer-state.py` shows it live and idle under an hour; for any
+other the note goes on the board for its next report, because a message to a cold session costs
+it its whole context; (5) check your own context fill and hand over at three quarters.
+
 **Surface every waiting session to your user, one line each.** Your user does not look
 into the other tabs. Whenever a worker waits for their go (a finished concept, a
 question), your next message carries one line per waiting session: which session, what
@@ -139,6 +169,14 @@ That line carries the link or the command to copy, in the SAME line, every time 
 it: an item your user has to scroll back for is an item they will not act on.
 If the user stays silent for long and the default is safe and reversible, pass the go
 with the default and say so.
+Find them off disk before each message to your user:
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/peer-state.py" --waiting` lists every live session that
+may be waiting, `permission` (a tool call with no result for three minutes or more: parked on a
+permission prompt) or `question` (its last turn asks something, or an AskUserQuestion is open).
+Such a session is alive but will not move until its user acts in that tab, so a peer message
+does nothing for it: tell your user which tab and what it waits for. It is a "may be", read from
+the transcript tail: a tool that simply runs long reads `permission` too, and a rhetorical
+question reads `question`.
 
 **Resource hygiene is yours.** Orphaned dev servers, worktrees of merged branches and
 stale watchers go as soon as their reason is gone (merge, answered thread, closed lane)
@@ -192,7 +230,10 @@ for a go on each step. Four parts, and the fourth is what makes the first three 
 1. **Merge on your own word** into the integration branch when the pull request is green,
    carries whatever review artifact your team requires (CUSTOMIZE), and a fresh-context
    review sub-agent found no blocker. A human reviewer stays on every pull request for
-   visibility; their review is no longer a gate.
+   visibility; their review is no longer a gate. The ready claim you merge on names the tip
+   SHA its tests and blocker check ran on; a rebase or a new commit voids it until re-run on
+   the new tip, and the landing refuses when `git rev-parse <branch>` differs from the
+   reported SHA (an identical tree, same `git rev-parse <sha>^{tree}`, keeps the claim).
 2. **Pick the next items** from a written queue of small packages that carry no product
    decision — one lane per worktree and pull request, non-overlapping files per wave, one
    lane stack at a time. CUSTOMIZE: where that queue lives, your branch pair, the model
@@ -203,7 +244,8 @@ for a go on each step. Four parts, and the fourth is what makes the first three 
    deleting data or services; anything a concept doc calls a decision.
 4. **Report as you go**: one line per merge or wave where you track lanes, a message
    through the off-keyboard channel at the end of a wave and whenever a gate needs the
-   user, and a wait-on-the-user block that carries gate items only.
+   user, and a wait-on-the-user block that carries gate items only. Each wave ends with the
+   wave-end check under "The two roles".
 
 Known failure mode: a sub-agent that pushes or opens a pull request stops dead on the
 permission prompt while the user is away, and it looks alive from the outside. Check the
@@ -445,7 +487,7 @@ it: persist first (a file, the board, a log), then poke.
 It is a net for **dead turns**. A session asleep inside an API retry only buffers the poke
 and wakes at its own reset, so there the heartbeat is harmless, not helpful. It cannot see
 a session parked on a permission dialog (its last record is a tool call, so it reads
-healthy), nor anything on a machine that is off. One honest caveat: that a poke re-triggers
+healthy; `peer-state.py --waiting` can), nor anything on a machine that is off. One honest caveat: that a poke re-triggers
 an *idle* session is proven; that it re-triggers a session whose *turn died* is not — treat
 the alarm as the reliable half of this unit and the poke as the cheap bet.
 

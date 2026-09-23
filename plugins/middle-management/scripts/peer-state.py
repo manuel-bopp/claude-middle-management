@@ -10,10 +10,13 @@ fresh input tokens once it has fallen out of cache - measured on one machine in 
 sessions to close their tab. Everything below comes from the registry, the transcript file and
 the session log. No socket, no message, no model turn: the target session pays nothing.
 
-Usage: peer-state.py [--all|--wrapped] [--name N] [--session-id ID] [--cwd PATH] [--json]
+Usage: peer-state.py [--all|--wrapped|--waiting] [--name N] [--session-id ID] [--cwd PATH] [--json]
   (no flags)        table of LIVE sessions, most recently active first
   --all             include sessions whose process is gone
   --wrapped         only sessions that read as finished, as a list to act on (implies --all)
+  --waiting         only live sessions that may be waiting on their user: "permission" (a tool
+                    call with no result for 3+ minutes, i.e. parked on a permission prompt) or
+                    "question" (its last text asks, or AskUserQuestion is open)
   --name N          one session by registry name        -> exit 1 if there is none
   --session-id ID   one session by sessionId or a >=8-char prefix; falls back to the transcript
                     when the registry entry is already gone   -> exit 1 if there is none
@@ -480,6 +483,47 @@ def wrap_state(texts, log_status, log_completed):
     return ("yes" if hit else "no"), ev
 
 
+# Waiting on its user: alive, but it will not move until somebody acts in THAT tab. Read-only and
+# a "may be", never a verdict: nothing is sent on it. The heartbeat cannot see a permission dialog
+# (its last record is a tool call, so it reads healthy) and a finished concept once sat unnoticed
+# for 40 minutes in a worker tab; this column is the cheap look at both, from the same tail.
+# ASK is matched in the last CLOSING_WINDOW characters of the session's last text, lowercased.
+ASK = re.compile(r"""(?x)
+      \?$
+    | \b(?: soll \s+ ich | sollen \s+ wir | willst \s+ du | m(?:ö|oe)chtest \s+ du | dein \s+ go
+          | shall \s+ i | should \s+ i | want \s+ me \s+ to | do \s+ you \s+ want | your \s+ go )\b
+""")
+# ponytail: a tool call with no result is either a permission dialog or a tool still running;
+# the transcript cannot tell them apart. Three quiet minutes is the cut, so a Bash call that
+# legitimately runs longer reads "permission" too. Upgrade path: a permission record, if the CLI
+# ever writes one.
+PERMISSION_AFTER = 180
+
+
+def waiting_state(recs, idle):
+    """"permission", "question" or None, from the session's LAST own user/assistant record.
+
+    A user record last means the turn is running (a prompt or a tool result just went in). An
+    assistant tool call with no result after it: AskUserQuestion is a question at once, any other
+    tool is a permission prompt once idle past PERMISSION_AFTER. An assistant text last means the
+    turn ended, and it is a question when that text ends in "?" or asks in so many words."""
+    last = next((r for r in reversed(recs) if r.get("type") in ("user", "assistant")
+                 and not r.get("isSidechain")), None)
+    if not last or last["type"] != "assistant":
+        return None
+    msg = last.get("message")
+    blocks = msg.get("content") if isinstance(msg, dict) else None
+    tools = [b.get("name") for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use"] \
+        if isinstance(blocks, list) else []
+    if tools:
+        if "AskUserQuestion" in tools:
+            return "question"
+        return "permission" if (idle or 0) >= PERMISSION_AFTER else None
+    texts = assistant_texts([last])
+    tail = texts[-1].rstrip("*_` \n").lower()[-CLOSING_WINDOW:] if texts else ""
+    return "question" if tail and ASK.search(tail) else None
+
+
 def apply_log(row, log):
     """Put a session-log entry's fields on the row and return its status. log None = no usable
     entry, which is exactly what log_completed None means to every caller: nothing corroborates
@@ -501,7 +545,8 @@ def read_session(sid, entry, logs, names=(), markers=(), known=()):
            "cwd": e.get("cwd"), "kind": e.get("kind"), "registry": entry is not None,
            "live": is_live(e.get("pid"), e.get("procStart")) if entry else False,
            "idle_seconds": None, "idle": "-", "ctx": None, "ctx_tokens": None,
-           "wrapped": "unknown", "evidence": ["no transcript on disk"], "wrapped_evidence": "",
+           "wrapped": "unknown", "waiting": None,
+           "evidence": ["no transcript on disk"], "wrapped_evidence": "",
            "last": None, "topic": None, "process_age_seconds": None,
            "conversation_age_seconds": None, "transcript": transcript_for(sid, e.get("cwd"))}
     # Two different ages. The process one is what `ListAgents` shows as "started Xh ago" - it is
@@ -542,6 +587,8 @@ def read_session(sid, entry, logs, names=(), markers=(), known=()):
             # session-log topic or the FIRST line, so the two are genuinely different handles.
             row["last"] = texts[-1].splitlines()[-1].strip() if texts else None
             row["wrapped"], row["evidence"] = wrap_state(texts, status, row["log_completed"])
+            # Only a live process can be parked on a dialog or wait for an answer.
+            row["waiting"] = waiting_state(recs, row["idle_seconds"]) if row["live"] else None
             first, conv = head_signals(row["transcript"])
             row["topic"] = row["topic"] or first
             if conv:
@@ -566,6 +613,8 @@ def read_session(sid, entry, logs, names=(), markers=(), known=()):
             row["wrapped"] = "yes"
             row["evidence"].insert(0, "session log marks this session closed at %s (marker id "
                                       "%s) - authoritative, filed by the wrap itself" % (at, mark["id"]))
+    if row["wrapped"] == "yes":
+        row["waiting"] = None                  # a finished session waits on nobody
     # Say that an entry was found and put aside. Dropping it silently would make the audit
     # trail claim there was no log entry at all, which is a different and much weaker fact.
     if row["log_stale"]:
@@ -594,17 +643,18 @@ def cut(s, n):
     return s if len(s) <= n else s[:n - 1] + "…"
 
 
-FMT = "%-16s %-8s %-8s %-4s %-7s %-7s %-6s %-7s %-18s %s"
+FMT = "%-16s %-8s %-8s %-4s %-7s %-7s %-6s %-7s %-10s %-18s %s"
 
 
 def table(rows):
     ctx = lambda r: "-" if r["ctx"] is None else "%dk" % (r["ctx"] // 1000)
     # CONV is the age of the CONVERSATION, not of the process - see head_signals().
-    print(FMT % ("NAME", "ID", "PID", "LIVE", "IDLE", "CONV", "CTX", "WRAPPED", "CWD", "LAST"))
+    print(FMT % ("NAME", "ID", "PID", "LIVE", "IDLE", "CONV", "CTX", "WRAPPED", "WAITING", "CWD",
+                 "LAST"))
     for r in rows:
         print(FMT % (
             cut(r["name"], 16), r["short"], r["pid"] or "-", "yes" if r["live"] else "no",
-            r["idle"], human(r["conversation_age_seconds"]), ctx(r), r["wrapped"],
+            r["idle"], human(r["conversation_age_seconds"]), ctx(r), r["wrapped"], r["waiting"] or "-",
             cut((r["cwd"] or "-").replace(os.path.expanduser("~"), "~"), 18), cut(r["last"], 70)))
 
 
@@ -620,6 +670,9 @@ def detail(r):
         if (r["conversation_age_seconds"] or 0) > (r["process_age_seconds"] or 0) + 900 else ""))
     print("  ctx     : %s tokens - the price of waking it" % (r["ctx"] if r["ctx"] else "?"))
     print("  wrapped : %s  (%s)" % (r["wrapped"], "; ".join(r["evidence"])))
+    if r["waiting"]:
+        print("  waiting : %s  (alive, but it will not move until its user acts in that tab)"
+              % r["waiting"])
     print("  topic   : %s" % cut(r["topic"], 200))
     print("  last    : %s" % cut(r["last"], 200))
 
@@ -635,6 +688,8 @@ def main():
                                   "(prefix match on whole path segments, so /x/Repo does not "
                                   "match /x/RepoOther) - a lane worker sits in a worktree, not "
                                   "in the checkout root, so an exact match would list none")
+    ap.add_argument("--waiting", action="store_true", help="only live sessions that may be waiting "
+                    "on their user: parked on a permission prompt, or ending on a question")
     ap.add_argument("--json", action="store_true", help="machine-readable, all fields")
     a = ap.parse_args()
 
@@ -669,6 +724,8 @@ def main():
                 if r["cwd"] and (os.path.abspath(r["cwd"]) + os.sep).startswith(want)]
     if a.wrapped:
         rows = [r for r in rows if r["wrapped"] == "yes"]
+    elif a.waiting:
+        rows = [r for r in rows if r["waiting"]]
     elif not (a.all or a.name or sid):
         rows = [r for r in rows if r["live"]]
     rows.sort(key=lambda r: (r["idle_seconds"] is None, r["idle_seconds"] or 0))
