@@ -115,7 +115,8 @@ assert_has "orchestrator banner: sub-agents return ten lines" "at most ten lines
 assert_has "orchestrator banner: model choice announced" "whether the strongest model was" "$OUT"
 assert_has "orchestrator banner: one lane one session" "One lane = one session" "$OUT"
 assert_has "orchestrator banner: wrapped tabs are read off disk, not asked" 'scripts/peer-state.py" --wrapped' "$OUT"
-assert_has "orchestrator banner: a waiting session goes to the user, not a message" "do not message it, tell your user" "$OUT"
+assert_has "orchestrator banner: a waiting session goes to the user, not a message" "Do not message such a session" "$OUT"
+assert_has "orchestrator banner: permission is hedged" "MAY be parked" "$OUT"
 # The printed command has to be runnable as printed: a plugin root with a space in it used to
 # produce a command line that breaks at the space.
 assert_has "orchestrator banner: the reader path is quoted" 'python3 "' "$OUT"

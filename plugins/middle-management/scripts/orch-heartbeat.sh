@@ -265,8 +265,8 @@ limit_cause() { # limit_cause <transcript> <episode start epoch>
 # Counter per session: $STATE/keepwarm-<sessionId> = "<pings> <epoch of the last ping>" (no .json
 # suffix, so close_foreign_episodes leaves it alone). The session's own "ok" lands within
 # KW_GRACE of the ping; activity later than that means it moved, and the wait phase starts over.
-# After the first ping the question is no longer its last text, so the counter file itself keeps
-# the session eligible. Test seams: OHB_PEERS (a peer-state --json array), OHB_KEEPWARM_DIR.
+# peer-state.py skips the ping and its "ok", so the question still reads; the counter file also
+# keeps a session eligible that qualified by hold file only. Test seams: OHB_PEERS (a peer-state --json array), OHB_KEEPWARM_DIR.
 KW_DIR=${OHB_KEEPWARM_DIR:-$CFG_DIR/state/keep-warm}
 KW_TEXT='KEEPWARM PING (automatic, not from your user, not an answer). Do nothing. Reply with exactly: ok'
 KW_FROM=2700; KW_TO=3300; KW_CAP=3; KW_GRACE=300   # seconds idle: ping inside [45, 55) min;

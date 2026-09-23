@@ -16,7 +16,8 @@ Usage: peer-state.py [--all|--wrapped|--waiting] [--name N] [--session-id ID] [-
   --all             include sessions whose process is gone
   --wrapped         only sessions that read as finished, as a list to act on (implies --all)
   --waiting         only live sessions that may be waiting on their user: "permission" (a tool
-                    call with no result for 3+ minutes, i.e. parked on a permission prompt) or
+                    call with no result for 3+ minutes: MAY be a permission prompt, or a long
+                    tool still running; a pending sub-agent call never counts) or
                     "question" (its last text asks, or AskUserQuestion is open)
   --name N          one session by registry name        -> exit 1 if there is none
   --session-id ID   one session by sessionId or a >=8-char prefix; falls back to the transcript
@@ -499,6 +500,18 @@ ASK = re.compile(r"""(?x)
 # legitimately runs longer reads "permission" too. Upgrade path: a permission record, if the CLI
 # ever writes one.
 PERMISSION_AFTER = 180
+# A pending sub-agent call is work in progress, never a dialog: its records go to subagents/.
+SUBAGENT_TOOLS = {"Agent", "Task"}
+# The heartbeat's keep-warm ping and the session's "ok" to it are not the session's own turn:
+# skipped, so a question asked before the ping still reads as a question.
+KEEPWARM_MARK = "KEEPWARM PING (automatic"
+
+
+def user_text(rec):
+    c = (rec.get("message") or {}).get("content") if isinstance(rec.get("message"), dict) else None
+    if isinstance(c, list):
+        return " ".join(b.get("text", "") for b in c if isinstance(b, dict))
+    return c if isinstance(c, str) else ""
 
 
 def waiting_state(recs, idle):
@@ -508,8 +521,13 @@ def waiting_state(recs, idle):
     assistant tool call with no result after it: AskUserQuestion is a question at once, any other
     tool is a permission prompt once idle past PERMISSION_AFTER. An assistant text last means the
     turn ended, and it is a question when that text ends in "?" or asks in so many words."""
-    last = next((r for r in reversed(recs) if r.get("type") in ("user", "assistant")
-                 and not r.get("isSidechain")), None)
+    own = [r for r in recs if r.get("type") in ("user", "assistant") and not r.get("isSidechain")]
+    while own:                                  # drop trailing keep-warm ping + reply pairs
+        i = next((k for k in range(len(own) - 1, -1, -1) if own[k]["type"] == "user"), None)
+        if i is None or KEEPWARM_MARK not in user_text(own[i]):
+            break
+        own = own[:i]
+    last = own[-1] if own else None
     if not last or last["type"] != "assistant":
         return None
     msg = last.get("message")
@@ -519,6 +537,8 @@ def waiting_state(recs, idle):
     if tools:
         if "AskUserQuestion" in tools:
             return "question"
+        if set(tools) <= SUBAGENT_TOOLS:
+            return None
         return "permission" if (idle or 0) >= PERMISSION_AFTER else None
     texts = assistant_texts([last])
     tail = texts[-1].rstrip("*_` \n").lower()[-CLOSING_WINDOW:] if texts else ""
@@ -673,8 +693,10 @@ def detail(r):
     print("  ctx     : %s tokens - the price of waking it" % (r["ctx"] if r["ctx"] else "?"))
     print("  wrapped : %s  (%s)" % (r["wrapped"], "; ".join(r["evidence"])))
     if r["waiting"]:
-        print("  waiting : %s  (alive, but it will not move until its user acts in that tab)"
-              % r["waiting"])
+        print("  waiting : %s  (%s)" % (r["waiting"], "a tool call with no result: MAY be a "
+              "permission prompt, or a tool still running; check the tab's last line"
+              if r["waiting"] == "permission" else
+              "alive, but it will not move until its user acts in that tab"))
     print("  topic   : %s" % cut(r["topic"], 200))
     print("  last    : %s" % cut(r["last"], 200))
 
@@ -691,7 +713,8 @@ def main():
                                   "match /x/RepoOther) - a lane worker sits in a worktree, not "
                                   "in the checkout root, so an exact match would list none")
     ap.add_argument("--waiting", action="store_true", help="only live sessions that may be waiting "
-                    "on their user: parked on a permission prompt, or ending on a question")
+                    "on their user: MAY be parked on a permission prompt (a long tool reads the same), or "
+                    "ending on a question")
     ap.add_argument("--json", action="store_true", help="machine-readable, all fields")
     a = ap.parse_args()
 

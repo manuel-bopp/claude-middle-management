@@ -412,6 +412,16 @@ waiter wt-dead dead 30 < <(text 'Passt die Reihenfolge so?')
 waiter wt-wrapped live 30 < <(text 'Alles gelandet. Soll ich noch etwas tun? Sonst: diesen Tab kannst du schließen.')
 waiter wt-sidechain live 10 < <(text 'Ich warte auf den Sub-Agenten.'
   printf '{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"tool_use","id":"s1","name":"Bash","input":{}}]}}\n')
+waiter wt-agent live 10 < <(text 'Ich lasse das reviewen.'; tool Agent)
+waiter wt-kw live 50 < <(text 'Konzept steht. Passt die Reihenfolge so?'
+  printf '{"type":"user","message":{"content":"<cross-session-message from-name=keepwarm> KEEPWARM PING (automatic, not from your user, not an answer). Do nothing. Reply with exactly: ok </cross-session-message>"}}\n'
+  text 'ok')
+waiter wt-kwdone live 5 < <(text 'Passt die Reihenfolge so?'
+  printf '{"type":"user","message":{"content":"KEEPWARM PING (automatic, not from your user, not an answer). Do nothing. Reply with exactly: ok"}}\n'
+  text 'ok'; printf '{"type":"user","message":{"content":"ja, passt"}}\n'; text 'Dann baue ich jetzt.')
+assert_lacks "a pending sub-agent (Agent) call is work, not a dialog" "waiting :" "$(ps_ --name wt-agent)"
+assert_has "a keep-warm ping and its ok do not hide the question" "waiting : question" "$(ps_ --name wt-kw)"
+assert_lacks "an answer after the ping ends the wait" "waiting :" "$(ps_ --name wt-kwdone)"
 assert_has "a tool call with no result, quiet 10 minutes -> permission" "waiting : permission" "$(ps_ --name wt-perm)"
 assert_lacks "the same call written just now is a tool still running" "waiting :" "$(ps_ --name wt-running)"
 assert_has "an open AskUserQuestion -> question at once" "waiting : question" "$(ps_ --name wt-askq)"
@@ -424,7 +434,8 @@ OUT="$(ps_ --name wt-wrapped)"
 assert_has "a wrapped session that asked on the way out..." "wrapped : yes" "$OUT"
 assert_lacks "...is finished, not waiting" "waiting :" "$OUT"
 assert_lacks "a sub-agent's open tool call is not the tab's" "waiting :" "$(ps_ --name wt-sidechain)"
-assert_has "the detail line says what the state means" "will not move until its user acts" "$(ps_ --name wt-perm)"
+assert_has "the detail line hedges permission" "MAY be a permission prompt, or a tool still running" "$(ps_ --name wt-perm)"
+assert_has "the detail line says what a question means" "will not move until its user acts" "$(ps_ --name wt-qmark)"
 OUT="$(ps_ --waiting)"
 assert_has "--waiting lists the permission prompt" "wt-perm" "$OUT"
 assert_has "--waiting lists the question" "wt-qmark" "$OUT"
