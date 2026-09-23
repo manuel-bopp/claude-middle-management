@@ -145,8 +145,10 @@ changing hands · red = never.*
    `claim` take over a seat whose holder wrapped last night. The plugin ships that wrap as
    the `middle-management:wrap` skill; a personal `~/.claude/skills/wrap` still wins on `/wrap`.
 6. Waiting is read off disk the same way: `scripts/peer-state.py --waiting` lists the live
-   sessions parked on a permission prompt or ending on a question. They are alive but will not
-   move until you act in that tab, so the coordinator tells you which tab instead of messaging it.
+   sessions that MAY be parked on a permission prompt (a long-running tool reads the same; a
+   pending sub-agent call never counts) or that end on a question. Such a session is alive but
+   will not move until someone acts in that tab, so the coordinator checks the tab's last line
+   and tells you which tab, instead of messaging it.
 
 Solo user with a single session? You do not need `claim` at all — install, configure
 the worktree part if you like it, and ignore the roles.
