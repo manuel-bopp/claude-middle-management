@@ -32,6 +32,14 @@ drawn in detail under [How the roles work](#how-the-roles-work).
 The empty cell in the top lane is the point: the coordinator cannot open a tab, and that is
 the only thing it needs you for.
 
+**Not every job needs a worker tab.** The coordinator can also run work through its own
+sub-agents (the Agent tool), and you can tell it to: "do that with sub-agents, no new session".
+Interactive worker sessions are for the bigger jobs, where you want to talk to the session
+directly while it works, or where the job is large enough that the session should call its
+own sub-agents for plan, build, review and report and keep its context for reading their
+results. Small, well-specified tasks stay with the coordinator and its sub-agents; a tab is
+what you open when a lane is worth a conversation of its own.
+
 ## Install
 
 ```
