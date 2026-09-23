@@ -110,7 +110,7 @@ changing hands · red = never.*
 10. The coordinator is the sole writer of the board; workers read it.
 11. The lane ends with its unit stopped and its worktree gone, and the session wraps itself.
 12. The seat is handed over to a fresh tab, or `release`d — best at wrap time, while still warm. An empty marker is a good state.
-13. The wrap ends on three lines and nothing after them: the session's name, its topic, and one closing line in the chat's language ("You can close this tab." *or* "Tab schließen") — never both, never a near-variant.
+13. The wrap ends on three lines and nothing after them: the session's name, its topic (both in the chat's language), and the literal `Close this tab.` alone on the last line in every language — never a translation, never both languages, never a near-variant.
 14. The same wrap appends `- Session: closed · <sessionId>` to its session-log entry — keyed by id, because session names get recycled.
 15. The coordinator runs `peer-state.py --wrapped` and gets the tab list, each row carrying that session's own last line so you find the tab by what is on screen in it. Nobody is woken. The same JSON is what lets `claim` take a stale seat off disk (wrapped **and** the log says completed **and** idle past `MM_STALE_SEAT_MIN`).
 

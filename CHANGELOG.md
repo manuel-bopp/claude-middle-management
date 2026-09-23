@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.1 — 2026-09-23
+
+**The closing line is one fixed string again: `Close this tab.`, alone on the last line, in every
+language.** 0.6.1 let the line follow the chat's language, and the reader accepted both, so
+sessions ended on `Diesen Tab kannst du schließen.`, `You can close this tab.`, or the sentence
+folded into a paragraph — correct for the tab list, useless for the user, who scans a row of tabs
+for one string and now had to read each ending. The two lines above it (session name, topic) still
+follow the chat. Changed in both skills, the role banner and the README; `peer-state.py` needs no
+change, its `close … tab` branch already matches the literal.
+
 ## 0.7.0 — 2026-09-22
 
 **The plugin now ships the wrap it has always depended on.** Since 0.6.1 the tab list decides

@@ -130,21 +130,24 @@ a confirmed defect acted on rather than narrated · "Your call" · the handoff p
 absolute. Holding the coordinator seat? `/orchestrator release` now, while you are still warm.
 
 Then the block, last, with **nothing after it** — the match runs in the last 200 characters of
-your message. **Exactly one closing line, in the language of the chat, never both languages:**
+your message. Lines 1 and 2 follow the language of the chat; **line 3 is always the literal
+`Close this tab.`, alone on the last line, in every language** (the user scans for that one
+fixed string; a translated or reworded line is what he asked to have removed, 2026-09-23):
 
 ```
 I am session <your name>.
 Our topic was: <a handful of words>.
-You can close this tab.
+Close this tab.
 ```
 
 ```
 Ich bin Session <resolved session name>.
 Unser Topic war: <a handful of words>.
-Diesen Tab kannst du schließen.
+Close this tab.
 ```
 
-A near-variant of your own invention — "closing out here", "I'm done here" — matches nothing: the
-session reads as still working and gets woken to be told it is finished, which costs it its whole
-conversation as fresh input. Report to the coordinator by peer message where one exists,
+Never "Diesen Tab kannst du schließen.", never "You can close this tab.", never the sentence
+folded into a paragraph. A near-variant of your own invention — "closing out here", "I'm done
+here" — matches nothing: the session reads as still working and gets woken to be told it is
+finished, which costs it its whole conversation as fresh input. Report to the coordinator by peer message where one exists,
 otherwise to your user in chat; the **recap** goes in the tab, never through `notifyCommand`.

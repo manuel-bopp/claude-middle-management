@@ -166,7 +166,7 @@ fi
 SESSION_LOG="$(bash "$CHECK" session-log)"; LOG_CHOSEN=$?
 if [ -f "$SESSION_LOG" ] || [ "$LOG_CHOSEN" -eq 0 ]; then
   printf 'Your wrap entry in the session log ends with one line: - Session: closed · %s\n' "${MY_ID:-<your sessionId>}"
-  printf 'When finished: name yourself, your topic, then the closing line (middle-management:wrap).\n'
+  printf 'When finished: name yourself, your topic, then the literal line "Close this tab." alone at the very end, in every language (middle-management:wrap).\n'
 else
   printf 'No session log yet — the middle-management:wrap skill creates it at %s (or set sessionLog via /middle-management-setup).\n' "$SESSION_LOG"
 fi

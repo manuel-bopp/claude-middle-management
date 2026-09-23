@@ -32,7 +32,7 @@ in its transcript *and* its last session-log entry reading `Status: completed`, 
 past `MM_STALE_SEAT_MIN` (default 60 minutes, the prompt-cache TTL) on top of both. The tab list
 below runs on the closing line alone, and that is right for a list: its false positive costs your
 user one glance at a tab. The seat is held to the stricter bar, because the sentence that decides
-it — "you can close this tab" — is one a *working* coordinator writes about somebody else's tab
+it — "Close this tab." — is one a *working* coordinator writes about somebody else's tab
 after every wrap, and two coordinators at once is the worst state this plugin can produce. One
 signal short, an unreadable state, a reader that cannot run: no takeover, and `claim` says which
 signal was missing. The log it reads is `$MM_SESSION_LOG`, else the `sessionLog` config key, else
@@ -374,7 +374,7 @@ that last warm message with three lines, and nothing after them:
 
 > I am session **\<your name\>**.
 > Our topic was: \<a handful of words\>.
-> **You can close this tab.**
+> **Close this tab.**
 
 Every session that finishes ends this way, not only the coordinator — the tab list reads a
 worker's last line by the same rule; a coordinator just releases the seat first.
@@ -388,15 +388,15 @@ tab by what is on screen in it, and a last line that names its session makes tha
 self-identifying. `/orchestrator status` prints your name and your sessionId; the **name is for
 your user's eyes only** — the machine identity stays the sessionId, in the session-log line below.
 
-**Exactly one closing line, in the language of the chat — never both.** The reader knows German
-and English as equals (the `CLOSING` branches in `scripts/peer-state.py`: `Tab … schließen` is its
-own alternative, right beside `close this tab`), so a session whose chat runs in German writes
-`Diesen Tab kannst du schließen.` and stops there. Writing the German line and then the English one
-"to be safe" is not safer — it is one line of noise for your user, and the wrap that produced it
-read the old "write it verbatim [in English]" as a demand it could only satisfy twice. What the
-reader does *not* know is a near-variant of your own invention — "closing out here", "I'm done
-here": that reads as a session still at work, and your user is told to wait for a tab that will
-never answer. Keep the block last for the same reason nothing may follow it: the match runs in the
+**Exactly one closing line, and it is always the literal `Close this tab.` — in every language,
+alone on the last line.** Lines 1 and 2 follow the chat (German chats write `Ich bin Session …` /
+`Unser Topic war: …`); line 3 does not translate. The reader would accept the German
+`Tab … schließen` too (the `CLOSING` branches in `scripts/peer-state.py`), but the user does not:
+he scans a row of tabs for one fixed string, and a line that is sometimes German, sometimes
+English, sometimes the end of a longer sentence is exactly what he asked to have removed
+(2026-09-23). Do not write both languages either — one line of noise. What the reader does *not*
+know is a near-variant of your own invention — "closing out here", "I'm done here": that reads as
+a session still at work, and your user is told to wait for a tab that will never answer. Keep the block last for the same reason nothing may follow it: the match runs in the
 last 200 characters of your message. Paired with your own session-log entry saying
 `Status: completed`, that closing line is also what lets a later session take the seat off disk
 instead of waking you.
