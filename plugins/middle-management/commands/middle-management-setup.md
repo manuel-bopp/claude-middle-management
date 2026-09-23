@@ -20,6 +20,7 @@ Schema (nothing else is valid):
   "notifyCommand": ". ~/.claude/secrets/telegram.env && curl -sS -m 15 -X POST \"https://api.telegram.org/bot$BOT_TOKEN/sendMessage\" --data-urlencode \"chat_id=$CHAT_ID\" --data-urlencode \"text=$1\"",
   "sessionLog": "/abs/path/to/logs/session-log.md",
   "longRunningAsUnit": false,
+  "reviewLoopGate": false,
   "unitMemoryMax": "3G",
   "capMemoryMax": "5G",
   "maxUnits": 2,
@@ -157,6 +158,14 @@ repositories; the user names them.
     command is rewritten in place, and a dev server inside a compound command
     (`cd x && npm run dev`) is refused with the replacement line to copy.
 
+12. **Review gate.** Ask whether plans and handoff docs should be held back until
+    the `review-loop` skill ran on them in the same session. Yes means
+    `reviewLoopGate: true`; the default is `false` and the hook then exits without
+    doing anything. Explain what it costs: ExitPlanMode with a plan of 900+
+    characters and a Write to any `<YYYY-MM-DD>_handoff-*.md` file are denied
+    until the skill's marker is under an hour old, so a session drafts in its
+    scratch dir, runs the loop, then writes the file.
+
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped
 from the file.
@@ -235,7 +244,7 @@ silently — then arms the timer:
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; HB="$CFG_DIR/middle-management-heartbeat"; UNITS="$HOME/.config/systemd/user"
 mkdir -p "$HB" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{orch-heartbeat.sh,poke-session.py,unit-failure-alarm.sh} "$HB/"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{orch-heartbeat.sh,poke-session.py,peer-state.py,unit-failure-alarm.sh} "$HB/"
 [ -e "$HB/orch-heartbeat-poke.md" ] || cp "${CLAUDE_PLUGIN_ROOT}/scripts/orch-heartbeat-poke.md" "$HB/"
 # The units carry the resolved config dir: the systemd user manager inherits no shell environment,
 # so a CLAUDE_CONFIG_DIR set in the shell would otherwise never reach the tick.
@@ -259,6 +268,21 @@ CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"; CFG="$(bash "$CHECK" file
 MSG="middle-management heartbeat: test alarm"
 printf '%s\n' "$MSG" | sh -c "$(jq -r .notifyCommand "$CFG")" notify "$MSG"
 ```
+
+**Keep-warm rides on the same timer.** Every tick also looks at ALL live sessions
+(`peer-state.py`, copied above): one that has not wrapped, has been idle 45 to 55
+minutes and either ends on an open question or carries a hold file
+`<config dir>/state/keep-warm/<sessionId>` gets one peer message from `keepwarm`
+that reads `KEEPWARM PING (automatic, not from your user, not an answer). Do
+nothing. Reply with exactly: ok`. That turn reads the prompt cache for a tenth of
+its price and keeps it warm for another hour, so the answer, when it comes, does
+not cost the session its whole context again. At most 3 pings per wait phase
+(about 2.5 h), then it goes cold; the count starts over once the session moves.
+Never a session parked on a permission prompt. Tell the user the two switches:
+`touch <config dir>/state/keep-warm/<sessionId>` holds a session warm that has no
+detected question, and `touch <config dir>/state/keep-warm/off` turns keep-warm
+off on this machine. The units run the copies, so a plugin update reaches
+keep-warm only after this step is re-run.
 
 Disarm and uninstall are in the skill; never run them here unasked.
 

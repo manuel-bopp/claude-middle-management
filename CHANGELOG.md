@@ -43,6 +43,31 @@ plugin's rules in view on every message; it never kept the long project rules in
 is where the day's slips came from. The morning ritual runs the same check over the night's
 landings.
 
+**Every deliverable goes through a review loop, with a hard end.** New skill `review-loop`: before
+a plan or handoff is sent, and before a result is reported done or "geprüft", a fresh-context
+reviewer checks it against its acceptance criteria and must prove each finding against the code or
+doc; a finding without evidence is dropped. The session fixes what was confirmed and a NEW
+reviewer runs on the revised version, until a round finds nothing. Four rounds per deliverable at
+most, then the open findings go to the coordinator or the user and nothing is called clean. Opus
+at xhigh reviews by default; Fable reviews money, security, data and the customer path from the
+first round, and takes over when Opus still finds something after two, both inside the cap. The
+rule existed as one sentence and a diagram edge; the only loop anyone ran lived in a skill on
+another machine and covered plans only. Both wraps now run it before the recap unless it already
+ran on the final state, the worker section names it beside the criteria tick-off, and an
+optional gate (`reviewLoopGate`, off by default) holds a real plan or a handoff doc until the loop
+ran in the same session within the hour.
+
+**Sessions waiting on their user stay warm.** The heartbeat tick now also looks at every live
+session: one that has not wrapped, has been idle 45 to 55 minutes, and ends on an open question
+(or carries a hold file `<config dir>/state/keep-warm/<sessionId>`) gets one peer message from
+`keepwarm` asking it to reply `ok`. That turn reads the prompt cache for a tenth of its price and
+keeps it for another hour; a cold wake costs the whole context again. At most 3 pings per wait phase, about 2.5 hours, then it goes cold;
+the count starts over when the session moves. Never on a session parked on a permission prompt,
+where a queued message starts no turn. `<config dir>/state/keep-warm/off` turns it off for the
+machine. The wake-cost rule gains its one exception: this ping is the only message that may go
+to a waiting session, and its user still answers the question. The units run copies, so re-run
+setup step 5 after the update; it now copies `peer-state.py` too.
+
 ## 0.7.1 — 2026-09-23
 
 **The closing line is one fixed string again: `Close this tab.`, alone on the last line, in every

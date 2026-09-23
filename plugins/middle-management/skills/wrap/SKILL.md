@@ -5,7 +5,7 @@ description: The end-of-session routine every middle-management session runs, an
 
 # Wrap — closing one session
 
-Nine steps, in order. The coordinator's tab list (`scripts/peer-state.py --wrapped`) reads its
+Ten steps, in order. The coordinator's tab list (`scripts/peer-state.py --wrapped`) reads its
 verdict out of what this routine writes — the session-log marker first, the closing lines as the
 fallback — and both must come from the same wrap in the same session, or neither counts: a
 closing phrase whose log entry says anything but `Status: completed` reads as a coordinator
@@ -106,6 +106,9 @@ Anything open that will not be finished here gets `docs/handoffs/<YYYY-MM-DD>_ha
 `## Suggested skills` and, last, `## Coordinate Closet` — literal `key: value` coordinates: ids,
 SHAs, ports, absolute paths, branch names. The copy-paste next-session prompt goes in the recap
 with a `Recommended model:` line. Items waiting on your user go under "Your call" instead.
+The handoff gets its review loop (step 7b) BEFORE it is written: draft it in your scratch dir,
+run the loop on the draft, then write the file; with `reviewLoopGate` on, the write is refused
+otherwise.
 
 ## 6. File the open items — optional
 
@@ -120,6 +123,15 @@ Skip the step entirely otherwise. Run the repo's configured formatter/linter if 
 `git add -A` sweeps a parallel session's parked work into your commit, which is what this
 plugin's staging guard exists to stop — then commit with a message mirroring the log headline.
 **Never push**; mention push status only where a remote exists.
+
+## 7b. Review loop on what this session delivered
+
+Run the `review-loop` skill on what this session delivered (the result; the handoff already had
+its own loop in step 5), unless it already ran on the final state; a change made after its last round means it
+did not. The recap names the round count and the last reviewer's verdict, e.g. `Review loop: 2
+rounds, last verdict CLEAN (Opus 5.5, xhigh)`, or after the cap of 4 the findings still open.
+Fixes are committed like step 7; findings still open after the cap join the step 5 list and
+the handoff. A session that delivered nothing reviewable says so in one line.
 
 ## 8. Recap, then the three closing lines
 

@@ -16,6 +16,10 @@
 # call, no quota - the transport must not depend on the resource a usage limit exhausts.
 # It re-triggers an IDLE session; a session asleep inside an API retry only buffers it. So this
 # is a net for DEAD TURNS, and merely harmless otherwise.
+# Second, independent job (keep_warm, before the coordinator check): ANY live, unwrapped interactive, non-SDK session
+# idle 45 to 55 minutes that waits on a question (peer-state.py --waiting) or carries a hold file
+# gets one fixed "reply ok" ping, so its prompt cache is read (cheap) instead of going cold (its
+# whole context again). At most 3 per wait phase; never a session parked on a permission prompt.
 # Linux only: /proc/<pid>/stat, systemd user units, GNU date. Arm, disarm, uninstall and the
 # alarm lines: skill middle-management, section "Recovery after a kill".
 #
@@ -256,6 +260,50 @@ limit_cause() { # limit_cause <transcript> <episode start epoch>
   return 0
 }
 
+# --- keep-warm ------------------------------------------------------------------------------
+# Opt-out machine-wide: <KW_DIR>/off. Opt-in without a detected question: <KW_DIR>/<sessionId>.
+# Counter per session: $STATE/keepwarm-<sessionId> = "<pings> <epoch of the last ping>" (no .json
+# suffix, so close_foreign_episodes leaves it alone). The session's own "ok" lands within
+# KW_GRACE of the ping; activity later than that means it moved, and the wait phase starts over.
+# After the first ping the question is no longer its last text, so the counter file itself keeps
+# the session eligible. Test seams: OHB_PEERS (a peer-state --json array), OHB_KEEPWARM_DIR.
+KW_DIR=${OHB_KEEPWARM_DIR:-$CFG_DIR/state/keep-warm}
+KW_TEXT='KEEPWARM PING (automatic, not from your user, not an answer). Do nothing. Reply with exactly: ok'
+KW_FROM=2700; KW_TO=3300; KW_CAP=3; KW_GRACE=300   # seconds idle: ping inside [45, 55) min;
+# grace: a slow "ok" must not end the phase, and a real answer inside it costs at most the cap
+keep_warm() {
+  [ -e "$KW_DIR/off" ] && return 0
+  local rows sid idle waiting n last f body now seen=" "
+  now=$(date +%s)
+  if [ -n "${OHB_PEERS+x}" ]; then rows=$(cat "$OHB_PEERS" 2>/dev/null || true)
+  else rows=$(python3 "$HB_DIR/peer-state.py" --json 2>/dev/null) || { log "keep-warm: peer-state.py failed"; return 0; }
+  fi
+  while IFS=$'\t' read -r sid idle waiting; do
+    seen="$seen$sid "; f=$STATE/keepwarm-$sid
+    { read -r n last < "$f"; } 2>/dev/null || { n=0; last=0; }
+    [ $((now - idle)) -gt $((last + KW_GRACE)) ] && { n=0; rm -f "$f"; }
+    [ "$waiting" = permission ] && continue      # a queued message there refreshes nothing
+    [ "$waiting" = question ] || [ -e "$KW_DIR/$sid" ] || [ "$n" -gt 0 ] || continue
+    [ "$idle" -ge "$KW_FROM" ] && [ "$idle" -lt "$KW_TO" ] && [ "$n" -lt "$KW_CAP" ] || continue
+    n=$((n + 1))
+    if [ -n "$POKE_SINK" ]; then printf '%s keepwarm#%s\n' "$sid" "$n" >> "$POKE_SINK"
+    else
+      body=$(mktemp); printf '%s\n' "$KW_TEXT" > "$body"
+      POKE_FROM_NAME=keepwarm python3 "$POKE_SENDER" "$sid" "$body" >&2 || log "keep-warm: poke-session exit $? for $sid"
+      rm -f "$body"
+    fi
+    printf '%s %s\n' "$n" "$now" > "$f"
+    log "keep-warm: ping #$n/$KW_CAP to $sid (idle $((idle / 60)) min, waiting=$waiting)"
+  done < <(printf '%s' "${rows:-[]}" | jq -r '.[] | select(.live == true and .kind == "interactive"
+             and ((.entrypoint // "") | startswith("sdk") | not)
+             and .wrapped != "yes" and .idle_seconds != null) | [.session_id, .idle_seconds, (.waiting // "-")] | @tsv' 2>/dev/null)
+  for f in "$STATE"/keepwarm-*; do              # counters of sessions gone or wrapped
+    [ -e "$f" ] || continue
+    case "$seen" in *" ${f##*/keepwarm-} "*) ;; *) rm -f "$f" ;; esac
+  done
+  return 0
+}
+
 # ============================ subcommands ===================================================
 case "${1:-tick}" in
   # classify is the read-only diagnostic: it prints a verdict and touches NO state, so running
@@ -277,6 +325,9 @@ trap 'rc=$?; if [ "$BASHPID" != "$$" ]; then exit $rc; fi
       if should_alarm internal-error 3600 2>/dev/null; then
         alarm "heartbeat: internal error (exit $rc, line $LINENO) - journalctl --user -u orch-heartbeat.service"; fi
       TICK_NOTE="error(exit $rc)"; exit 0' ERR
+
+# 0. Keep-warm runs first and never ends the tick: every branch below may exit early.
+keep_warm || log "keep-warm: failed this tick"
 
 # 1. Who coordinates? Marker first, then the name fallback session-role.sh implements.
 ID=""; NAME=""; SRC=""

@@ -84,6 +84,11 @@ you are. One line per criterion; the list goes in your report file and the repor
 how many are met. The coordinator then checks your list against the kickoff instead of
 re-deriving it from prose.
 
+**Run the review loop before either claim.** Your plan before you build, your result before you
+report it ready: skill `review-loop`, a fresh reviewer per round, refute by default, until a
+round finds nothing, at most 4 rounds. The report names the round count and the last verdict;
+a lane that hit the cap reports its open findings and is not ready.
+
 **"Ready" names the commit it was tested on.** Your ready report carries the tip SHA your tests
 and blocker check ran on. A rebase or a new commit voids the claim until you re-run on the new
 tip and report the new SHA; a rebase that leaves the tree byte-identical (same
@@ -354,6 +359,13 @@ own context. Seven of the eight existed only to tell an already-wrapped lane to 
 Under the hour the cache is usually still warm and a message is cheap — that is a rule of
 thumb, not a guarantee.
 
+**One exception: the keep-warm ping.** A session that is idle under 55 minutes, waiting on its
+user (an open question, or a hold file) and not wrapped may get the heartbeat's keep-warm ping,
+because its cache is still warm and one "reply ok" turn keeps it so. That ping is the ONLY
+message that may go to a waiting session. Its user still answers the question; sessions do not,
+and no session "helps" by answering it. The heartbeat sends it on its own (see "Recovery after
+a kill"); nobody sends it by hand.
+
 The reader is deliberately conservative: `unknown` means "may be messaged". It never
 suppresses a message it is unsure about, because a lane that never hears from you is the
 worse failure. Idle time alone proves nothing either — a session parked mid-work and a
@@ -491,12 +503,22 @@ healthy; `peer-state.py --waiting` can), nor anything on a machine that is off. 
 an *idle* session is proven; that it re-triggers a session whose *turn died* is not — treat
 the alarm as the reliable half of this unit and the poke as the cheap bet.
 
+**Keep-warm**, the same tick's second job, watches every live session in a tab (no background or SDK
+session), not just the coordinator: unwrapped, idle 45 to 55 minutes, and either ending on a question
+(`peer-state.py --waiting` reads `question`) or carrying a hold file
+`<config dir>/state/keep-warm/<sessionId>` → one peer message from `keepwarm`: `KEEPWARM PING
+(automatic, not from your user, not an answer). Do nothing. Reply with exactly: ok`. At most 3
+per wait phase (about 2.5 h), then the session goes cold; the count starts over when the session
+moves. Never on `permission`: a message queued behind a permission dialog starts no turn, so it
+refreshes nothing. Off for the whole machine: `touch <config dir>/state/keep-warm/off`. One
+journal line per ping, no alarm. Receiving it: reply `ok` and nothing else.
+
 Files after the install: `<config dir>/middle-management-heartbeat/` — the scripts and
 your copy of the poke prompt, which later plugin updates do not touch; **after a plugin
 update, re-run setup step 5** so the scripts are refreshed — plus
 `~/.config/systemd/user/orch-heartbeat.{timer,service}` and `unit-failure-alarm@.service`,
 and state under `<config dir>/state/orch-heartbeat/` (one open episode per coordinator,
-`latches`, `last-tick`).
+`latches`, `last-tick`, and a `keepwarm-<sessionId>` ping counter per waiting session).
 
 - Armed? `systemctl --user list-timers orch-heartbeat.timer` and
   `cat <config dir>/state/orch-heartbeat/last-tick` — a timestamp older than 15 minutes

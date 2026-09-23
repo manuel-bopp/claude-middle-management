@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """peer-state.py - what every Claude Code session on this machine is doing, read from disk alone.
 
-Consumers: scripts/orchestrator.sh (stale-seat check), the coordinator by hand, the
-  middle-management skill. Nothing else calls it.
+Consumers: scripts/orchestrator.sh (stale-seat check), scripts/orch-heartbeat.sh (keep-warm,
+  reads --json from its installed copy), the coordinator by hand, the middle-management skill.
+  Nothing else calls it.
 
 Why it exists: asking a session how it is doing costs THAT session its whole conversation as
 fresh input tokens once it has fallen out of cache - measured on one machine in one morning:
@@ -542,7 +543,8 @@ def read_session(sid, entry, logs, names=(), markers=(), known=()):
     e = entry or {}
     started = e.get("startedAt")
     row = {"session_id": sid, "short": sid[:8], "name": e.get("name"), "pid": e.get("pid"),
-           "cwd": e.get("cwd"), "kind": e.get("kind"), "registry": entry is not None,
+           "cwd": e.get("cwd"), "kind": e.get("kind"), "entrypoint": e.get("entrypoint"),
+           "registry": entry is not None,
            "live": is_live(e.get("pid"), e.get("procStart")) if entry else False,
            "idle_seconds": None, "idle": "-", "ctx": None, "ctx_tokens": None,
            "wrapped": "unknown", "waiting": None,

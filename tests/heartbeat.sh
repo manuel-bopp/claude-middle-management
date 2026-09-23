@@ -6,6 +6,7 @@
 #   C  every transition, liveness outcome and latch, against a fake registry/marker/transcript
 #   D  the configured notifyCommand and the unit-failure alarm
 #   E  the real poke sender's envelope against a fake socket
+#   F  keep-warm: which waiting sessions get the "reply ok" ping, the cap, the off switch
 # The master setup this plugin derives from also re-runs the classifier against real stalled
 # transcripts (its section A); those files are private and stay there.
 # Alarms and pokes are redirected into files with OHB_ALARM_SINK / OHB_POKE_SINK; section D
@@ -128,6 +129,7 @@ tick() {
   OHB_REG=$ENVDIR/reg OHB_MARKER=$ENVDIR/state/orchestrator OHB_PROJECTS=$ENVDIR/projects \
   OHB_STATE_DIR=$ENVDIR/hbstate OHB_DIR=$ENVDIR/hb OHB_CONFIG=$ENVDIR/mm.json \
   OHB_ALARM_SINK=${ALARM_SINK_OVERRIDE-$ENVDIR/alarms} OHB_POKE_SINK=${POKE_SINK_OVERRIDE-$ENVDIR/pokes} \
+  OHB_PEERS=$ENVDIR/peers.json OHB_KEEPWARM_DIR=$ENVDIR/kw \
   "$SCRIPT" tick >"$ENVDIR/journal" 2>&1
   echo $?
 }
@@ -307,6 +309,56 @@ is "C17 one internal-error alarm" "$(grep -c 'internal error' "$ENVDIR/alarms")"
 is "C17 plus the legitimate one"  "$(alarms)" 2
 POKE_SINK_OVERRIDE="" tick >/dev/null
 is "C17 error alarm is latched"   "$(grep -c 'internal error' "$ENVDIR/alarms")" 1
+
+# ------------------------------------------------------------------------- F. keep-warm -----
+echo "F. keep-warm pings for waiting sessions"
+K=aaaaaaaa-0000-0000-0000-00000000000k
+# peers <idle_min> <waiting|null> [wrapped] -> the peer-state --json row keep-warm reads
+peers() { jq -n --arg s "$K" --argjson i "$(( $1 * 60 ))" --argjson w "$2" --arg x "${3:-no}" \
+  '[{session_id:$s, kind:"interactive", live:true, wrapped:$x, idle_seconds:$i, waiting:$w}]' > "$ENVDIR/peers.json"; }
+kw()   { grep -c keepwarm "$ENVDIR/pokes"; }
+kwset() { mkdir -p "$ENVDIR/hbstate"; printf '%s %s\n' "$1" "$(( $(date +%s) - $2 * 60 ))" > "$ENVDIR/hbstate/keepwarm-$K"; }
+kwsetup() { setup; transcript 3 < <( { u "20 min ago"; a "3 min ago"; } ); mkdir -p "$ENVDIR/kw"; }
+
+kwsetup; peers 50 '"question"'; tick >/dev/null
+is "F1 question, idle 50 min -> ping"          "$(kw)" 1
+is "F1 counter written"                        "$(cut -d' ' -f1 "$ENVDIR/hbstate/keepwarm-$K")" 1
+is "F1 coordinator watch unaffected"           "$(alarms)" 0
+kwsetup; peers 30 '"question"'; tick >/dev/null
+is "F2 idle 30 min -> not yet"                 "$(kw)" 0
+kwsetup; peers 60 '"question"'; tick >/dev/null
+is "F2 idle 60 min -> too late, cache is cold" "$(kw)" 0
+kwsetup; peers 50 '"permission"'; touch "$ENVDIR/kw/$K"; tick >/dev/null
+is "F3 permission, even with a hold -> never"  "$(kw)" 0
+kwsetup; peers 50 null; tick >/dev/null
+is "F4 no question, no hold -> nothing"        "$(kw)" 0
+touch "$ENVDIR/kw/$K"; tick >/dev/null
+is "F4 hold file -> ping"                      "$(kw)" 1
+kwsetup; peers 50 '"question"' yes; tick >/dev/null
+is "F5 wrapped -> nothing"                     "$(kw)" 0
+for w in '.kind = "bg"' '.entrypoint = "sdk-cli"'; do
+  kwsetup; peers 50 '"question"'; jq ".[0]$w" "$ENVDIR/peers.json" > "$TMP/e" && mv "$TMP/e" "$ENVDIR/peers.json"
+  tick >/dev/null
+  is "F5 not a tab ($w) -> nothing"             "$(kw)" 0
+done
+# F6 its own "ok" (activity right after the last ping) keeps the phase: ping #2 without a question
+kwsetup; kwset 1 51; peers 50 null; tick >/dev/null
+is "F6 phase carried by the counter -> ping #2" "$(grep -c 'keepwarm#2' "$ENVDIR/pokes")" 1
+kwsetup; kwset 3 51; peers 50 '"question"'; tick >/dev/null
+is "F7 cap of 3 reached -> silent"             "$(kw)" 0
+kwsetup; kwset 3 150; peers 50 '"question"'; tick >/dev/null
+is "F8 moved since (idle dropped) -> reset, ping #1" "$(grep -c 'keepwarm#1' "$ENVDIR/pokes")" 1
+kwsetup; peers 50 '"question"'; touch "$ENVDIR/kw/off"; tick >/dev/null
+is "F9 off switch -> nothing"                  "$(kw)" 0
+kwsetup; kwset 2 51; echo '[]' > "$ENVDIR/peers.json"; tick >/dev/null
+is "F10 counter of a gone session removed"     "$([ -e "$ENVDIR/hbstate/keepwarm-$K" ] && echo yes || echo no)" no
+# F11 the real send path: exact text, sender name, and never the closing phrase
+kwsetup; peers 50 '"question"'
+printf 'import os,sys\nopen(os.environ["KWOUT"],"w").write(os.environ.get("POKE_FROM_NAME","")+"|"+sys.argv[1]+"|"+open(sys.argv[2]).read())\n' \
+  > "$ENVDIR/hb/poke-session.py"
+KWOUT=$ENVDIR/kwout POKE_SINK_OVERRIDE="" tick >/dev/null
+is "F11 sender, target and exact text" "$(cat "$ENVDIR/kwout")" "keepwarm|$K|KEEPWARM PING (automatic, not from your user, not an answer). Do nothing. Reply with exactly: ok"
+is "F11 never the closing phrase"      "$(grep -ci 'close this tab' "$ENVDIR/kwout")" 0
 
 # ----------------------------------------------------------------- D. notifyCommand ---------
 echo "D. the configured notifyCommand and the unit-failure alarm"

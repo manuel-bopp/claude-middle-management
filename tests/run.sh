@@ -823,6 +823,31 @@ rm -f "$H/.claude/state/allow-hand-start"
 printf '{oops' > "$H/.claude/middle-management.json"
 assert_empty "unusable config -> hook silent (the role hook shouts instead)" "" "$(lru "$LANE" 'next dev')"
 
+say "== review gate (optional hook) =="
+RLG="$P/hooks/require-review-loop.sh"
+H="$(new_home)"
+rlg() {  # $1 = tool name, $2 = tool_input JSON -> the hook's stdout
+  jq -n --arg t "$1" --argjson i "$2" '{session_id:"sess-rl",tool_name:$t,tool_input:$i}' \
+    | HOME="$H" CLAUDE_CONFIG_DIR="" bash "$RLG" 2>&1
+}
+HANDOFF='{"file_path":"/x/docs/handoffs/2026-09-23_handoff-topic.md","content":"x"}'
+LONGPLAN="$(jq -n --arg p "$(printf 'step %.0s' $(seq 1 200))" '{plan:$p}')"
+printf '{"protectedCheckouts":[]}' > "$H/.claude/middle-management.json"
+assert_empty "config without the key -> gate silent" "" "$(rlg Write "$HANDOFF")"
+printf '{"reviewLoopGate":true,"protectedCheckouts":[]}' > "$H/.claude/middle-management.json"
+assert_has "handoff write without a review -> denied" '"deny"' "$(rlg Write "$HANDOFF")"
+assert_has "the denial names the skill" "review-loop" "$(rlg Write "$HANDOFF")"
+assert_has "a long plan without a review -> denied" '"deny"' "$(rlg ExitPlanMode "$LONGPLAN")"
+assert_empty "a two-line plan -> passes" "" "$(rlg ExitPlanMode '{"plan":"fix the typo"}')"
+assert_empty "any other file -> passes" "" "$(rlg Write '{"file_path":"/x/docs/notes.md","content":"x"}')"
+assert_empty "a name that merely contains handoff -> passes" "" "$(rlg Write '{"file_path":"/x/merge-handoff-infra.md"}')"
+mkdir -p "$H/.claude/state/review-loop"; echo '{}' > "$H/.claude/state/review-loop/sess-rl.json"
+assert_empty "fresh marker from the skill -> passes" "" "$(rlg Write "$HANDOFF")"
+touch -d '-2 hours' "$H/.claude/state/review-loop/sess-rl.json"
+assert_has "marker older than an hour -> denied again" '"deny"' "$(rlg Write "$HANDOFF")"
+printf '{oops' > "$H/.claude/middle-management.json"
+assert_empty "unusable config -> gate silent" "" "$(rlg Write "$HANDOFF")"
+
 say "== lane reaper: decisions against a stub wt =="
 REAPER="$P/scripts/lane-reaper.sh"
 H="$(new_home)"
