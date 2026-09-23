@@ -255,7 +255,7 @@ entry header, middle dot `·` in the closed line:
 - `## YYYY-MM-DD` — a day heading, and nothing else on that line. Entries under no day heading
   still count as entries, but a closed marker under none is ignored: its age cannot be checked.
 - `### HH:MM – [name] – topic` — the session's **display name** in brackets (anything after a
-  `/` inside them, `[name / Opus 5, WORKER]`, is free text), then the topic. `-`, `–` and `—` all
+  `/` inside them, `[name / Opus 5.5, WORKER]`, is free text), then the topic. `-`, `–` and `—` all
   parse.
 - `- Status: completed` — `completed`, `in-progress`, `blocked`, whatever you use; only
   `completed` corroborates a wrap. It describes **the entry's work**, not the session's life.

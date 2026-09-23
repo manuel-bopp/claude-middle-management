@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+**Opus 5.5 is the Opus standard.** The session-log example in the README names it (`[name / Opus 5.5, WORKER]`); the review-loop skill already did. No behaviour change, docs only.
+
 ## 0.7.2 — 2026-09-23
 
 **The tab list now shows which sessions are waiting on their user.** `peer-state.py` gains a
