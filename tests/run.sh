@@ -280,11 +280,20 @@ assert_has "an unfiled key -> N unfiled" "Open-items inbox: 1 unfiled in 1 file"
 printf -- '- cafe0001-W1 · user · decide it\n' >> "$H/board.md"
 OUT="$(role "$H" "sess-alpha")"
 assert_lacks "every key on the board -> silent" "Open-items inbox" "$OUT"
+# One unreadable drop file must not hide the others, and is named itself.
+printf '# gamma · cafe0002-x · /tmp\n- W1 · owner: lane · still open\n' > "$H/.claude/open-items/cafe0002-session-notes.md"
 chmod 000 "$H/.claude/open-items/cafe0001-session-notes.md"
 OUT="$(role "$H" "sess-alpha")"; RC=$?
 chmod 600 "$H/.claude/open-items/cafe0001-session-notes.md"
-assert_rc "a failing open-items script never fails the prompt" 0 "$RC"
-assert_lacks "...prints nothing of its error" "Traceback" "$OUT"
+assert_rc "an unreadable drop file never fails the prompt" 0 "$RC"
+assert_has "...the readable file's unfiled item still counts" "Open-items inbox: 1 unfiled in 1 file" "$OUT"
+assert_has "...and the unreadable one is named" "cafe0001-session-notes.md (PermissionError)" "$OUT"
+assert_lacks "...no traceback" "Traceback" "$OUT"
+# The script itself failing (here: no python3 on PATH) prints a fallback line, never silence.
+NOPY="$(mktemp -d -p "$TMPBASE")"; ln -s /usr/bin/* /bin/* "$NOPY"/ 2>/dev/null; rm -f "$NOPY"/python3*
+OUT="$(printf '{"session_id":"sess-alpha"}' | HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$NOPY" bash "$ROLE" 2>&1)"; RC=$?
+assert_rc "a failing count never fails the prompt" 0 "$RC"
+assert_has "...prints the fallback line instead of silence" "Open-items inbox: the count failed; run python3" "$OUT"
 assert_has "...and the rest of the banner still follows" "Current workers" "$OUT"
 rm -f "$H/.claude/middle-management.json"
 kill "$PEER" 2>/dev/null

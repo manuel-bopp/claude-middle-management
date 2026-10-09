@@ -147,8 +147,10 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
   printf 'model first, escalate after two failed attempts, never a third try on the same one.\n'
   [ -n "$NOTIFY" ] && printf 'Your off-keyboard channel to your user is configured (notifyCommand): use it for what must reach\nthem away from the desk — plain text, one topic, the fact first. The skill has the call.\n'
   [ -n "$BOARD" ] && printf 'You are the sole writer of the board %s; workers read it and report to you.\n' "$BOARD"
-  # The open-items inbox: one python run, silent at 0 and on any error; it never fails the prompt.
-  python3 "$PLUGIN_ROOT/scripts/open-items.py" count 2>/dev/null
+  # The open-items inbox: one python run, silent at 0. A failed count must not read as "inbox empty",
+  # so it prints one fallback line instead (no traceback); the prompt never fails.
+  python3 "$PLUGIN_ROOT/scripts/open-items.py" count 2>/dev/null \
+    || printf 'Open-items inbox: the count failed; run python3 "%s/scripts/open-items.py" list\n' "$PLUGIN_ROOT"
   printf 'Current workers: %s\n' "$(printf '%s\n' "$LIVE" | cut -f1 | grep -vxF "$ORCH" | tr '\n' ' ')"
 else
   printf 'Session role: WORKER ("%s"). The coordinator is "%s".\n' "${MY_NAME:-unnamed}" "${ORCH:-unnamed}"

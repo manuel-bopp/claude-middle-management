@@ -130,7 +130,8 @@ otherwise.
 
 With a tracker reachable from this session (its MCP server, `gh issue`, a capture skill): file
 every uncaptured, actionable item as a full ticket — context, links, acceptance criteria — after
-checking for duplicates. **Missing → the handoff is the record**, and one line says so.
+checking for duplicates. **Missing → the drop file (step 5) is the record** and the handoff carries
+the detail; one line says so.
 
 ## 7. Commit — git repositories only
 

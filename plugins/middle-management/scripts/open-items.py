@@ -8,7 +8,7 @@ Consumers: hooks/session-role.sh (`count`, coordinator branch; the write-now lin
 
 Usage:
   open-items.py add --owner user|coordinator|lane|external:<who> "<what> · next: <step> · src: <who, when> · <path>"
-  open-items.py add --done W<n> "<evidence: commit, live, the user's answer>"
+  open-items.py add --done W<n>|<sid8>-W<n> "<evidence: commit, live, the user's answer>"
   open-items.py add --wrapped          the wrap's last line, also when nothing is open
   open-items.py list                   every item not on the board yet, plus sessions that died unwrapped
   open-items.py count                  one banner line, or nothing when there is nothing to file
@@ -44,7 +44,8 @@ def peer_state():
 
 
 def board():
-    """(path or "", text or None). None = unset or unreadable: nothing counts as filed."""
+    """(path or "", the set of keys on it or None). One read and one scan per run.
+    None = unset or unreadable: nothing counts as filed."""
     try:
         p = json.load(open(os.path.join(CFG, "middle-management.json"), encoding="utf-8")).get("board")
     except (OSError, ValueError, AttributeError):
@@ -53,7 +54,7 @@ def board():
         return "", None
     p = os.path.expanduser(p)
     try:
-        return p, open(p, encoding="utf-8", errors="replace").read()
+        return p, set(BOARD_KEY.findall(open(p, encoding="utf-8", errors="replace").read()))
     except OSError:
         return p, None
 
@@ -80,10 +81,20 @@ def sid8_of(path):
     return os.path.basename(path)[:-len(SUFFIX)]
 
 
-def unfiled(path, text):
+def unfiled(path, keys):
     s8, (_, opn, _, _) = sid8_of(path), parse(path)
-    keys = set(BOARD_KEY.findall(text or ""))
-    return [(n, l) for n, l in sorted(opn.items()) if "%s-W%d" % (s8, n) not in keys]
+    return [(n, l) for n, l in sorted(opn.items()) if "%s-W%d" % (s8, n) not in (keys or ())]
+
+
+def scan(keys):
+    """([(file, unfiled items)], [(file, error name)]): one bad file must not hide the others."""
+    ok, bad = [], []
+    for f in files():
+        try:
+            ok.append((f, unfiled(f, keys)))
+        except (OSError, ValueError) as e:
+            bad.append((f, type(e).__name__))
+    return ok, bad
 
 
 def is_gone(s8):
@@ -116,6 +127,18 @@ def add(argv):
     sid, entry = own_session()
     if not sid:
         sys.exit("open-items: cannot resolve this session's id (no $CLAUDE_CODE_SESSION_ID, no registry entry up the process tree)")
+    # One entry = one physical line: a newline in the text would start a line the parser reads as
+    # another item, a done mark or WRAPPED.
+    text = " ".join(argv[2].split()) if len(argv) == 3 else ""
+    key = re.fullmatch(r"(?:(\w{8})-)?[Ww]?(\d+)", argv[1]) if len(argv) == 3 else None
+    if argv == ["--wrapped"]:
+        pass
+    elif argv[:1] == ["--done"] and text and key and key.group(1) in (None, sid[:8]):
+        pass
+    elif argv[:1] == ["--owner"] and text and OWNER.match(argv[1]):
+        pass
+    else:
+        sys.exit(__doc__.split("\n\n")[2])
     os.makedirs(DROP, exist_ok=True)
     path = os.path.join(DROP, sid[:8] + SUFFIX)
     with open(path, "a+", encoding="utf-8") as fh:
@@ -126,23 +149,21 @@ def add(argv):
                                             entry.get("cwd") or os.getcwd()))
             fh.flush()
         _, opn, top, _ = parse(path)
-        if argv[:1] == ["--wrapped"]:
+        if argv[0] == "--wrapped":
             line = "- WRAPPED %s · %d open" % (time.strftime("%H:%M"), len(opn))
-        elif argv[:1] == ["--done"] and len(argv) == 3:
-            n = int(argv[1].lstrip("Ww")) if argv[1].lstrip("Ww").isdigit() else 0
+        elif argv[0] == "--done":
+            n = int(key.group(2))
             if n not in opn:
-                sys.exit("open-items: W%s is not an open item in %s" % (argv[1].lstrip("Ww"), path))
-            line = "- W%d done · %s" % (n, argv[2])
-        elif argv[:1] == ["--owner"] and len(argv) == 3 and OWNER.match(argv[1]) and argv[2].strip():
+                sys.exit("open-items: %s-W%d is not an open item in %s" % (sid[:8], n, path))
+            line = "- W%d done · %s" % (n, text)
+        else:
             # Next free number from the file AND the board: a file deleted after its session died
             # comes back on resume (same sessionId), and W1 would then read as already filed.
-            _, text = board()
-            n = 1 + max([top] + [int(k.split("-W")[1]) for k in BOARD_KEY.findall(text or "")
+            _, keys = board()
+            n = 1 + max([top] + [int(k.split("-W")[1]) for k in keys or ()
                                  if k.startswith(sid[:8] + "-")])
-            line = "- W%d · owner: %s · %s" % (n, argv[1], argv[2].strip())
+            line = "- W%d · owner: %s · %s" % (n, argv[1], text)
             print("%s-W%d" % (sid[:8], n))
-        else:
-            sys.exit(__doc__.split("\n\n")[2])
         fh.write(line + "\n")
     print(path)
 
@@ -158,26 +179,35 @@ def not_configured(bpath, n):
 
 
 def count():
-    bpath, text = board()
-    per = [len(unfiled(f, text)) for f in files()]
-    n, m = sum(per), sum(1 for c in per if c)
-    if not n:
-        return
-    if text is None:
+    bpath, keys = board()
+    ok, bad = scan(keys)
+    n, m = sum(len(t) for _, t in ok), sum(1 for _, t in ok if t)
+    if n and keys is None:
         print("Open-items inbox: " + not_configured(bpath, n))
-    else:
+    elif n:
         print('Open-items inbox: %d unfiled in %d file%s (python3 "%s" list); put each key on the board,'
               " then open-items.py done <file> (middle-management skill, \"Open items\")."
               % (n, m, "s" if m > 1 else "", os.path.abspath(__file__)))
+    if bad:
+        print("Open-items inbox: %d drop file%s unreadable, items in it cannot be counted: %s"
+              % (len(bad), "s" if len(bad) > 1 else "",
+                 ", ".join("%s (%s)" % (os.path.basename(f), e) for f, e in bad)))
 
 
 def list_():
-    bpath, text = board()
-    if text is None:
-        print("Open-items inbox: " + not_configured(bpath, sum(len(unfiled(f, None)) for f in files())))
-    for f in files():
-        todo, gone = unfiled(f, text), is_gone(sid8_of(f))
-        lines, _, _, wrapped = parse(f)
+    bpath, keys = board()
+    ok, bad = scan(keys)
+    if keys is None:
+        print("Open-items inbox: " + not_configured(bpath, sum(len(t) for _, t in ok)))
+    for f, e in bad:
+        print("%s · unreadable (%s), fix or remove it by hand" % (f, e))
+    for f, todo in ok:
+        gone = is_gone(sid8_of(f))
+        try:
+            lines, _, _, wrapped = parse(f)
+        except (OSError, ValueError) as e:
+            print("%s · unreadable (%s), fix or remove it by hand" % (f, type(e).__name__))
+            continue
         if gone and not wrapped:
             state = "died unwrapped → backfill (resume it and run the wrap)"
         elif gone and not todo:
@@ -197,10 +227,13 @@ def done(arg):
     f = arg if os.path.isfile(arg) else os.path.join(DROP, os.path.basename(arg))
     if not (os.path.isfile(f) and f.endswith(SUFFIX)):
         sys.exit("open-items: no drop file %s" % arg)
-    bpath, text = board()
-    if text is None:
-        sys.exit("open-items: refused, " + not_configured(bpath, len(unfiled(f, None))))
-    todo = unfiled(f, text)
+    bpath, keys = board()
+    try:
+        todo = unfiled(f, keys)
+    except (OSError, ValueError) as e:
+        sys.exit("open-items: refused, %s is unreadable (%s)" % (f, type(e).__name__))
+    if keys is None:
+        sys.exit("open-items: refused, " + not_configured(bpath, len(todo)))
     if todo:
         sys.exit("open-items: refused, not on the board yet: "
                  + ", ".join("%s-W%d" % (sid8_of(f), n) for n, _ in todo))

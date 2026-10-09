@@ -190,7 +190,9 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
 
 - `board` (optional): a status/waiting board only the coordinator writes; workers read. Open
   items count as filed once their key is in it, so without it the open-items inbox never empties.
-  A symlink works (it is followed), which keeps the path stable while the board itself rotates.
+  A symlink works (it is followed), which keeps the path stable while the board itself rotates;
+  carry the keys of still-open items over to the new board, or the inbox lists them again. Keys go
+  on the board in full (`b42d7700-W2`), never as ranges (`-W1..W3`).
 - `notifyCommand` (optional): a shell command that reaches you when you are away from the
   keyboard — the ONE sender on the machine. The heartbeat, the unit-failure alarm and the
   coordinator itself run it with the message as `$1` and on stdin. Callers always pass plain

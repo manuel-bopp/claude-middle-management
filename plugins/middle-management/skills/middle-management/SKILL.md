@@ -238,19 +238,21 @@ whatever the old seat had not filed yet. So every "for later" goes to disk the m
   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/open-items.py" add --owner user|coordinator|lane|external:<who> "<what> · next: <step> · src: <who, when> · <path>"`,
   appends to `<config-dir>/open-items/<sid8>-session-notes.md` and prints the key
   `<sid8>-W<n>`; it numbers from the file and the board, so a key is never reused. `add --done W<n>
-  "<evidence>"` closes an item, `add --wrapped` is the wrap's last line (wrap skill, step 5).
+  "<evidence>"` (or the full key) closes an item, `add --wrapped` is the wrap's last line (wrap skill, step 5).
   Workers never write the board.
 - **Who files:** the coordinator. Its banner counts the unfiled items on every message;
   `open-items.py list` shows them per file, plus sessions gone without a `WRAPPED` line ("died
   unwrapped": backfill per morning ritual step 3). Filing = the whole key anywhere in a board line,
-  in the board's own format. Your reply to a worker's wrap report names the keys filed ("filed
-  b42d7700-W1..W3").
+  in the board's own format. Write every key in full (`b42d7700-W2`), never as a range like
+  `b42d7700-W1..W3`: only whole keys count. Your reply to a worker's wrap report names the keys
+  filed, in full ("filed b42d7700-W1, b42d7700-W2, b42d7700-W3").
 - **Who deletes:** the coordinator, with `open-items.py done <file>`, which refuses unless every
   open key is on the board AND the session is gone (peer-state's liveness, PID reuse included). A
   live tab's file stays even after its wrap: wrapped tabs get reused.
 - **No board configured** (`board` unset or unreadable): nothing counts as filed and nothing can be
   deleted; the banner says so. Set it with `/middle-management-setup`, ideally to a stable path
-  (a symlink you re-point when the board rotates).
+  (a symlink you re-point when the board rotates). Rotating the board: carry the keys of every
+  item still open over to the new board, otherwise the inbox lists them all again.
 
 ## The autonomous loop (optional)
 

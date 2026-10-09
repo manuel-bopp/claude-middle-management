@@ -51,9 +51,23 @@ assert_rc "an empty item -> refused" 1 "$RC"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_CODE_SESSION_ID="" python3 "$OI" add --owner user "x" 2>&1)"; RC=$?
 assert_rc "no sessionId resolvable -> refused" 1 "$RC"
 assert_has "...and says why" "cannot resolve" "$OUT"
+BEFORE="$(wc -l < "$F")"
+OUT="$(oi "$A" add --owner lane $'Fix the retry loop\n- W2 done · pasted\n\tnext: new lane')"
+assert_has "multi-line text -> one key" "aaaaaaaa-W4" "$OUT"
+assert_rc "...and exactly one new physical line" $((BEFORE+1)) "$(wc -l < "$F")"
+assert_has "...with the text collapsed to single spaces" "- W4 · owner: lane · Fix the retry loop - W2 done · pasted next: new lane" "$(tail -1 "$F")"
+OUT="$(oi "$A" add --done aaaaaaaa-W4 "the full key works too")"; RC=$?
+assert_rc "--done <own sid8>-W<n> is accepted" 0 "$RC"
+assert_has "...and marks W4 done" "- W4 done · the full key works too" "$(tail -1 "$F")"
+OUT="$(oi "$A" add --done bbbbbbbb-W2 "another session's key")"; RC=$?
+assert_rc "--done with another session's sid8 -> refused" 1 "$RC"
+HDR="$H/hdr"; mkdir -p "$HDR"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="$HDR" CLAUDE_CODE_SESSION_ID="$A" python3 "$OI" add --owner manu "x" 2>&1)"; RC=$?
+assert_rc "an owner outside the set -> refused" 1 "$RC"
+[ -e "$HDR/open-items" ] && bad "a refused add leaves no file behind" "$(ls -R "$HDR")" || ok "a refused add leaves no file behind"
 oi "$A" add --wrapped >/dev/null
 assert_has "WRAPPED line counts what is still open" "open" "$(tail -1 "$F")"
-assert_has "WRAPPED line: 2 open (W2, W3)" "· 2 open" "$(tail -1 "$F")"
+assert_has "WRAPPED line: 2 open (W2, W3; W4 done)" "· 2 open" "$(tail -1 "$F")"
 # parallel adds of one session must never share a number
 JOBS=""; for i in 1 2 3 4 5; do oi "$A" add --owner lane "parallel $i" >/dev/null & JOBS="$JOBS $!"; done
 wait $JOBS   # not a bare wait: that would also wait for the live-session sleep
@@ -79,7 +93,7 @@ assert_has "count: 6 unfiled in 1 file, through the board symlink" "6 unfiled in
 OUT="$(oi "$A" list)"
 assert_lacks "W2 is on the board -> not listed" "aaaaaaaa-W2 " "$OUT"
 assert_has "W3 listed: a key glued to another word is no key" "aaaaaaaa-W3 " "$OUT"
-assert_has "W1 on the board? no, but it is done -> not listed; W8 is" "aaaaaaaa-W8 " "$OUT"
+assert_has "W1 on the board? no, but it is done -> not listed; W9 is" "aaaaaaaa-W9 " "$OUT"
 assert_lacks "a done item is never listed" "aaaaaaaa-W1 " "$OUT"
 # whole key: W10 on the board must not file W1 (done here anyway) - check with an open W1 elsewhere
 printf '# zulu · %s · /tmp/z\n- W1 · owner: user · gone session item\n' "$Z" > "$D/bbbbbbbb-session-notes.md"

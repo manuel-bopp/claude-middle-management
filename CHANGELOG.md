@@ -11,8 +11,10 @@ every session, the coordinator included, appends each item the moment it appears
 script numbers `W<n>` itself, from the file and the board, so a compaction or a second wrap never
 reuses a key. The coordinator files an item by putting its key `<sid8>-W<n>` anywhere on the board
 (whole-key match: `-W1` is not filed by `-W10`); its banner counts the unfiled items on every
-message, one python run, silent at zero and silent on any error of the script, and says so when no
-`board` is configured. `list` shows what is unfiled per file and marks sessions gone without a
+message, one python run, silent at zero; it names an unreadable drop file instead of going quiet
+about the others, prints one fallback line when the count itself fails, and says so when no
+`board` is configured. Keys go on the board in full, never as ranges; a rotated board needs the
+still-open keys carried over. `list` shows what is unfiled per file and marks sessions gone without a
 `WRAPPED` line as "died unwrapped" for the morning backfill. `done <file>` deletes only when every
 open key is on the board and the session is gone, by `peer-state.py`'s liveness with its PID-reuse
 guard; a live tab's file stays even after its wrap, because wrapped tabs get reused. Both banners
