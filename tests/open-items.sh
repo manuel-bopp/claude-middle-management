@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# middle-management plugin: open-items.py against inline fixtures (fake HOME, never the real drop dir or board).
+# Consumers: tests/run.sh (folded into the main matrix); run by hand: bash tests/open-items.sh
+# Everything lives under mktemp: no real registry, no real ~/.claude/open-items, no real board.
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OI="$ROOT/plugins/middle-management/scripts/open-items.py"
+PASS=0; FAIL=0
+TMPBASE="$(mktemp -d -t mm-open-items.XXXXXX)"
+PEERS=""
+trap 'for p in $PEERS; do kill "$p" 2>/dev/null; done; case "$TMPBASE" in /tmp/*|/var/tmp/*) rm -rf "$TMPBASE" ;; esac' EXIT
+
+say() { printf '%s\n' "$*"; }
+ok()  { PASS=$((PASS+1)); say "  ok  - $1"; }
+bad() { FAIL=$((FAIL+1)); say "  FAIL- $1"; [ -n "${2:-}" ] && say "        got: $2"; }
+assert_has()   { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "$3" ;; esac; }
+assert_lacks() { case "$3" in *"$2"*) bad "$1" "$3" ;; *) ok "$1" ;; esac; }
+assert_rc()    { [ "$3" -eq "$2" ] && ok "$1" || bad "$1" "rc=$3 (want $2)"; }
+
+H="$(mktemp -d -p "$TMPBASE")"; [ "$H" = "$HOME" ] && { echo "refusing: real HOME"; exit 2; }
+C="$H/.claude"; D="$C/open-items"; B="$H/board.md"
+mkdir -p "$C/sessions"
+A=aaaaaaaa-1111-4000-8000-000000000001   # this session: live
+Z=bbbbbbbb-2222-4000-8000-000000000002   # another session: gone
+# oi <sessionId> args...: run as that session
+oi() { local s="$1"; shift; HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_CODE_SESSION_ID="$s" python3 "$OI" "$@" 2>&1; }
+sleep 300 >/dev/null 2>&1 </dev/null & LIVEPID=$!; PEERS="$PEERS $LIVEPID"
+printf '{"pid":%s,"sessionId":"%s","name":"alpha","cwd":"/tmp/x","kind":"interactive"}\n' "$LIVEPID" "$A" > "$C/sessions/$LIVEPID.json"
+printf '{"pid":999999,"sessionId":"%s","name":"zulu","cwd":"/tmp/z","kind":"interactive"}\n' "$Z" > "$C/sessions/999999.json"
+
+say "== add: numbering from the file =="
+OUT="$(oi "$A" add --owner user "Decide keep-alive default · next: user picks · src: finding 15:10")"
+assert_has "first add prints its key" "aaaaaaaa-W1" "$OUT"
+F="$D/aaaaaaaa-session-notes.md"
+[ -f "$F" ] && ok "the drop file is <sid8>-session-notes.md under <config dir>/open-items" || bad "drop file created" "$(ls -R "$C")"
+assert_has "header line: name · full sessionId · cwd" "# alpha · $A · /tmp/x" "$(head -1 "$F")"
+assert_has "item line format" "- W1 · owner: user · Decide keep-alive default" "$(cat "$F")"
+OUT="$(oi "$A" add --owner lane "Compare-and-set route · next: new lane")"
+assert_has "second add -> W2" "aaaaaaaa-W2" "$OUT"
+OUT="$(oi "$A" add --done W1 "41ab9c2 live 15:40")"
+assert_has "done line written" "- W1 done · 41ab9c2 live 15:40" "$(cat "$F")"
+OUT="$(oi "$A" add --owner external:zoki "Send the key")"
+assert_has "a done item keeps its number: next is W3, never W1 again" "aaaaaaaa-W3" "$OUT"
+OUT="$(oi "$A" add --done W9 "nope")"; RC=$?
+assert_rc "done of an unknown item -> refused" 1 "$RC"
+OUT="$(oi "$A" add --owner boss "x")"; RC=$?
+assert_rc "an unknown owner -> refused" 1 "$RC"
+OUT="$(oi "$A" add --owner user "")"; RC=$?
+assert_rc "an empty item -> refused" 1 "$RC"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_CODE_SESSION_ID="" python3 "$OI" add --owner user "x" 2>&1)"; RC=$?
+assert_rc "no sessionId resolvable -> refused" 1 "$RC"
+assert_has "...and says why" "cannot resolve" "$OUT"
+oi "$A" add --wrapped >/dev/null
+assert_has "WRAPPED line counts what is still open" "open" "$(tail -1 "$F")"
+assert_has "WRAPPED line: 2 open (W2, W3)" "· 2 open" "$(tail -1 "$F")"
+# parallel adds of one session must never share a number
+JOBS=""; for i in 1 2 3 4 5; do oi "$A" add --owner lane "parallel $i" >/dev/null & JOBS="$JOBS $!"; done
+wait $JOBS   # not a bare wait: that would also wait for the live-session sleep
+NUMS="$(grep -oE '^- W[0-9]+ · owner' "$F" | sort | uniq -d)"
+[ -z "$NUMS" ] && ok "five parallel adds get five distinct numbers" || bad "parallel adds collided" "$NUMS"
+
+say "== count, list: board unset =="
+OUT="$(oi "$A" count)"
+assert_has "board unset and items exist -> says so" "board not configured (/middle-management-setup)" "$OUT"
+printf '{"board":"%s"}' "$B" > "$C/middle-management.json"
+OUT="$(oi "$A" count)"
+assert_has "board set but missing -> not readable, with its path" "board $B is not readable" "$OUT"
+OUT="$(oi "$A" done "$F")"; RC=$?
+assert_rc "done without a readable board -> refused" 1 "$RC"
+assert_has "...and says so" "not readable" "$OUT"
+
+say "== whole-key match, count, list =="
+# W1 is done; W2..W8 open. Put W2 and W10 (not W1x, not W3) on the board.
+printf '# board\n- aaaaaaaa-W2 · lane · compare-and-set route\n- aaaaaaaa-W10 unrelated\n- xaaaaaaaa-W3 is not a key\n' > "$H/real-board.md"
+ln -s "$H/real-board.md" "$B"
+OUT="$(oi "$A" count)"
+assert_has "count: 6 unfiled in 1 file, through the board symlink" "6 unfiled in 1 file (" "$OUT"
+OUT="$(oi "$A" list)"
+assert_lacks "W2 is on the board -> not listed" "aaaaaaaa-W2 " "$OUT"
+assert_has "W3 listed: a key glued to another word is no key" "aaaaaaaa-W3 " "$OUT"
+assert_has "W1 on the board? no, but it is done -> not listed; W8 is" "aaaaaaaa-W8 " "$OUT"
+assert_lacks "a done item is never listed" "aaaaaaaa-W1 " "$OUT"
+# whole key: W10 on the board must not file W1 (done here anyway) - check with an open W1 elsewhere
+printf '# zulu · %s · /tmp/z\n- W1 · owner: user · gone session item\n' "$Z" > "$D/bbbbbbbb-session-notes.md"
+printf '%s\n' "- bbbbbbbb-W10 filed" >> "$H/real-board.md"
+OUT="$(oi "$A" list)"
+assert_has "bbbbbbbb-W10 on the board does not file bbbbbbbb-W1" "bbbbbbbb-W1 " "$OUT"
+assert_has "a gone session without WRAPPED -> died unwrapped" "died unwrapped" "$OUT"
+assert_has "list names the header" "# zulu · $Z" "$OUT"
+OUT="$(oi "$A" add --owner user "next after board keys")"
+assert_has "numbering also skips keys already on the board (W10) -> W11" "aaaaaaaa-W11" "$OUT"
+
+say "== done: the two rules =="
+OUT="$(oi "$A" done "$D/bbbbbbbb-session-notes.md")"; RC=$?
+assert_rc "done with a key missing from the board -> refused" 1 "$RC"
+assert_has "...naming the key" "bbbbbbbb-W1" "$OUT"
+printf '%s\n' "- bbbbbbbb-W1 · user · gone session item" >> "$H/real-board.md"
+OUT="$(oi "$A" done bbbbbbbb-session-notes.md)"; RC=$?
+assert_rc "every key filed, session gone -> deleted (by basename)" 0 "$RC"
+[ -f "$D/bbbbbbbb-session-notes.md" ] && bad "file deleted" || ok "file deleted"
+# the live session: file everything, still refused
+for n in $(seq 1 20); do printf -- '- aaaaaaaa-W%d\n' "$n"; done >> "$H/real-board.md"
+OUT="$(oi "$A" count)"
+[ -z "$OUT" ] && ok "everything filed -> count is silent" || bad "count silent at 0" "$OUT"
+OUT="$(oi "$A" done "$F")"; RC=$?
+assert_rc "everything filed but the session is live -> refused" 1 "$RC"
+assert_has "...and says why" "still live" "$OUT"
+# PID reuse: a live pid whose procStart does not match is a dead session
+printf '{"pid":%s,"sessionId":"%s","name":"alpha","cwd":"/tmp/x","kind":"interactive","procStart":"1"}\n' "$LIVEPID" "$A" > "$C/sessions/$LIVEPID.json"
+OUT="$(oi "$A" done "$F")"; RC=$?
+assert_rc "a reused pid (procStart mismatch) is gone -> deleted" 0 "$RC"
+
+say ""
+say "RESULT: $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

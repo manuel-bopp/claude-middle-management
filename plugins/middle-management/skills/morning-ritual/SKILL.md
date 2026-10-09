@@ -73,16 +73,23 @@ test/probe artifact (nothing owed) · **dead without closing its books → headl
 backfill**: `claude --resume <sessionId> -p "<your wrap command> — backfill
 (coordinator, date): …"`, sequential, in the background. The backfill prompt names:
 why (session died), what is already recorded on the board (so work is NOT
-repeated), the owed artifacts, and the guard rails: commit only that session's own
-files, board file explicitly forbidden (the coordinator is its only writer), no
-pushes, no outward sends. Below 75% certainty whose a dirty file is: verify (mtime,
-transcript grep) or leave it uncommitted and flag it — never guess ownership.
+repeated), the owed artifacts, its open-items drop file (`open-items.py list` marks
+it "died unwrapped"; the wrap adds what is missing there and ends it with `--wrapped`),
+and the guard rails: commit only that session's own files, board file explicitly
+forbidden (the coordinator is its only writer), no pushes, no outward sends. Below
+75% certainty whose a dirty file is: verify (mtime, transcript grep) or leave it
+uncommitted and flag it — never guess ownership.
 
 Done when every yesterday-transcript carries one of the four verdicts.
 
 ## 4. Open-items sweep → board
 
-Fold overnight movement into the board (config `.board`; the coordinator is its only
+Start with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/open-items.py" list`: every item a session
+wrote to its drop file that is not on the board yet. File each by putting its key `<sid8>-W<n>`
+in a board line, then `open-items.py done <file>` for every file it marks "all filed, session
+gone" (rules: middle-management skill, "Open items").
+
+Then fold overnight movement into the board (config `.board`; the coordinator is its only
 writer): externally resolved items (merged PRs, answered threads, arrived reports),
 the wrap-audit result, new sessions your user started this morning. Dated morning
 block; if the board lives in a git repo, commit surgically — the board file plus

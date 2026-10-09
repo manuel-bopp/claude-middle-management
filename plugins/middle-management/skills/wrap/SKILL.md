@@ -98,8 +98,24 @@ format is frozen — `scripts/peer-state.py` parses exactly this:
 
 Walk the session from its beginning, not just the last stretch: open decisions, started-but-
 unfinished work, promises you made and did not keep, findings neither fixed nor filed, work now
-waiting on someone else. Give each a stable ID `W1, W2, …` and an **owner**, and state the result
-in the recap either way — the list, or "Completeness sweep: nothing open."
+waiting on someone else. Each gets an **owner**, and state the result in the recap either way: the
+list, or "Completeness sweep: nothing open."
+
+**The drop file is mandatory, also when nothing is open.** Every item goes into this session's
+open-items file, the record the coordinator files on the board (middle-management skill, "Open
+items"). One command per line, never typed by hand; it numbers `W<n>` itself, so an item written
+earlier in the session keeps its key: check the file (`<config-dir>/open-items/<sid8>-session-notes.md`)
+and add only what is missing. An earlier item finished since gets `--done` with its evidence. End
+with `--wrapped`:
+
+```bash
+OI="${CLAUDE_PLUGIN_ROOT}/scripts/open-items.py"
+python3 "$OI" add --owner lane "<what> · next: <step> · src: <who, when> · <path>"   # or user, coordinator, external:<who>
+python3 "$OI" add --done W2 "<evidence: commit, live, your user's answer>"
+python3 "$OI" add --wrapped
+```
+
+The recap and the handoff name the keys `add` printed (`<sid8>-W<n>`).
 
 Anything open that will not be finished here gets `docs/handoffs/<YYYY-MM-DD>_handoff-<topic>.md`:
 3–5 sentences of context, then per item status · next step · who it waits on · paths, ending on
@@ -130,8 +146,8 @@ Run the `review-loop` skill on what this session delivered (the result; the hand
 its own loop in step 5), unless it already ran on the final state; a change made after its last round means it
 did not. The recap names the round count and the last reviewer's verdict, e.g. `Review loop: 2
 rounds, last verdict CLEAN (Opus 5.5, xhigh)`, or after the cap of 4 the findings still open.
-Fixes are committed like step 7; findings still open after the cap join the step 5 list and
-the handoff. A session that delivered nothing reviewable says so in one line.
+Fixes are committed like step 7; findings still open after the cap join the step 5 list, the
+drop file (followed by a fresh `--wrapped`) and the handoff. A session that delivered nothing reviewable says so in one line.
 
 ## 8. Recap, then the three closing lines
 

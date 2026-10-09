@@ -258,6 +258,37 @@ assert_lacks "sessionLog does not make the config invalid" "is invalid" "$OUT"
 rm -f "$H/.claude/middle-management.json"
 kill "$PEER" 2>/dev/null
 
+say "== the open-items drop in the banner =="
+# Both roles get the write-now line; only the coordinator gets the inbox count, silent at 0.
+H="$(new_home)"; PEER="$(add_peer "$H")"
+HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim >/dev/null 2>&1
+OUT="$(role "$H" "sess-alpha")"
+assert_has "orchestrator banner: write-now line with the add command path" "$P/scripts/open-items.py\" add --owner" "$OUT"
+assert_lacks "no drop files -> no inbox line" "Open-items inbox" "$OUT"
+OUT="$(role "$H" "sess-beta")"
+assert_has "worker banner: the same write-now line" "$P/scripts/open-items.py\" add --owner" "$OUT"
+mkdir -p "$H/.claude/open-items"
+printf '# beta · cafe0001-x · /tmp\n- W1 · owner: user · decide it\n' > "$H/.claude/open-items/cafe0001-session-notes.md"
+OUT="$(role "$H" "sess-alpha")"
+assert_has "items but no board -> the coordinator hears it cannot file them" "board not configured (/middle-management-setup), 1 items" "$OUT"
+OUT="$(role "$H" "sess-beta")"
+assert_lacks "the worker never gets the inbox line" "Open-items inbox" "$OUT"
+printf '# board\n' > "$H/board.md"
+printf '{"board":"%s/board.md"}' "$H" > "$H/.claude/middle-management.json"
+OUT="$(role "$H" "sess-alpha")"
+assert_has "an unfiled key -> N unfiled" "Open-items inbox: 1 unfiled in 1 file" "$OUT"
+printf -- '- cafe0001-W1 · user · decide it\n' >> "$H/board.md"
+OUT="$(role "$H" "sess-alpha")"
+assert_lacks "every key on the board -> silent" "Open-items inbox" "$OUT"
+chmod 000 "$H/.claude/open-items/cafe0001-session-notes.md"
+OUT="$(role "$H" "sess-alpha")"; RC=$?
+chmod 600 "$H/.claude/open-items/cafe0001-session-notes.md"
+assert_rc "a failing open-items script never fails the prompt" 0 "$RC"
+assert_lacks "...prints nothing of its error" "Traceback" "$OUT"
+assert_has "...and the rest of the banner still follows" "Current workers" "$OUT"
+rm -f "$H/.claude/middle-management.json"
+kill "$PEER" 2>/dev/null
+
 say "== stale seat: claim over a holder that WRAPPED but left its tab open =="
 # Everything the route needs is on disk — a registry entry (add_peer), a transcript, and that
 # transcript's mtime as the idle age. The holder is never messaged, so no peer is started here.
@@ -982,6 +1013,14 @@ say "  ${PS_LINE:-peer-state matrix did not report}"
 [ "$PS_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
 say ""
+say "== open-items (tests/open-items.sh) =="
+OI_OUT="$(bash "$ROOT/tests/open-items.sh" 2>&1)"; OI_RC=$?
+printf '%s\n' "$OI_OUT" | grep -E '^\s+(FAIL|skip)' || true
+OI_LINE="$(printf '%s\n' "$OI_OUT" | grep -E '^RESULT:' | tail -1)"
+say "  ${OI_LINE:-open-items matrix did not report}"
+[ "$OI_RC" -eq 0 ] || FAIL=$((FAIL+1))
+
+say ""
 say "== heartbeat (tests/heartbeat.sh) =="
 HB_OUT="$(bash "$ROOT/tests/heartbeat.sh" 2>&1)"; HB_RC=$?
 printf '%s\n' "$HB_OUT" | grep -E '^\s+(FAIL|skip)' || true
@@ -990,5 +1029,5 @@ say "  ${HB_LINE:-heartbeat matrix did not report}"
 [ "$HB_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
 say ""
-say "RESULT: $PASS passed, $FAIL failed (plus peer-state: ${PS_LINE:-FAILED TO RUN}; heartbeat: ${HB_LINE:-FAILED TO RUN})"
+say "RESULT: $PASS passed, $FAIL failed (plus peer-state: ${PS_LINE:-FAILED TO RUN}; open-items: ${OI_LINE:-FAILED TO RUN}; heartbeat: ${HB_LINE:-FAILED TO RUN})"
 [ "$FAIL" -eq 0 ]

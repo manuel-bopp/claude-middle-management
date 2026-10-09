@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-10-09
+
+**Open items never get dropped.** A to-do said mid-session lived in that transcript only until the
+wrap, and a session that died before its wrap took it along; what the wrap did write sat in a
+session-log entry or a handoff that only the morning ritual read, by hand, once a day. A 7-day
+audit on one machine found 77 of 296 items still open and 104 unclear. New `scripts/open-items.py`:
+every session, the coordinator included, appends each item the moment it appears to its own file
+`<config-dir>/open-items/<sid8>-session-notes.md` (`add`, `add --done W<n>`, `add --wrapped`). The
+script numbers `W<n>` itself, from the file and the board, so a compaction or a second wrap never
+reuses a key. The coordinator files an item by putting its key `<sid8>-W<n>` anywhere on the board
+(whole-key match: `-W1` is not filed by `-W10`); its banner counts the unfiled items on every
+message, one python run, silent at zero and silent on any error of the script, and says so when no
+`board` is configured. `list` shows what is unfiled per file and marks sessions gone without a
+`WRAPPED` line as "died unwrapped" for the morning backfill. `done <file>` deletes only when every
+open key is on the board and the session is gone, by `peer-state.py`'s liveness with its PID-reuse
+guard; a live tab's file stays even after its wrap, because wrapped tabs get reused. Both banners
+carry one write-now line naming the `add` command; the wrap's completeness sweep (step 5) writes
+the file, `--wrapped` included, also when nothing is open; the morning ritual starts its board
+sweep with `list` and names the drop file in every backfill prompt. No change to `peer-state.py`,
+the session-log format or the board's format.
 
 **Opus 5.5 is the Opus standard.** The session-log example in the README names it (`[name / Opus 5.5, WORKER]`); the review-loop skill already did. No behaviour change, docs only.
 

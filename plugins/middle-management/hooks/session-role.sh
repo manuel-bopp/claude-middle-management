@@ -2,7 +2,7 @@
 # middle-management plugin — UserPromptSubmit hook.
 # Consumers: hooks/hooks.json (UserPromptSubmit registration). Reads the coordinator
 # marker written by scripts/orchestrator.sh; resolves every path through
-# scripts/config-check.sh.
+# scripts/config-check.sh; runs scripts/open-items.py count in the coordinator branch.
 #
 # Exactly ONE session coordinates, every other session is a worker. Two sources for
 # "who coordinates", in this order:
@@ -147,6 +147,8 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
   printf 'model first, escalate after two failed attempts, never a third try on the same one.\n'
   [ -n "$NOTIFY" ] && printf 'Your off-keyboard channel to your user is configured (notifyCommand): use it for what must reach\nthem away from the desk — plain text, one topic, the fact first. The skill has the call.\n'
   [ -n "$BOARD" ] && printf 'You are the sole writer of the board %s; workers read it and report to you.\n' "$BOARD"
+  # The open-items inbox: one python run, silent at 0 and on any error; it never fails the prompt.
+  python3 "$PLUGIN_ROOT/scripts/open-items.py" count 2>/dev/null
   printf 'Current workers: %s\n' "$(printf '%s\n' "$LIVE" | cut -f1 | grep -vxF "$ORCH" | tr '\n' ' ')"
 else
   printf 'Session role: WORKER ("%s"). The coordinator is "%s".\n' "${MY_NAME:-unnamed}" "${ORCH:-unnamed}"
@@ -163,6 +165,7 @@ else
   [ -n "$BOARD" ] && printf 'The board %s is read-only for you — the coordinator is its only writer.\n' "$BOARD"
 fi
 # Both roles wrap, so these lines live outside the branches — one copy, no drift.
+printf 'Something for later (your user names it, a finding you will not fix, a promise you cannot keep here, work now waiting on someone): write it NOW, same turn: python3 "%s/scripts/open-items.py" add --owner user|coordinator|lane|external:<who> "<what> · next: <step> · src: <who, when> · <path>"\n' "$PLUGIN_ROOT"
 # The closed-marker instruction is only actionable where a log exists or the user picked a path
 # for one; on a machine with neither it was permanent noise (nothing says where to write it).
 # Exit 0 from `session-log` = the path was CHOSEN ($MM_SESSION_LOG or the sessionLog key), so a
