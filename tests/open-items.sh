@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # middle-management plugin: open-items.py against inline fixtures (fake HOME, never the real drop dir or board).
 # Consumers: tests/run.sh (folded into the main matrix); run by hand: bash tests/open-items.sh
+# Covers add / list / count / done and todo (the user's to-do list, morning ritual step 6).
 # Everything lives under mktemp: no real registry, no real ~/.claude/open-items, no real board.
 set -u
 
@@ -124,6 +125,52 @@ assert_has "...and says why" "still live" "$OUT"
 printf '{"pid":%s,"sessionId":"%s","name":"alpha","cwd":"/tmp/x","kind":"interactive","procStart":"1"}\n' "$LIVEPID" "$A" > "$C/sessions/$LIVEPID.json"
 OUT="$(oi "$A" done "$F")"; RC=$?
 assert_rc "a reused pid (procStart mismatch) is gone -> deleted" 0 "$RC"
+
+say "== todo: your user's open to-dos, delta since the last delivery =="
+H="$(mktemp -d -p "$TMPBASE")"; C="$H/.claude"; D="$C/open-items"; B="$H/board.md"
+mkdir -p "$C/sessions"
+printf '{"pid":%s,"sessionId":"%s","name":"alpha","cwd":"/tmp/x","kind":"interactive"}\n' "$LIVEPID" "$A" > "$C/sessions/$LIVEPID.json"
+OUT="$(oi "$A" todo)"
+assert_has "nothing anywhere -> none open, board named" "none open (board not configured, drop files only)" "$OUT"
+oi "$A" add --owner user "Decide the keep-alive default · next: user picks · src: 15:10" >/dev/null
+oi "$A" add --owner lane "Fix the retry loop" >/dev/null
+oi "$A" add --owner user "Open https://example.test/review and vote" >/dev/null
+oi "$A" add --owner user "Run the home scan" >/dev/null
+oi "$A" add --done W4 "ran it" >/dev/null
+OUT="$(oi "$A" todo)"
+assert_has "drop items with owner user are listed" "- aaaaaaaa-W1 · Decide the keep-alive default · next: user picks" "$OUT"
+assert_has "...with the link on the same line" "- aaaaaaaa-W3 · Open https://example.test/review and vote" "$OUT"
+assert_lacks "a lane item is not your user's" "aaaaaaaa-W2" "$OUT"
+assert_lacks "a done item is not open" "aaaaaaaa-W4" "$OUT"
+assert_has "the header counts them, nothing delivered yet" "2 new (nothing delivered before); 2 open in total" "$OUT"
+assert_has "the last line is the exact delivered command" "todo --delivered aaaaaaaa-W1 aaaaaaaa-W3" "$OUT"
+# The board: a line in the drop format wins (owner and text), "<key> done" closes, user+lane counts.
+printf '{"board":"%s"}' "$B" > "$C/middle-management.json"
+printf '# board\n- aaaaaaaa-W1 · owner: user · Decide the keep-alive default (board text) · next: user\n- cccccccc-W2 · owner: user+lane(home) · Home session for the viewer pages\n- dddddddd-W1 · owner: user · Already answered\n- 10:40 dddddddd-W1 DONE.\n- eeeeeeee-W1 · owner: coordinator · not yours\nWaiting on Manu: aaaaaaaa-W3 (prose, not an item line)\n' > "$B"
+OUT="$(oi "$A" todo)"
+assert_has "the board line wins over the drop line" "- aaaaaaaa-W1 · Decide the keep-alive default (board text)" "$OUT"
+assert_has "a board-only item with owner user+lane counts" "- cccccccc-W2 · Home session for the viewer pages" "$OUT"
+assert_lacks "'<key> DONE' on the board closes the item" "dddddddd-W1" "$OUT"
+assert_lacks "a coordinator item is not listed" "eeeeeeee-W1" "$OUT"
+assert_has "the drop item the board only mentions in prose stays" "- aaaaaaaa-W3 · Open https://example.test/review" "$OUT"
+OUT="$(oi "$A" todo --delivered aaaaaaaa-W1 aaaaaaaa-W3)"; RC=$?
+assert_rc "--delivered records the keys" 0 "$RC"
+assert_has "...in the ritual's state dir" "$C/state/morning-ritual/delivered" "$OUT"
+OUT="$(oi "$A" todo)"
+assert_has "after delivery only the new one is listed" "1 new since $(date +%Y-%m-%d)" "$OUT"
+assert_has "...and it is the board-only one" "- cccccccc-W2" "$OUT"
+assert_lacks "a delivered item does not come again" "aaaaaaaa-W1 ·" "$OUT"
+assert_has "...but the total still counts it" "3 open in total" "$OUT"
+OUT="$(oi "$A" todo --all)"
+assert_has "--all lists every open one" "- aaaaaaaa-W1 ·" "$OUT"
+oi "$A" todo --delivered cccccccc-W2 >/dev/null
+OUT="$(oi "$A" todo)"
+assert_has "all delivered -> nothing new, the total named" "nothing new since" "$OUT"
+assert_has "...3 open" "3 open in total (todo --all lists them)" "$OUT"
+OUT="$(oi "$A" todo --delivered "not-a-key")"; RC=$?
+assert_rc "--delivered with a malformed key -> refused" 1 "$RC"
+OUT="$(oi "$A" todo --bogus)"; RC=$?
+assert_rc "an unknown todo flag -> usage" 1 "$RC"
 
 say ""
 say "RESULT: $PASS passed, $FAIL failed"

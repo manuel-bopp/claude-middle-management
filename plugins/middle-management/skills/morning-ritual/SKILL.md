@@ -1,12 +1,14 @@
 ---
 name: morning-ritual
-description: The coordinator's morning ritual — messages delta, repo state, wrap audit of yesterday's sessions, open-items sweep into the board, machine cleanup (stale dev servers, merged worktrees, dead watchers), day plan for your user. Use when the user says "morning ritual" / "Morgenroutine" / "start my day", opens the day with a status ask, or a fresh coordinator session starts its first morning. Coordinator sessions only — run this ONLY when the middle-management role hook says ORCHESTRATOR; in a worker session, point the user at the coordinator instead.
+description: The coordinator's morning ritual — messages delta, repo state, wrap audit of yesterday's sessions, open-items sweep into the board, machine cleanup (stale dev servers, merged worktrees, dead watchers), your user's open to-do list, day plan for your user. Use when the user says "morning ritual" / "Morgenroutine" / "start my day", opens the day with a status ask, or a fresh coordinator session starts its first morning. Step 6 alone (the user's to-do list, delta since the last delivery) when the user asks "todo list", "my open to-dos", "meine offenen To-Dos" or "Was sind meine offenen To-Dos", and as part of a seat takeover when no headless ritual delivered it this morning. Coordinator sessions only — run this ONLY when the middle-management role hook says ORCHESTRATOR; in a worker session, point the user at the coordinator instead.
 ---
 
 # Coordinator morning ritual
 
-The first thing a coordinator session does each day. Run the six steps in order;
-steps 1–3 are independent — run their commands in parallel. Everything here is
+The first thing a coordinator session does each day. Run the seven steps in order;
+steps 1–3 are independent — run their commands in parallel. Step 6 also runs on its own
+(see there). Run headless by `scripts/morning-headless.sh` (a systemd timer, README "Headless
+morning ritual"), the same steps apply with the limits that run's prompt names. Everything here is
 coordinator work: read, reconcile, route. Product/repo work stays delegated to
 worker sessions.
 
@@ -17,7 +19,9 @@ or a fork of this file.
 
 ## 1. Messages delta — CUSTOMIZE
 
-Window: since the last ritual run (default: yesterday evening).
+Window: since the last ritual run — the epoch in `<config dir>/state/morning-ritual/window`
+(`date -d @$(cat …)`), written at the end of step 7 and by the headless runner; no file → yesterday
+evening.
 
 Read the delta from wherever your team talks — Slack/Teams/Discord channels, direct
 messages to the coordinator, watched threads. Gotchas that generalize: channel
@@ -133,10 +137,42 @@ freed. Gather in one read-only pass, then act through ONE sub-agent with explici
 Done when no listening port, worktree or watcher on the machine lacks a live owner on the
 board. Ownership below 75% certain → leave it, list it under "unclear" in the day plan.
 
-## 6. Day plan to your user
+## 6. Your user's to-do list
+
+Also on its own: "todo list", "my open to-dos", "meine offenen To-Dos", "Was sind meine offenen
+To-Dos" — run this step alone and answer with its result. A coordinator that takes the seat in the
+morning runs it too when the headless ritual did not deliver today (no `window` file from today, or
+your user says nothing arrived).
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/open-items.py" todo          # new since the last delivery
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/open-items.py" todo --all    # every open one, on request
+```
+
+It lists every open item whose owner is `user` (also `user+lane…`) from the board and the
+open-items drops, not yet delivered: a board line `- <key> · owner: user · …` wins over the drop
+file's line, `<key> done` on the board or `add --done` in the drop closes one. Board items your
+user owns must therefore sit on the board in that drop-line shape — that is what filing them with
+the line `list` printed gives you.
+
+Write it for your user, grouped by what they have to do, in this order, empty groups left out:
+**decide** (a choice or a go only they can give) · **click** (open a link, approve, sign in) ·
+**run** (a command or a session on their side) · **read** (a report or a doc to take in). One line
+per item: what it is in one line of context, then the link or command **on the same line**, then
+the key. No item without its link or command when the line it came from has one. Nothing new →
+one line saying so, with the total still open.
+
+Delivered = your user has the list in the chat or the channel. Then, and only then, run the
+`todo --delivered <keys>` line the command printed (the exact keys it listed), so the next ritual
+does not repeat them. A key that is still open stays in `todo --all`.
+
+## 7. Day plan to your user
 
 One message, in the language you talk to your user in, timestamped, links clickable,
 every topic spelled out (no bare codenames): (a) what moved overnight, (b) the TOP
 priority with a recommendation, (c) decisions pending on the user — each one line
-with what unblocks it, (d) ready lanes they could open worker sessions for. Lead
-with the delta; reference docs by path instead of retelling them.
+with what unblocks it, (d) ready lanes they could open worker sessions for, (e) step 6's
+to-do list. Lead with the delta; reference docs by path instead of retelling them.
+
+Once it is out, stamp the window for the next ritual:
+`mkdir -p "<config dir>/state/morning-ritual" && date +%s > "<config dir>/state/morning-ritual/window"`.

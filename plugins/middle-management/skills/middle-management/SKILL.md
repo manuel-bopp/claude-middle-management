@@ -261,6 +261,11 @@ whatever the old seat had not filed yet. So every "for later" goes to disk the m
 - **Who deletes:** the coordinator, with `open-items.py done <file>`, which refuses unless every
   open key is on the board AND the session is gone (peer-state's liveness, PID reuse included). A
   live tab's file stays even after its wrap: wrapped tabs get reused.
+- **Your user's side:** `open-items.py todo` lists every open item owned by `user` (board line
+  `- <key> · owner: user · …` first, else the drop line), only the ones not delivered yet;
+  `todo --delivered <keys>` records the delivery. Close a user item on the board with `<key> done`.
+  Procedure and grouping: `morning-ritual` skill, step 6 — also when your user just asks for
+  their open to-dos.
 - **No board configured** (`board` unset or unreadable): nothing counts as filed and nothing can be
   deleted; the banner says so. Set it with `/middle-management-setup`, ideally to a stable path
   (a symlink you re-point when the board rotates). Rotating the board: carry the keys of every

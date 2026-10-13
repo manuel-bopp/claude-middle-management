@@ -95,7 +95,7 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 | `review-loop` skill | skill | The loop every deliverable goes through before it is handed on as finished: a fresh-context reviewer checks it against its acceptance criteria and must prove each finding against the code or doc, the session fixes what was confirmed, a new reviewer runs again, until a round finds nothing. Hard cap 4 rounds, then the open findings are reported and nothing is called clean. Opus at xhigh by default, Fable for money, security, data and the customer path. |
 | Review gate | PreToolUse hook (optional) | Holds ExitPlanMode on a real plan and a Write to any `<date>_handoff-*.md` until the review loop ran in this session within the hour. Off unless `reviewLoopGate: true`. |
 | Open-items drop | script + banner line | Every session writes each "for later" item the moment it appears, with `scripts/open-items.py add`, to its own file under `<config-dir>/open-items/`; the coordinator's banner counts what is not on the board yet, `list` shows it, and `done` deletes a file only once every key is on the board and the session is gone. A to-do no longer dies with a session that never wrapped, or with a coordinator hand-over. |
-| `morning-ritual` skill | skill | The coordinator’s day-opener: messages delta, repo state, wrap audit, board sweep, machine cleanup, day plan. Coordinator sessions only; carries CUSTOMIZE markers for your team’s stack. |
+| `morning-ritual` skill | skill | The coordinator’s day-opener: messages delta, repo state, wrap audit, board sweep, machine cleanup, your user’s to-do list, day plan. The to-do list also runs alone ("todo list", "meine offenen To-Dos"): every open `owner: user` item from the board and the drops, grouped decide / click / run / read, only what was not delivered yet (`open-items.py todo`). Coordinator sessions only; carries CUSTOMIZE markers for your team’s stack. |
 | Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. The same tick keeps waiting sessions warm: a live, unwrapped session idle 45 to 55 minutes on an open question (or a hold file) gets one "reply ok" ping, at most 3 per wait phase, so the answer does not cost it its whole context again. Installed by setup step 5. |
 
 ## How the roles work
@@ -156,8 +156,9 @@ changing hands · red = never.*
 7. Open items go to disk, not into prose: every session appends them with
    `scripts/open-items.py add` to `<config-dir>/open-items/<sid8>-session-notes.md`, each under a
    key `<sid8>-W<n>`. The coordinator files a key by writing it anywhere on the board; its banner
-   says how many are still unfiled and stays silent at zero. Details: the middle-management
-   skill, section "Open items".
+   says how many are still unfiled and stays silent at zero. `open-items.py todo` is the user's
+   side of the same records: every open `owner: user` item, new since the last delivery
+   (morning ritual, step 6). Details: the middle-management skill, section "Open items".
 
 Solo user with a single session? You do not need `claim` at all — install, configure
 the worktree part if you like it, and ignore the roles.
