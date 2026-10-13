@@ -142,6 +142,8 @@ read_peer() {  # $1 = sessionId
 # this script), and nothing of that session may have moved in that time: not its transcript
 # (IDLE_S) and not the folder beside it, where a foreground sub-agent and tool results keep writing
 # while the main transcript stays quiet. A find that cannot read that folder counts as activity.
+# ponytail: a background Bash job writes to /tmp/claude-<uid>/…/tasks/, not here, so a holder
+# babysitting a 6 h+ job reads as expired; accepted, quiet that long is what the issue calls expired.
 expired() {
   case "$W" in yes|no) ;; *) return 1 ;; esac
   [ "${IDLE_S:-x}" -ge "$((EXPIRED_MIN * 60))" ] 2>/dev/null || return 1
@@ -175,7 +177,13 @@ backfill() {
     printf -- '- Its last line: %s\n' "$LAST"
     printf -- '- Status: completed\n'
     printf -- '- Session: closed · %s — backfilled by %s at %s %s\n' "$HID" "$MY_NAME" "$day" "$hhmm"
-  } >> "$SESSION_LOG"
+  } >> "$SESSION_LOG" || return 1
+  # Its open-items drop gets the WRAPPED line too: without it `open-items.py list` calls the holder
+  # "died unwrapped" and routes the next ritual to resume it, the wake this takeover exists to avoid.
+  local drop="$CFG_DIR/open-items/${HID:0:8}-session-notes.md"
+  [ -f "$drop" ] && printf -- '- WRAPPED %s · backfilled by %s at %s (expired seat; items not swept, file the open keys from list)\n' \
+    "$hhmm" "$MY_NAME" "$day" >> "$drop"
+  return 0
 }
 
 HID=$(held_id); HNAME=""; [ -n "$HID" ] && HNAME=$(alive_name "$HID")
@@ -188,6 +196,10 @@ case "${1:-status}" in
       # been quiet past the cache window loses its seat, and the evidence is printed so the
       # takeover is auditable in this transcript.
       check_min STALE_MIN MM_STALE_SEAT_MIN; check_min EXPIRED_MIN MM_EXPIRED_SEAT_MIN
+      # An expiry under the stale threshold would take a seat the two-signal rule still protects.
+      [ "$EXPIRED_MIN" -ge "$STALE_MIN" ] || {
+        echo "MM_EXPIRED_SEAT_MIN=$EXPIRED_MIN is below MM_STALE_SEAT_MIN=$STALE_MIN — refused; the coordinator seat stays where it is."
+        exit 1; }
       read_peer "$HID"
       # Below MM_EXPIRED_SEAT_MIN: TWO agreeing signals, not one. The tab list (peer-state.py --wrapped) runs on the closing
       # line alone and may be generous: its false positive costs the user one glance at a tab. The
@@ -275,6 +287,13 @@ case "${1:-status}" in
     # NB: an `[ … ] && echo` chain here would make a successful claim exit 1.
     if [ -n "$HID" ] && [ -z "$HNAME" ]; then
       echo "(The previous holder is no longer running — marker taken over.)"
+    fi
+    # Issue #2: the first coordinator of the day delivers the ritual (the user's to-do list at least)
+    # when the headless run did not. The window is the epoch of the last delivered ritual.
+    WIN="$(cat "$CFG_DIR/state/morning-ritual/window" 2>/dev/null)"; case "$WIN" in ''|*[!0-9]*) WIN=0 ;; esac
+    MIDNIGHT=$(( $(date +%s) - 10#$(date +%H) * 3600 - 10#$(date +%M) * 60 - 10#$(date +%S) ))
+    if [ "$WIN" -lt "$MIDNIGHT" ]; then
+      echo "No morning ritual was delivered today — run middle-management:morning-ritual now (step 6, your user's to-do list, at least)."
     fi
     if rc_off; then
       echo ""

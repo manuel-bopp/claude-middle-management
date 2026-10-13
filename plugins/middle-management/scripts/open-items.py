@@ -27,7 +27,7 @@ Own session: $CLAUDE_CODE_SESSION_ID, else the registry entry of the nearest anc
 wrap skill's step 0 walk). Liveness is peer-state.py's is_live, with its PID-reuse guard.
 To-dos: a board line `- <key> · owner: <owner> · <text>` (the drop line as `list` prints it) wins
 over the drop file's line; an item is closed by its drop file's `- W<n> done` or by `<key> done`
-anywhere on the board. Delivered keys: <config dir>/state/morning-ritual/delivered, `key<TAB>time`.
+(closed, answered, decided, resolved, erledigt) anywhere on the board. Delivered keys: <config dir>/state/morning-ritual/delivered, `key<TAB>time`.
 """
 import fcntl, functools, glob, importlib.util, json, os, re, sys, time
 
@@ -42,7 +42,7 @@ WRAPPED = re.compile(r"^- WRAPPED\b")
 BOARD_KEY = re.compile(r"(?<![\w-])(\w{8}-W\d+)(?!\w)")
 OWNER = re.compile(r"^(user|coordinator|lane|external:\S+)$")
 BOARD_ITEM = re.compile(r"^\s*(?:[-*]\s*)?(\w{8}-W\d+)\s*·\s*owner:\s*([^\s·]+)\s*·\s*(.*)$")
-BOARD_DONE = re.compile(r"(?<![\w-])(\w{8}-W\d+)(?!\w)[\s*`:.,]*(?:done|erledigt)\b", re.I)
+BOARD_DONE = re.compile(r"(?<![\w-])(\w{8}-W\d+)(?!\w)[\s*`:.,]*(?:done|erledigt|closed|answered|decided|resolved)\b", re.I)
 DELIVERED = os.path.join(CFG, "state", "morning-ritual", "delivered")
 
 
@@ -272,9 +272,11 @@ def todo(argv):
     items, closed = {}, set()
     for f in files():                     # drop files first, so a board line can override them
         try:
-            _, opn, _, _ = parse(f)
+            lines, opn, _, _ = parse(f)
         except (OSError, ValueError):
             continue                      # `list` names unreadable files; a to-do list stays quiet
+        # a drop's done line closes the item even when the board still carries its line
+        closed.update("%s-W%s" % (sid8_of(f), m.group(1)) for m in map(DONE.match, lines) if m)
         for n, ln in sorted(opn.items()):
             _, owner, text = (ln.split(" · ", 2) + ["", ""])[:3]
             items["%s-W%d" % (sid8_of(f), n)] = (owner[len("owner: "):], text)

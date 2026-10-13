@@ -524,6 +524,8 @@ mkdir -p "$H/.claude/projects/-tmp-x"
 TR="$H/.claude/projects/-tmp-x/sess-beta.jsonl"
 NOT_WRAPPED='Bundle 40 ist live, morgen geht es mit dem Board weiter.'
 holder_wrote "$NOT_WRAPPED" 400 completed
+mkdir -p "$H/.claude/open-items"   # r1 m8: the holder's drop must not read "died unwrapped" afterwards
+printf '# beta · sess-beta · /tmp/x\n- W1 · owner: user · decide X\n' > "$H/.claude/open-items/sess-bet-session-notes.md"
 OUT="$(claim_alpha)"; RC=$?
 assert_rc "idle 6h40m, log completed, no closing line -> the seat is taken" 0 "$RC"
 assert_has "the takeover names itself" "EXPIRED SEAT" "$OUT"
@@ -542,6 +544,9 @@ assert_has "the backfill carries the closed marker, keyed by the holder's id" "-
 assert_has "the backfill entry reads completed" "- Status: completed" "$LOG"
 assert_has "the backfill quotes the last line it read" "- Its last line: $NOT_WRAPPED" "$LOG"
 [ "$(grep -c '^## ' "$H/logs/session-log.md")" -eq 1 ] && ok "exactly one day heading" || bad "exactly one day heading" "$LOG"
+assert_has "the holder's drop gets a backfilled WRAPPED line" "- WRAPPED" "$(tail -1 "$H/.claude/open-items/sess-bet-session-notes.md")"
+assert_has "...naming who backfilled it" "backfilled by alpha" "$(tail -1 "$H/.claude/open-items/sess-bet-session-notes.md")"
+assert_has "a claim on a day without a delivered ritual says to run it (r1 m9)" "No morning ritual was delivered today" "$OUT"
 
 holder_wrote "$NOT_WRAPPED" 400 in-progress
 OUT="$(claim_alpha)"; RC=$?
@@ -572,9 +577,16 @@ assert_rc "idle 5h, under the expiry, no closing line -> BUSY (two-signal rule u
 assert_has "the refusal says when the seat expires" "expires  : once nothing of it moves for 360 min" "$OUT"
 [ "$(held)" = "sess-beta" ] && ok "under the expiry the seat stays put" || bad "under the expiry the seat stays put"
 assert_lacks "...and nothing is backfilled" "seat expired" "$(cat "$H/logs/session-log.md")"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_EXPIRED_SEAT_MIN=30 bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "MM_EXPIRED_SEAT_MIN below MM_STALE_SEAT_MIN -> refused (r1 m7)" 1 "$RC"
+assert_has "...naming both values" "MM_EXPIRED_SEAT_MIN=30 is below MM_STALE_SEAT_MIN=60" "$OUT"
+[ "$(held)" = "sess-beta" ] && ok "...and the seat stays" || bad "an expiry under the stale threshold keeps the seat"
+mkdir -p "$H/.claude/state/morning-ritual"; date +%s > "$H/.claude/state/morning-ritual/window"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_EXPIRED_SEAT_MIN=240 bash "$ORCH" claim 2>&1)"; RC=$?
 assert_rc "MM_EXPIRED_SEAT_MIN lowers the expiry -> the same seat is taken" 0 "$RC"
 assert_has "...and the threshold it applied is printed" "threshold 240 min" "$OUT"
+assert_lacks "a ritual delivered today -> no reminder on claim" "No morning ritual" "$OUT"
+rm -rf "$H/.claude/state/morning-ritual"
 
 # A foreground sub-agent writes into <sessionId>/subagents/ while the main transcript stays quiet:
 # that is activity, and the seat does not expire.

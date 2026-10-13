@@ -310,10 +310,15 @@ step 7 installs. Every path comes from the config (`sessionLog`, `board`,
    primary login on every run.
 3. **The ritual**, `middle-management:morning-ritual` with its to-do step, under
    `--max-budget-usd` (`MM_MORNING_MAX_BUDGET_USD`, 3) and `timeout` (`MM_MORNING_TIMEOUT_MIN`,
-   20). The model writes the day plan to a file; the runner sends it, records the to-dos as
-   delivered and stamps the window. Model and permission mode: `MM_MORNING_MODEL`,
-   `MM_MORNING_PERMISSION_MODE` (unset = the CLI's defaults; the run needs Bash for git and
-   `open-items.py` and may only do what your settings allow without asking).
+   20), as the coordinator's unattended stand-in that reads and reports only (no board write, no
+   action: steps 3-5 become report lines). Its final message is the day plan; the runner checks it
+   for secret-looking strings, sends it (cut on a line boundary past 3800 bytes), records as
+   delivered only the to-do keys the sent text carries, and stamps the window. The probe uses the
+   same model. Model and permission mode: `MM_MORNING_MODEL`, `MM_MORNING_PERMISSION_MODE` (unset =
+   the CLI's defaults; the report needs no tool, the ritual's reads such as git and `open-items.py`
+   need your settings' allow rules or a mode, since nothing can be approved unattended). A unit
+   `CLAUDE_CONFIG_DIR` equal to `~/.claude` is not passed on to `claude`, which would otherwise read
+   `~/.claude/.claude.json` instead of your `~/.claude.json`.
 4. **Failure** → exit 1 with a cause file `<config-dir>/state/unit-failure-alarm/<unit>.cause`:
    one headline, the cause (`429`, `401`, `timeout`, `budget`, `other`) and the one fix command.
    The unit's `OnFailure=unit-failure-alarm@%n.service` sends that instead of the journal tail.
@@ -328,9 +333,10 @@ around `claude -p` with hard-coded paths and its own sender) moves onto this one
 | an API key or a second account's token for bad mornings | a mode-600 file of `ANTHROPIC_API_KEY=…` / `CLAUDE_CODE_OAUTH_TOKEN=…` lines (`claude setup-token` of the second account), named by `Environment=MM_MORNING_FALLBACK_ENV=` in the unit |
 | its budget, `--model`, `--permission-mode`, extra inputs, force/dry switch | `MM_MORNING_MAX_BUDGET_USD`, `MM_MORNING_MODEL`, `MM_MORNING_PERMISSION_MODE`, `MM_MORNING_WATCH`, `MM_MORNING_FORCE=1` |
 | unit `ExecStart=<old script> …` | `ExecStart=<config-dir>/middle-management-morning/morning-headless.sh`, no arguments |
-| unit `TimeoutStartSec=` sized for a hang | `MM_MORNING_TIMEOUT_MIN` + 5 to 10 minutes: the run stops itself first, with its cause |
+| unit `TimeoutStartSec=` sized for a hang | `MM_MORNING_TIMEOUT_MIN` + 10 minutes (the template's 30): the run stops itself first, with its cause; add 1 minute per protected checkout beyond a few (each fetch may take that long) |
 | — | new: `Environment=MM_MORNING_UNIT=%n`, `Environment=CLAUDE_CONFIG_DIR=…`, an `Environment=PATH=` that finds `claude`, `git`, `jq`, `python3`, `timeout` |
-| `OnFailure=unit-failure-alarm@%n.service`, the timer's `OnCalendar=` | unchanged |
+| `OnFailure=` | `unit-failure-alarm@%n.service`, the plugin's alarm (switch to it if the old unit used a site alarm: only the plugin's reads the cause file) |
+| the timer's `OnCalendar=` | unchanged |
 | its pre-gather step, proxy wrap + seat release + poke of the old coordinator, a watchdog unit, a journal-dump alarm, a runs log | dropped: the skill gathers, `claim` takes an expired seat and backfills its wrap, the cause file replaces the dump |
 
 Re-running setup step 7 writes exactly these unit lines; the old unit and its timer are disabled

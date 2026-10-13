@@ -15,8 +15,8 @@
 #     CLAUDE_CODE_OAUTH_TOKEN from $MM_MORNING_FALLBACK_ENV and probe once more. Names only: no
 #     value is ever printed or logged.
 #  3. The ritual (middle-management:morning-ritual, its to-do step 6 included), bounded twice:
-#     --max-budget-usd and a hard `timeout`. The model writes the day plan to a file; this script
-#     sends it, marks the to-dos delivered and stamps the window.
+#     --max-budget-usd and a hard `timeout`, read-only. Its final message is the day plan; this
+#     script sends it, marks the to-dos whose keys it carries as delivered and stamps the window.
 #  4. Failure: a headline, the cause (429 / 401 / timeout / budget / other) and the one fix
 #     command, to stderr and to <config dir>/state/unit-failure-alarm/<unit>.cause, which the
 #     OnFailure= alarm sends INSTEAD of the journal tail. Exit 1.
@@ -27,8 +27,9 @@
 #                              CLAUDE_CODE_OAUTH_TOKEN; read ONLY after a failed probe
 #   MM_MORNING_MAX_BUDGET_USD  default 3     MM_MORNING_TIMEOUT_MIN  default 20
 #   MM_MORNING_PROBE_SEC       default 25    MM_MORNING_MODEL        default: the CLI's
-#   MM_MORNING_PERMISSION_MODE default: the CLI's. The run needs Bash (git, open-items.py) and
-#                              file writes: allow them in settings.json or set e.g. bypassPermissions
+#   MM_MORNING_PERMISSION_MODE default: the CLI's. The report needs no tool; the ritual's reads
+#                              (Bash: git, gh, open-items.py) need your settings.json allow rules
+#                              or a mode set here — unattended, anything else is refused
 #   MM_MORNING_WATCH           more files/dirs whose change counts as progress (space-separated),
 #                              e.g. the inbox your team's chat bridge writes
 #   MM_MORNING_FORCE=1         run the model even when the window is empty
@@ -48,11 +49,12 @@
 #                 its --permission-mode -> MM_MORNING_PERMISSION_MODE, extra inputs it watched ->
 #                 MM_MORNING_WATCH, its dry-run/force switches -> MM_MORNING_FORCE=1.
 #   unit lines    ExecStart= points at the installed copy of this script (no arguments);
-#                 TimeoutStartSec= drops to MM_MORNING_TIMEOUT_MIN + 5 min (the model run fails on
-#                 its own first); Environment=MM_MORNING_UNIT=%n and
-#                 Environment=MM_MORNING_FALLBACK_ENV=<that file> are new; OnFailure= stays
-#                 unit-failure-alarm@%n.service; Environment=PATH= must find claude, git, jq,
-#                 python3 and timeout; the timer keeps its OnCalendar=.
+#                 TimeoutStartSec= drops to MM_MORNING_TIMEOUT_MIN + 10 min (the model run fails on
+#                 its own first; the fetch of each protected checkout takes up to 1 min more);
+#                 Environment=MM_MORNING_UNIT=%n and Environment=MM_MORNING_FALLBACK_ENV=<that file>
+#                 are new; OnFailure= becomes unit-failure-alarm@%n.service if it pointed at a site
+#                 alarm (only the plugin's alarm reads the cause file); Environment=PATH= must find
+#                 claude, git, jq, python3 and timeout; the timer keeps its OnCalendar=.
 #   drops out     its own gather step, proxy wrap / seat release / poke (claim does that now, issue
 #                 #1), its own watchdog and journal-dump alarm, its runs log.
 set -uo pipefail
@@ -61,6 +63,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 CFG_DIR="$(bash "$HERE/config-check.sh" dir)"
 CFG_FILE="$(bash "$HERE/config-check.sh" file)"
 SESSION_LOG="$(bash "$HERE/config-check.sh" session-log)"
+# The unit sets CLAUDE_CONFIG_DIR for the helpers, but the CLI reads its global config from
+# $CLAUDE_CONFIG_DIR/.claude.json when it is set and from ~/.claude.json when not: the default dir
+# must stay unset for claude, or the probe tests a stale copy instead of the user's real login.
+[ "${CLAUDE_CONFIG_DIR:-}" = "$HOME/.claude" ] && unset CLAUDE_CONFIG_DIR
 STATE="$CFG_DIR/state/morning-ritual"
 WINDOW_FILE="$STATE/window"
 UNIT="${MM_MORNING_UNIT:-}"
@@ -110,16 +116,25 @@ classify() {  # $1 = exit code, $2 = file with the CLI's output -> 429 | 401 | t
   # The status codes only as whole tokens: a cost of 0.0429 or a sessionId with "c429f" is no 429.
   local t; t="$(head -c 20000 "$2" 2>/dev/null)"
   if   grep -qi 'error_max_budget' <<<"$t"; then echo budget
-  elif grep -qiE '(^|[^0-9a-z.])429([^0-9a-z]|$)|rate_limit|rate limit|usage limit' <<<"$t"; then echo 429
-  elif grep -qiE '(^|[^0-9a-z.])401([^0-9a-z]|$)|authentication_error|unauthorized|invalid api key|/login' <<<"$t"; then echo 401
+  elif grep -qiE '(^|[^0-9a-z.])429([^0-9a-z]|$)|rate_limit|rate limit|usage limit|hit your ([a-z]+ )?(spend )?limit|limit reached' <<<"$t"; then echo 429
+  elif grep -qiE '(^|[^0-9a-z.])401([^0-9a-z]|$)|authentication_error|unauthorized|invalid api key|/login|token (has )?expired|token is invalid|revoked' <<<"$t"; then echo 401
   else echo other; fi
 }
 
-said() { if [ "$1" = timeout ]; then echo "no answer within ${PROBE_SEC}s (a rate-limited login retries and hangs)"; else echo "$1"; fi; }
+said() {  # a probe cause in words; `other` carries the CLI's own first line
+  case "$1" in
+    timeout) echo "no answer within ${PROBE_SEC}s (a rate-limited login retries and hangs)" ;;
+    other)   echo "other: $(head -c 160 "$STATE/probe.out" 2>/dev/null | tr '\n' ' ')" ;;
+    *)       echo "$1" ;;
+  esac
+}
 
 probe() {  # sets PROBE to ok or a cause word
   local rc
-  ( cd "$STATE" && timeout -k 5 "$PROBE_SEC" claude -p "OK" --max-turns 1 </dev/null ) > "$STATE/probe.out" 2>&1; rc=$?
+  # Same model as the run (limits are per model family too); two retries, so a 429 comes back as a
+  # 429 within seconds instead of a backoff loop; no MCP servers on the probe's clock.
+  ( cd "$STATE" && CLAUDE_CODE_MAX_RETRIES=2 timeout -k 5 "$PROBE_SEC" claude -p "OK" --max-turns 1 \
+      --strict-mcp-config ${MM_MORNING_MODEL:+--model "$MM_MORNING_MODEL"} </dev/null ) > "$STATE/probe.out" 2>&1; rc=$?
   if [ "$rc" -eq 0 ]; then PROBE=ok; return 0; fi
   PROBE="$(classify "$rc" "$STATE/probe.out")"; return 1
 }
@@ -138,9 +153,12 @@ SINCE="yesterday evening (no earlier delivered ritual on record)"
 if [ -n "$W" ] && [ "${MM_MORNING_FORCE:-}" != 1 ]; then
   moved=""
   # shellcheck disable=SC2086  # MM_MORNING_WATCH is a space-separated list on purpose
-  for p in "$SESSION_LOG" "$(cfg '.board // ""')" "$CFG_DIR/open-items" ${MM_MORNING_WATCH:-}; do
+  B="$(cfg '.board // ""')"; B="${B/#\~/$HOME}"
+  for p in "$SESSION_LOG" "$B" "$CFG_DIR/open-items" ${MM_MORNING_WATCH:-}; do
     [ -n "$p" ] && [ -e "$p" ] || continue
-    [ -n "$(find -L "$p" -newermt "@$W" -print -quit 2>/dev/null)" ] && { moved="$p"; break; }
+    # a find that fails (no GNU -newermt) counts as progress: never a silent "no progress" every day
+    hit="$(find -L "$p" -newermt "@$W" -print -quit 2>/dev/null)" || hit="find failed"
+    [ -n "$hit" ] && { moved="$p"; break; }
   done
   if [ -z "$moved" ]; then
     while IFS= read -r r; do
@@ -164,8 +182,8 @@ if ! probe; then
   [ -n "$FALLBACK" ] || fail "$FIRST" "probe: $(said "$FIRST"); no fallback configured (MM_MORNING_FALLBACK_ENV)"
   [ -r "$FALLBACK" ] || fail "$FIRST" "probe: $(said "$FIRST"); the fallback file $FALLBACK is not readable"
   # KEY=value lines, read and never executed; only the two names, never echoed.
-  while IFS='=' read -r k v; do
-    k="${k#export }"; v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+  while IFS='=' read -r k v || [ -n "$k" ]; do          # a last line without newline counts too
+    k="${k#export }"; v="${v%$'\r'}"; v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
     case "$k" in ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN) [ -n "$v" ] && export "$k=$v" && FELL_BACK="$FELL_BACK $k" ;; esac
   done < "$FALLBACK"
   [ -n "$FELL_BACK" ] || fail "$FIRST" "probe: $(said "$FIRST"); $FALLBACK sets neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN"
@@ -179,14 +197,14 @@ RUN="$STATE/runs/$(date +%Y-%m-%d-%H%M%S)"; mkdir -p "$RUN" || fail other "canno
 find "$STATE/runs" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} + 2>/dev/null
 python3 "$HERE/open-items.py" todo > "$RUN/todo.txt" 2>&1 || echo "open-items.py todo failed, see $RUN/todo.txt" >&2
 REPORT="$RUN/report.txt"
-PROMPT="Run the middle-management:morning-ritual skill headless. Nobody is at the keyboard and nobody can answer.
+PROMPT="You are the unattended stand-in for the coordinator, started by the middle-management plugin's scripts/morning-headless.sh: the session-role banner does not apply to this run. Run the middle-management:morning-ritual skill. Nobody is at the keyboard and nobody can answer.
 Window: since $SINCE.
-Limits of this run: read, reconcile and report. No kills, no deletes, no pushes, no messages to other sessions and nothing sent outward: this script sends your report. Step 3 backfills and step 5 clean-ups become lines in the report instead of actions. Write the board only as step 4 says, and nothing into the session log.
-Step 6: its input is already gathered in $RUN/todo.txt (the output of open-items.py todo); group it as the step says. Do NOT run todo --delivered and do not stamp the window: this script does both after sending.
-Step 7: write the day plan, step 6 included, as plain text of at most 3500 characters to $REPORT and nothing else into that file."
+Limits of this run: read and report only. Write no file at all (no board, no session log), kill and delete nothing, push nothing, message no session, send nothing outward: this script sends your report. Step 3 backfills, step 4 filings and step 5 clean-ups become lines in the report for the coordinator.
+Step 6: its input is already gathered in $RUN/todo.txt (the output of open-items.py todo); group it as the step says and end every to-do line with its key. What does not fit becomes one line \"+N more: open-items.py todo --all\". Do NOT run todo --delivered and do not stamp the window: this script marks exactly the keys your report carries.
+Step 7: your final message is the day plan, step 6 included, plain text of at most 3500 characters, and nothing else."
 ( cd "$RUN" && timeout -k 30 "${TMO_MIN}m" claude -p "$PROMPT" --output-format json \
     --max-budget-usd "$BUDGET" ${MM_MORNING_MODEL:+--model "$MM_MORNING_MODEL"} \
-    ${MM_MORNING_PERMISSION_MODE:+--permission-mode "$MM_MORNING_PERMISSION_MODE"} --add-dir "$RUN" \
+    ${MM_MORNING_PERMISSION_MODE:+--permission-mode "$MM_MORNING_PERMISSION_MODE"} \
     </dev/null ) > "$RUN/claude.json" 2> "$RUN/claude.err"
 RC=$?
 cat "$RUN/claude.json" "$RUN/claude.err" > "$RUN/claude.all" 2>/dev/null
@@ -199,9 +217,22 @@ if [ "$RC" -ne 0 ] || [ "$(jq -r '.is_error | tostring' "$RUN/claude.json" 2>/de
     *)       fail "$WHY" "the ritual run ended with exit $RC ($(jq -r '.subtype // empty' "$RUN/claude.json" 2>/dev/null | head -c 80)); output in $RUN" ;;
   esac
 fi
-[ -s "$REPORT" ] || fail other "the ritual run finished but wrote no report to $REPORT"
-notify "$(head -c 3800 "$REPORT")" || fail other "the report could not be sent through notifyCommand (it is in $REPORT)"
-KEYS="$(sed -n 's/.* todo --delivered //p' "$RUN/todo.txt" | tail -1)"
+# The report is the run's final message (.result): no Write call, so the CLI's default permission
+# mode is enough for it.
+jq -r '.result // empty' "$RUN/claude.json" 2>/dev/null > "$REPORT"
+grep -q '[^[:space:]]' "$REPORT" || fail other "the ritual run ended without a day plan in its final message (output in $RUN; tool calls your settings do not allow are refused unattended: MM_MORNING_PERMISSION_MODE)"
+# Last guard before the channel: the fallback credential sits in the run's environment.
+if grep -qE 'sk-ant-[A-Za-z0-9_-]{8,}|(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)=[^ ]' "$REPORT" \
+   || { [ -n "${ANTHROPIC_API_KEY:-}" ] && grep -qF -- "$ANTHROPIC_API_KEY" "$REPORT"; } \
+   || { [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && grep -qF -- "$CLAUDE_CODE_OAUTH_TOKEN" "$REPORT"; }; then
+  fail other "the report contains a secret-looking string and was NOT sent ($REPORT)"
+fi
+SENT="$(cat "$REPORT")"
+[ "$(wc -c < "$REPORT")" -le 3800 ] || SENT="$(head -c 3800 "$REPORT" | sed '$d')"   # whole lines only
+notify "$SENT" || fail other "the report could not be sent through notifyCommand (it is in $REPORT)"
+# Delivered = what reached your user: only the keys the sent text carries.
+KEYS="$(for k in $(sed -n 's/.* todo --delivered //p' "$RUN/todo.txt" | tail -1); do
+          case "$SENT" in *"$k"*) printf '%s ' "$k" ;; esac; done)"
 # shellcheck disable=SC2086  # the keys are one word each by construction
 [ -z "$KEYS" ] || python3 "$HERE/open-items.py" todo --delivered $KEYS >/dev/null \
   || echo "morning-headless: to-dos sent but not marked delivered: $KEYS" >&2

@@ -28,23 +28,30 @@ cat > "$BIN/claude" <<'STUB'
 #!/usr/bin/env bash
 if [ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then auth=fallback; mode="${STUB_FALLBACK:-ok}"
 else auth=primary; mode="${STUB_PRIMARY:-ok}"; fi
+case "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" in *$'\r') mode=401 ;; esac   # a CRLF value is a bad key
 kind=run; [ "${2:-}" = OK ] && kind=probe
 printf '%s %s\n' "$kind" "$auth" >> "$STUB_LOG"
-[ "$kind" = run ] && printf '%s\n' "$*" > "$STUB_LOG.args"
-case "$mode" in
-  429)  echo 'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account'"'"'s rate limit"}}' >&2; exit 1 ;;
-  401)  echo 'Invalid API key · Please run /login'; exit 1 ;;
-  hang) sleep 30; exit 0 ;;
+printf '%s\n' "$*" > "$STUB_LOG.$kind-args"
+printf '%s\n' "${CLAUDE_CONFIG_DIR-unset}" > "$STUB_LOG.$kind-cfgdir"
+case "$mode" in   # the CLI's own wording
+  429)     echo 'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account'"'"'s rate limit"}}' >&2; exit 1 ;;
+  limit)   echo "You've hit your limit · resets 3am (Europe/Berlin)"; exit 1 ;;
+  401)     echo 'Invalid API key · Please run /login'; exit 1 ;;
+  expired) echo 'OAuth token has expired. Please obtain a new token or refresh your existing token.'; exit 1 ;;
+  weird)   echo 'Something unexpected happened in the CLI'; exit 1 ;;
+  hang)    sleep 30; exit 0 ;;
 esac
 [ "$kind" = probe ] && { echo OK; exit 0; }
+res() { jq -n --arg r "$1" '{type:"result",subtype:"success",is_error:false,total_cost_usd:0.12,result:$r}'; }
 case "${STUB_RUN:-ok}" in
-  hang)   sleep 30 ;;
-  budget) echo '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"total_cost_usd":3.0429}'; exit 1 ;;
-  other)  echo '{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.0429,"session_id":"c429f401-0000"}'; exit 1 ;;
-  noreport) echo '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.1}' ;;
-  *)      report=$(printf '%s' "$2" | grep -o '/[^ ]*/report\.txt' | head -1)
-          printf 'Day plan for today\nTo-dos: %s\n' "$(grep -c '^- ' "$(dirname "$report")/todo.txt")" > "$report"
-          echo '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.12}' ;;
+  hang)     sleep 30 ;;
+  budget)   echo '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"total_cost_usd":3.0429}'; exit 1 ;;
+  other)    echo '{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.0429,"session_id":"c429f401-0000"}'; exit 1 ;;
+  noreport) res "" ;;
+  secret)   res "Day plan. env: ANTHROPIC_API_KEY=sk-ant-api03-LEAKEDVALUE" ;;
+  long)     res "$(python3 -c "print('\\n'.join('ü'*60 for _ in range(60)))")" ;;
+  partial)  res "$(printf 'Day plan for today\n%s\n+1 more: open-items.py todo --all' "$(grep '^- ' todo.txt | head -1)")" ;;
+  *)        res "$(printf 'Day plan for today\n%s' "$(grep '^- ' todo.txt)")" ;;
 esac
 STUB
 chmod +x "$BIN/claude"
@@ -70,12 +77,13 @@ CLAUDE_CONFIG_DIR="$C" CLAUDE_CODE_SESSION_ID="$SID" python3 "$P/scripts/open-it
 OUT="$(run)"; RC=$?
 assert_rc "a healthy run exits 0" 0 "$RC"
 assert_has "the probe ran first, then the ritual" "$(printf 'probe primary\nrun primary')" "$(cat "$STUB_LOG")"
-ARGS="$(cat "$STUB_LOG.args")"
+ARGS="$(cat "$STUB_LOG.run-args")"
 assert_has "the run invokes the morning-ritual skill" "middle-management:morning-ritual" "$ARGS"
 assert_has "...with the to-do step's gathered input" "todo.txt" "$ARGS"
 assert_has "...bounded by --max-budget-usd (default 3)" "--max-budget-usd 3" "$ARGS"
 assert_has "the report went out through notifyCommand" "Day plan for today" "$(cat "$C/notified")"
-assert_has "...with the to-do the run was given" "To-dos: 1" "$(cat "$C/notified")"
+assert_has "...with the to-do the run was given, key included" "- aaaaaaaa-W1 · Decide the keep-alive default" "$(cat "$C/notified")"
+assert_lacks "the run is not told to write files (r1 m6: the report is its final message)" "--add-dir" "$ARGS"
 assert_has "the to-do is marked delivered" "aaaaaaaa-W1" "$(cat "$C/state/morning-ritual/delivered" 2>/dev/null)"
 [ -s "$C/state/morning-ritual/window" ] && ok "the window is stamped" || bad "the window is stamped"
 assert_has "the run says what it cost" "cost 0.12 USD" "$OUT"
@@ -142,7 +150,7 @@ assert_rc "429 and no fallback -> exit 1" 1 "$RC"
 assert_has "the headline names the cause" "morning ritual FAILED: 429 (orch-morning-ritual.service)" "$(CAUSEF)"
 assert_has "the fix names the fallback variable" "MM_MORNING_FALLBACK_ENV" "$(CAUSEF)"
 assert_has "...and the rerun command" "systemctl --user start orch-morning-ritual.service" "$(CAUSEF)"
-[ -s "$STUB_LOG.args" ] && bad "no ritual run after a failed probe" || ok "no ritual run after a failed probe"
+[ -s "$STUB_LOG.run-args" ] && bad "no ritual run after a failed probe" || ok "no ritual run after a failed probe"
 # the OnFailure alarm sends the cause file instead of the journal, once
 OUT2="$(CLAUDE_CONFIG_DIR="$C" UFA_THROTTLE_SEC=0 bash "$P/scripts/unit-failure-alarm.sh" orch-morning-ritual.service 2>&1)"; RC=$?
 assert_rc "the alarm delivers" 0 "$RC"
@@ -172,7 +180,7 @@ setup
 OUT="$(STUB_RUN=budget run MM_MORNING_MAX_BUDGET_USD=0.5)"; RC=$?
 assert_rc "budget hit -> exit 1" 1 "$RC"
 assert_has "...cause budget" "FAILED: budget" "$(CAUSEF)"
-assert_has "...the passed cap" "--max-budget-usd 0.5" "$(cat "$STUB_LOG.args")"
+assert_has "...the passed cap" "--max-budget-usd 0.5" "$(cat "$STUB_LOG.run-args")"
 setup
 OUT="$(STUB_RUN=other run)"; RC=$?
 assert_rc "another error -> exit 1" 1 "$RC"
@@ -180,7 +188,8 @@ assert_has "...cause other (a cost of 0.0429 or an id with 429 is no 429)" "FAIL
 setup
 OUT="$(STUB_RUN=noreport run)"; RC=$?
 assert_rc "a run that writes no report -> exit 1" 1 "$RC"
-assert_has "...says so" "wrote no report" "$(CAUSEF)"
+assert_has "...says so" "without a day plan in its final message" "$(CAUSEF)"
+assert_has "...and names the permission knob (r1 m6)" "MM_MORNING_PERMISSION_MODE" "$(CAUSEF)"
 setup; jq 'del(.notifyCommand)' "$C/middle-management.json" > "$C/j" && mv "$C/j" "$C/middle-management.json"
 OUT="$(run)"; RC=$?
 assert_rc "no notifyCommand -> exit 1 before any model run" 1 "$RC"
@@ -190,6 +199,55 @@ OUT="$(STUB_PRIMARY=429 PATH="$BIN:$PATH" CLAUDE_CONFIG_DIR="$C" MM_SESSION_LOG=
 assert_rc "a manual run (no MM_MORNING_UNIT) fails the same way" 1 "$RC"
 assert_has "...with the cause on stderr" "FAILED: 429" "$OUT"
 [ -z "$(ls "$C/state/unit-failure-alarm" 2>/dev/null)" ] && ok "...and leaves no cause file" || bad "manual run cause file"
+
+say "== r1 fold =="
+# M1: delivered = what the sent report carries, not everything gathered
+setup
+for t in "Decide A" "Click B"; do
+  CLAUDE_CONFIG_DIR="$C" CLAUDE_CODE_SESSION_ID="$SID" python3 "$P/scripts/open-items.py" add --owner user "$t" >/dev/null
+done
+OUT="$(STUB_RUN=partial run)"; RC=$?
+assert_rc "a report that carries one of two to-dos -> exit 0" 0 "$RC"
+D="$(cat "$C/state/morning-ritual/delivered" 2>/dev/null)"
+assert_has "the to-do in the report is marked delivered" "aaaaaaaa-W1" "$D"
+assert_lacks "the one left out is not" "aaaaaaaa-W2" "$D"
+# M1: an over-long report (7200 bytes of umlauts) is cut on a line boundary, never mid-character
+setup; OUT="$(STUB_RUN=long run)"; RC=$?
+assert_rc "an over-long report -> exit 0" 0 "$RC"
+LENS="$(sed '/^---$/d' "$C/notified" | LC_ALL=C awk '{print length}' | sort -u)"
+[ "$LENS" = 120 ] && ok "every sent line is whole (120 bytes)" || bad "whole lines only" "$LENS"
+[ "$(sed '/^---$/d' "$C/notified" | wc -l)" -lt 60 ] && ok "...and the text was cut" || bad "the text was cut"
+# m1: a fallback file without a trailing newline, and one with CRLF
+setup; printf 'ANTHROPIC_API_KEY=sk-ant-api03-NONEWLINE' > "$C/fb"
+OUT="$(STUB_PRIMARY=429 run MM_MORNING_FALLBACK_ENV="$C/fb")"; RC=$?
+assert_rc "a fallback file whose only line has no newline is read" 0 "$RC"
+setup; printf 'ANTHROPIC_API_KEY=sk-ant-api03-CRLFVALUE\r\n' > "$C/fb"
+OUT="$(STUB_PRIMARY=429 run MM_MORNING_FALLBACK_ENV="$C/fb")"; RC=$?
+assert_rc "a CRLF fallback file exports the key without the CR" 0 "$RC"
+# m2: the CLI's own limit and expiry wording is classified, not "other"
+setup; OUT="$(STUB_PRIMARY=limit run)"
+assert_has "\"You've hit your limit\" -> 429" "FAILED: 429" "$(CAUSEF)"
+setup; OUT="$(STUB_PRIMARY=expired run)"
+assert_has "\"OAuth token has expired\" -> 401" "FAILED: 401" "$(CAUSEF)"
+setup; OUT="$(STUB_PRIMARY=weird run)"
+assert_has "an unknown error carries the CLI's own first line" "other: Something unexpected happened" "$(CAUSEF)"
+# m3: the probe tests the run's model
+setup; OUT="$(run MM_MORNING_MODEL=sonnet)"
+assert_has "the probe uses MM_MORNING_MODEL" "--model sonnet" "$(cat "$STUB_LOG.probe-args")"
+assert_has "...and so does the run" "--model sonnet" "$(cat "$STUB_LOG.run-args")"
+# m4: the default config dir is not exported to claude (it would read ~/.claude/.claude.json)
+setup; H="$(mktemp -d -p "$TMPBASE")"; mv "$C" "$H/.claude"; C="$H/.claude"
+sed -i "s|$(dirname "$NOTE")|$C|g" "$C/middle-management.json"; NOTE="$C/notified"; export STUB_LOG="$C/stub.log"
+OUT="$(HOME="$H" run)"; RC=$?
+assert_rc "a run with the default config dir -> exit 0" 0 "$RC"
+assert_has "claude sees CLAUDE_CONFIG_DIR unset" "unset" "$(cat "$STUB_LOG.probe-cfgdir")"
+setup; OUT="$(run)"
+assert_has "a non-default config dir still reaches claude" "$C" "$(cat "$STUB_LOG.probe-cfgdir")"
+# n8: a report with a secret-looking string is not sent
+setup; OUT="$(STUB_RUN=secret run)"; RC=$?
+assert_rc "a secret-looking report -> exit 1" 1 "$RC"
+assert_lacks "...and nothing reached the channel" "LEAKEDVALUE" "$(cat "$C/notified" 2>/dev/null)"
+assert_has "...the cause says why" "secret-looking" "$(CAUSEF)"
 
 say "== templates =="
 TPL="$P/templates/systemd"; U="$TMPBASE/units"; mkdir -p "$U"

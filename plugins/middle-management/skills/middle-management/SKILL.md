@@ -48,7 +48,8 @@ it simply did nothing — waking it would re-pay its whole context for a sentenc
 your user appoints takes it with `claim`, which prints `EXPIRED SEAT` with the idle age, the log
 state and the holder's last line, then appends the holder's wrap entry to the session log
 (`- Session: closed · <its id> — backfilled by <you> at <time>`), so the tab list reads it as
-finished. Never message the holder and never delete the marker by hand; a reader that cannot judge
+finished, and a `WRAPPED` line to its open-items drop, so no ritual resumes it later. An expiry set
+below `MM_STALE_SEAT_MIN` is refused. Never message the holder and never delete the marker by hand; a reader that cannot judge
 the holder (`unknown`, no transcript) still means no takeover. If the backfill says `NOT
 completed`, the holder's last work may be unfinished: read its transcript tail and the board
 before the day plan.

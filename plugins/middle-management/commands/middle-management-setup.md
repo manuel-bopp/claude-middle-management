@@ -353,8 +353,9 @@ Preconditions — the same four as step 5 plus `claude` and `timeout` on this PA
 Ask two things: whether the account may fall back to a second credential when its own login is
 rate-limited — if yes, the PATH of a mode-600 file holding `ANTHROPIC_API_KEY=…` or
 `CLAUDE_CODE_OAUTH_TOKEN=…` (the user fills it themselves; never read it, never print it); and
-whether the run may act without asking (`MM_MORNING_PERMISSION_MODE`, README "Headless morning
-ritual") — without it, tool calls the user's settings do not allow are refused in the unattended run.
+whether the run may use tools without asking (`MM_MORNING_PERMISSION_MODE`, README "Headless
+morning ritual"). The day plan itself needs none (it is the run's final message), but the ritual's
+reads (git, gh, open-items.py) are refused unattended unless the user's settings allow them.
 
 Install — copies the runner and its helpers OUT of the plugin, for the same reason as step 5:
 

@@ -167,6 +167,14 @@ oi "$A" todo --delivered cccccccc-W2 >/dev/null
 OUT="$(oi "$A" todo)"
 assert_has "all delivered -> nothing new, the total named" "nothing new since" "$OUT"
 assert_has "...3 open" "3 open in total (todo --all lists them)" "$OUT"
+# r1 M2: the coordinator filed W1 during the day, the session's wrap later closed it in its drop.
+oi "$A" add --done W1 "decided by the user" >/dev/null
+OUT="$(oi "$A" todo --all)"
+assert_lacks "a drop's done line closes an item the board still carries" "aaaaaaaa-W1 ·" "$OUT"
+# r1 n7: the closure words the real board uses besides DONE
+printf -- '- cccccccc-W2 answered by Manu 11:00\n' >> "$B"
+OUT="$(oi "$A" todo --all)"
+assert_lacks "'<key> answered' on the board closes the item too" "cccccccc-W2" "$OUT"
 OUT="$(oi "$A" todo --delivered "not-a-key")"; RC=$?
 assert_rc "--delivered with a malformed key -> refused" 1 "$RC"
 OUT="$(oi "$A" todo --bogus)"; RC=$?

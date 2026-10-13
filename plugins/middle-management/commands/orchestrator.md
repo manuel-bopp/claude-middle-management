@@ -41,9 +41,13 @@ the marker that decides which one.
      (`/middle-management:wrap`) in the holder's session creates it; README, "The session log". Asking the holder to release the seat stays the route for one that
      is live and still working, and for one idle less than that: its prompt cache is warm, so the
      message costs it almost nothing.
+   - when `claim` prints "No morning ritual was delivered today": run the
+     `middle-management:morning-ritual` skill now, step 6 (the user's to-do list) at least, before
+     anything else — issue #2, the first coordinator of the day delivers what the headless run did not.
    - on `EXPIRED SEAT`: nothing of the holder moved for `MM_EXPIRED_SEAT_MIN` (default 360
      minutes), so the seat was taken without its closing line and the holder's wrap entry was
-     backfilled into the session log (`BACKFILLED:` names the file). Relay the evidence; if the
+     backfilled into the session log (`BACKFILLED:` names the file) and its open-items drop got a
+     `WRAPPED` line, so no ritual resumes it later. Relay the evidence; if the
      log line says `NOT completed`, tell the user the old coordinator's last work may be
      unfinished. The holder was not messaged — do not message it now either. A `WARNING` instead
      of `BACKFILLED` means the seat is yours but the entry must be written by hand.
