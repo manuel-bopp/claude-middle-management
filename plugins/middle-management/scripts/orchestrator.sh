@@ -2,7 +2,8 @@
 # middle-management plugin — the coordinator seat: claim / release / status.
 # Consumers: commands/orchestrator.md (the /orchestrator slash command), the
 #   stale-marker hint printed by hooks/session-role.sh, tests/run.sh.
-#   The marker it writes is read by hooks/session-role.sh.
+#   The marker it writes is read by hooks/session-role.sh; the wrap entry it backfills on an
+#   expired seat is read by scripts/peer-state.py.
 #   Calls scripts/peer-state.py (stale-seat check on claim, holder line on status).
 #
 # Why a marker file and not the session name: an editor tab title never reaches the
@@ -76,38 +77,46 @@ rc_off() { [ "$(jq -r '.remoteControlAtStartup' "$CFG_DIR/settings.json" 2>/dev/
 # Not a guarantee: under usage overage the TTL drops to five minutes, so 60 is an upper bound on
 # "cheap to wake", not a promise — which is why it is an env var and not a constant.
 STALE_MIN="${MM_STALE_SEAT_MIN:-60}"
+# How long ANY holder must have been quiet before its seat counts as expired, closing line or not
+# (issue #1). Six hours is past every prompt cache and past a working day's lunch break: a holder
+# that quiet re-pays its whole context when woken, and the session log that the wrap would have
+# completed is either already completed or the holder did nothing at all in that time. Observed:
+# a coordinator idle 12h26m, log entry completed, no closing line - BUSY, and the only way out was
+# waking it (~500k tokens) or deleting the marker by hand.
+EXPIRED_MIN="${MM_EXPIRED_SEAT_MIN:-360}"
 # Checked inside `claim`, and only where the value is actually used — NOT at file scope. `status`
 # and `release` must keep working whatever this variable contains: release is the emergency exit
 # that switches the regime off after a coordinator died, and a stray export in someone's shell
 # profile must not block it with a message about an unrelated feature.
-check_stale_min() {
-  case "$STALE_MIN" in
+check_min() {  # $1 = the shell variable holding the value, $2 = the env name it came from
+  local v="${!1}" why=""
+  case "$v" in
     ''|*[!0-9]*)  why="is not a whole number of minutes" ;;
     ????????*)    why="is far outside 1..525600 minutes" ;;   # 8+ digits, see the int64 note below
     # 10#: a leading zero is a minute count to a human and octal to bash — $((08 * 60)) aborts the
     # whole script with "value too great for base", no refusal, no explanation. The upper bound is
-    # the other half of the same arithmetic: it is int64, so from ~1.5e17 on STALE_MIN * 60 wraps
+    # the other half of the same arithmetic: it is int64, so from ~1.5e17 on the value * 60 wraps
     # NEGATIVE and every idle age clears the threshold — the huge value someone sets to switch this
     # route OFF would take every seat instead. Out of range keeps the seat; that is the direction
     # an absurd value was reaching for anyway.
-    *) STALE_MIN=$((10#$STALE_MIN))
-       [ "$STALE_MIN" -ge 1 ] && [ "$STALE_MIN" -le 525600 ] \
+    *) v=$((10#$v)); printf -v "$1" '%s' "$v"
+       [ "$v" -ge 1 ] && [ "$v" -le 525600 ] \
          || why="is not between 1 and 525600 minutes (one year)" ;;
   esac
-  [ -z "${why:-}" ] && return 0
-  echo "MM_STALE_SEAT_MIN=\"${MM_STALE_SEAT_MIN:-}\" $why — refused; the coordinator seat stays where it is."
+  [ -z "$why" ] && return 0
+  echo "$2=\"${!2:-}\" $why — refused; the coordinator seat stays where it is."
   exit 1
 }
 
 # What the holder is doing, read off DISK (its registry entry, transcript and log) by
 # peer-state.py — the holder itself is never messaged and pays nothing. Sets W (wrapped:
 # yes/no/unknown), LOGOK (its session log entry says completed: true/false/null), IDLE_S/IDLE,
-# CTX, EV (the signals that decided W), LAST (its own last line), and NOREAD when the reader
-# could not be run at all. All empty when the reader is absent, fails, or answers unparseably:
+# CTX, EV (the signals that decided W), LAST (its own last line), TR (its transcript path), and
+# NOREAD when the reader could not be run at all. All empty when the reader is absent, fails, or answers unparseably:
 # an empty W means "we do not know", and every caller must then treat the holder as working.
 # Fail closed — two coordinators at once is a worse failure than one expensive wake.
 read_peer() {  # $1 = sessionId
-  W=""; LOGOK=""; IDLE_S=""; IDLE=""; CTX=""; EV=""; LAST=""; NOREAD=""
+  W=""; LOGOK=""; IDLE_S=""; IDLE=""; CTX=""; EV=""; LAST=""; TR=""; NOREAD=""
   [ -f "$DIR/peer-state.py" ] || { NOREAD="scripts/peer-state.py is not there"; return 0; }
   # jq is checked at the top of this script; python3 is checked here and not there, because
   # only this route needs it — status and release must not die on a machine without it.
@@ -124,8 +133,57 @@ read_peer() {  # $1 = sessionId
       | select(.wrapped != null and .idle_seconds != null)
       | [.wrapped, (.log_completed | tostring), .idle_seconds, (.idle // "?"), (.ctx // "?"),
          ((.evidence // []) | join("; ") | gsub("\t"; " ")),
-         ((.last // "-") | gsub("\t"; " "))] | @tsv' 2>/dev/null) || return 0
-  IFS=$'\t' read -r W LOGOK IDLE_S IDLE CTX EV LAST <<<"$PEER_ROW"
+         ((.last // "-") | gsub("\t"; " ")), (.transcript // "-")] | @tsv' 2>/dev/null) || return 0
+  IFS=$'\t' read -r W LOGOK IDLE_S IDLE CTX EV LAST TR <<<"$PEER_ROW"
+}
+
+# Expired (issue #1): past EXPIRED_MIN the holder's closing line is no longer required. The reader
+# must still have READ the holder (W yes|no — "unknown" or no answer fails closed, as everywhere in
+# this script), and nothing of that session may have moved in that time: not its transcript
+# (IDLE_S) and not the folder beside it, where a foreground sub-agent and tool results keep writing
+# while the main transcript stays quiet. A find that cannot read that folder counts as activity.
+# ponytail: a background Bash job writes to /tmp/claude-<uid>/…/tasks/, not here, so a holder
+# babysitting a 6 h+ job reads as expired; accepted, quiet that long is what the issue calls expired.
+expired() {
+  case "$W" in yes|no) ;; *) return 1 ;; esac
+  [ "${IDLE_S:-x}" -ge "$((EXPIRED_MIN * 60))" ] 2>/dev/null || return 1
+  local d="${TR%.jsonl}" hit
+  [ -f "$TR" ] || return 1                   # no transcript read = nothing to measure the quiet on
+  [ -d "$d" ] || return 0
+  hit=$(find "$d" -type f -mmin "-$EXPIRED_MIN" -print -quit 2>/dev/null) || { FOLDER_MOVED=1; return 1; }
+  [ -z "$hit" ] || { FOLDER_MOVED=1; return 1; }
+}
+log_state() {
+  case "$LOGOK" in
+    true)  echo "completed" ;;
+    false) echo "NOT completed (its last entry says otherwise; work may be unfinished, see its transcript)" ;;
+    *)     if [ -f "$SESSION_LOG" ]; then echo "no entry under its name"; else echo "none (no session log at $SESSION_LOG)"; fi ;;
+  esac
+}
+# The holder's wrap entry, written FOR it by the session that took the expired seat: the documented
+# shape (README, "The session log"), appended at the end, a day heading first when the file's last one
+# is not today, and the closed marker keyed by the holder's sessionId, so the tab list reads it as
+# finished from now on. Nothing in it is invented: idle, log state and last line are what was read.
+backfill() {
+  local day hhmm last
+  day=$(date +%F); hhmm=$(date +%H:%M)
+  mkdir -p "$(dirname "$SESSION_LOG")" 2>/dev/null
+  last=$(sed -nE 's/^##[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$/\1/p' "$SESSION_LOG" 2>/dev/null | tail -1)
+  {
+    [ "$last" = "$day" ] || printf '\n## %s\n' "$day"
+    printf '\n### %s – [%s] – coordinator seat expired, wrap backfilled\n' "$hhmm" "${HNAME%% *}"
+    printf -- '- Backfilled by %s (%s) on taking the expired coordinator seat; the holder was NOT messaged.\n' "$MY_NAME" "$MY_ID"
+    printf -- '- Idle %s (threshold %s min); its own session-log entry: %s.\n' "$IDLE" "$EXPIRED_MIN" "$(log_state)"
+    printf -- '- Its last line: %s\n' "$LAST"
+    printf -- '- Status: completed\n'
+    printf -- '- Session: closed · %s — backfilled by %s at %s %s\n' "$HID" "$MY_NAME" "$day" "$hhmm"
+  } >> "$SESSION_LOG" || return 1
+  # Its open-items drop gets the WRAPPED line too: without it `open-items.py list` calls the holder
+  # "died unwrapped" and routes the next ritual to resume it, the wake this takeover exists to avoid.
+  local drop="$CFG_DIR/open-items/${HID:0:8}-session-notes.md"
+  [ -f "$drop" ] && printf -- '- WRAPPED %s · backfilled by %s at %s (expired seat; items not swept, file the open keys from list)\n' \
+    "$hhmm" "$MY_NAME" "$day" >> "$drop"
+  return 0
 }
 
 HID=$(held_id); HNAME=""; [ -n "$HID" ] && HNAME=$(alive_name "$HID")
@@ -137,15 +195,19 @@ case "${1:-status}" in
       # Ask the disk instead of the session: only a holder that demonstrably wrapped AND has
       # been quiet past the cache window loses its seat, and the evidence is printed so the
       # takeover is auditable in this transcript.
-      check_stale_min
+      check_min STALE_MIN MM_STALE_SEAT_MIN; check_min EXPIRED_MIN MM_EXPIRED_SEAT_MIN
+      # An expiry under the stale threshold would take a seat the two-signal rule still protects.
+      [ "$EXPIRED_MIN" -ge "$STALE_MIN" ] || {
+        echo "MM_EXPIRED_SEAT_MIN=$EXPIRED_MIN is below MM_STALE_SEAT_MIN=$STALE_MIN — refused; the coordinator seat stays where it is."
+        exit 1; }
       read_peer "$HID"
-      # TWO agreeing signals, not one. The tab list (peer-state.py --wrapped) runs on the closing
+      # Below MM_EXPIRED_SEAT_MIN: TWO agreeing signals, not one. The tab list (peer-state.py --wrapped) runs on the closing
       # line alone and may be generous: its false positive costs the user one glance at a tab. The
       # seat may not be, because two coordinators at once is the worst failure this plugin can
       # produce — and the sentence that decides it ("the tab can be closed") is one a WORKING
       # coordinator writes after every wrap, about somebody else's tab. So a takeover needs the
       # holder's own closing line AND its session-log entry reading completed, and the idle age on
-      # top of both. One signal short is an appeal, not a takeover.
+      # top of both. One signal short is an appeal, not a takeover — until the seat expires.
       if [ "$W" = "yes" ] && [ "$LOGOK" = "true" ] \
          && [ "${IDLE_S:-x}" -ge "$((STALE_MIN * 60))" ] 2>/dev/null; then
         echo "STALE SEAT: \"$HNAME\" reads as wrapped — closing line AND session log agree — and has not moved in $IDLE. Taking it over."
@@ -153,6 +215,18 @@ case "${1:-status}" in
         echo "  signals  : $EV"
         echo "  last line: $LAST"
         echo "  (Read off disk by peer-state.py; the holder was NOT messaged. Threshold: ${STALE_MIN} min.)"
+      elif expired; then
+        # Past the long threshold the appeal is the expensive route by definition: the holder's
+        # cache is long cold. Take the seat and write the wrap it never wrote — never message it.
+        if [ "$LOGOK" = "true" ]; then why="its session log entry reads completed"
+        else why="nothing in its transcript or session folder moved in that time"; fi
+        echo "EXPIRED SEAT: \"$HNAME\" has not moved in $IDLE (threshold ${EXPIRED_MIN} min) and $why. Taking it over."
+        echo "  holder   : \"$HNAME\" ($HID), idle $IDLE, ctx $CTX tokens — what waking it would cost"
+        echo "  log      : $(log_state)"
+        echo "  signals  : $EV"
+        echo "  last line: $LAST"
+        echo "  (Read off disk by peer-state.py; the holder was NOT messaged. Its wrap entry is backfilled.)"
+        BACKFILL=1
       else
         # "No entry for this session" and "no log on this machine at all" read identically in the
         # reader (log_completed stays null for both) and are completely different problems: the
@@ -161,7 +235,9 @@ case "${1:-status}" in
         # entry in a file that was not there. So the file itself is tested here, and the refusal
         # names it, who writes it, and the way out when the holder is dead.
         NOLOG=""
+        if [ -n "${FOLDER_MOVED:-}" ]; then W=folder; fi
         case "$W" in
+          folder) why="its transcript is quiet for $IDLE, but its session folder (${TR%.jsonl}) moved within ${EXPIRED_MIN} min — a sub-agent or tool is still writing, so it is not expired" ;;
           yes) case "$LOGOK" in
                  true)  why="it wrapped, but has been idle only $IDLE (threshold ${STALE_MIN} min) — its prompt cache is probably still warm, so appealing there is cheap" ;;
                  false) why="its last line reads as wrapped, but its own session log entry is not completed (idle $IDLE) — that is one of the two signals the seat needs, so this stays an appeal" ;;
@@ -181,6 +257,7 @@ case "${1:-status}" in
           echo "  who writes it   : the middle-management:wrap skill — ONE wrap in \"$HNAME\" files the entry, and this claim works"
           echo "  session is dead : bash $SELF release $HID   (only when your user says that tab is gone)"
         fi
+        case "$W" in yes|no) echo "  expires  : once nothing of it moves for ${EXPIRED_MIN} min (MM_EXPIRED_SEAT_MIN) — then claim takes the seat and backfills its wrap" ;; esac
         echo "Release it there (bash $SELF release) or ask your user, then claim again here."
         exit 1
       fi
@@ -198,9 +275,25 @@ case "${1:-status}" in
       exit 1
     fi
     echo "OK: this session (\"$MY_NAME\") is the coordinator from now on."
+    # Only the winner of the marker writes the backfill, so a lost race never files a second one.
+    if [ -n "${BACKFILL:-}" ]; then
+      if backfill 2>/dev/null; then
+        echo "BACKFILLED: wrap entry for \"$HNAME\" appended to $SESSION_LOG (- Session: closed · $HID)."
+      else
+        echo "WARNING: the seat is yours, but the backfill could not be appended to $SESSION_LOG —"
+        echo "  write the holder's wrap entry by hand (middle-management:wrap, step 4) with: - Session: closed · $HID"
+      fi
+    fi
     # NB: an `[ … ] && echo` chain here would make a successful claim exit 1.
     if [ -n "$HID" ] && [ -z "$HNAME" ]; then
       echo "(The previous holder is no longer running — marker taken over.)"
+    fi
+    # Issue #2: the first coordinator of the day delivers the ritual (the user's to-do list at least)
+    # when the headless run did not. The window is the epoch of the last delivered ritual.
+    WIN="$(cat "$CFG_DIR/state/morning-ritual/window" 2>/dev/null)"; case "$WIN" in ''|*[!0-9]*) WIN=0 ;; esac
+    MIDNIGHT=$(( $(date +%s) - 10#$(date +%H) * 3600 - 10#$(date +%M) * 60 - 10#$(date +%S) ))
+    if [ "$WIN" -lt "$MIDNIGHT" ]; then
+      echo "No morning ritual was delivered today — run middle-management:morning-ritual now (step 6, your user's to-do list, at least)."
     fi
     if rc_off; then
       echo ""
@@ -249,7 +342,8 @@ case "${1:-status}" in
       read_peer "$HID"
       if [ -n "$W" ]; then
         echo "              idle $IDLE, wrapped $W, session log completed $LOGOK, ctx $CTX tokens"
-        echo "              'claim' takes the seat only when BOTH read finished and it has been idle over ${STALE_MIN} min."
+        echo "              'claim' takes the seat when BOTH read finished and it has been idle over ${STALE_MIN} min,"
+        echo "              or once nothing of it moved for ${EXPIRED_MIN} min (expired: its wrap is backfilled)."
       fi
     fi
     ;;

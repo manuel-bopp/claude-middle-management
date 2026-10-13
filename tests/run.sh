@@ -514,6 +514,128 @@ assert_has "the dead-holder note is what fires" "taken over" "$OUT"
 assert_lacks "a dead holder is not routed through the stale-seat evidence" "STALE SEAT" "$OUT"
 kill "$PEER" 2>/dev/null
 
+say "== expired seat: a holder quiet past MM_EXPIRED_SEAT_MIN loses it without its closing line =="
+# Issue #1, observed: the old coordinator idle 12h26m, its session-log entry completed, NO closing
+# line -> BUSY, and the only ways out were waking it (~500k tokens) or deleting the marker by hand.
+# Past the long threshold the seat expires: claim takes it, prints what it read, backfills the
+# holder's wrap entry (closed marker included) and never messages the holder.
+H="$(new_home)"; PEER="$(add_peer "$H" beta)"
+mkdir -p "$H/.claude/projects/-tmp-x"
+TR="$H/.claude/projects/-tmp-x/sess-beta.jsonl"
+NOT_WRAPPED='Bundle 40 ist live, morgen geht es mit dem Board weiter.'
+holder_wrote "$NOT_WRAPPED" 400 completed
+mkdir -p "$H/.claude/open-items"   # r1 m8: the holder's drop must not read "died unwrapped" afterwards
+printf '# beta · sess-beta · /tmp/x\n- W1 · owner: user · decide X\n' > "$H/.claude/open-items/sess-bet-session-notes.md"
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "idle 6h40m, log completed, no closing line -> the seat is taken" 0 "$RC"
+assert_has "the takeover names itself" "EXPIRED SEAT" "$OUT"
+assert_has "...and the reason it applied" "its session log entry reads completed" "$OUT"
+assert_has "the evidence names holder and idle age" '"beta" (sess-beta), idle 6h40m' "$OUT"
+assert_has "the evidence names the log state" "log      : completed" "$OUT"
+assert_has "the evidence quotes the holder's last line" "last line: $NOT_WRAPPED" "$OUT"
+assert_has "the evidence names the threshold" "threshold 360 min" "$OUT"
+assert_has "the holder was not messaged" "NOT messaged" "$OUT"
+assert_has "the backfill is reported with its marker" "BACKFILLED: wrap entry for \"beta\"" "$OUT"
+[ "$(held)" = "sess-alpha" ] && ok "the marker now points at the claimer" || bad "the marker now points at the claimer" "$(held)"
+LOG="$(cat "$H/logs/session-log.md")"
+assert_has "the backfill opens today's day heading (the log had none)" "## $(date +%F)" "$LOG"
+assert_has "the backfill entry header names the holder" "– [beta] – coordinator seat expired, wrap backfilled" "$LOG"
+assert_has "the backfill carries the closed marker, keyed by the holder's id" "- Session: closed · sess-beta — backfilled by alpha at $(date +%F)" "$LOG"
+assert_has "the backfill entry reads completed" "- Status: completed" "$LOG"
+assert_has "the backfill quotes the last line it read" "- Its last line: $NOT_WRAPPED" "$LOG"
+[ "$(grep -c '^## ' "$H/logs/session-log.md")" -eq 1 ] && ok "exactly one day heading" || bad "exactly one day heading" "$LOG"
+assert_has "the holder's drop gets a backfilled WRAPPED line" "- WRAPPED" "$(tail -1 "$H/.claude/open-items/sess-bet-session-notes.md")"
+assert_has "...naming who backfilled it" "backfilled by alpha" "$(tail -1 "$H/.claude/open-items/sess-bet-session-notes.md")"
+assert_has "a claim on a day without a delivered ritual says to run it (r1 m9)" "No morning ritual was delivered today" "$OUT"
+
+holder_wrote "$NOT_WRAPPED" 400 in-progress
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "idle past the threshold with the log in-progress -> taken too (no activity at all)" 0 "$RC"
+assert_has "...and says that nothing moved" "nothing in its transcript or session folder moved" "$OUT"
+assert_has "the log state is named, unfinished work flagged" "NOT completed" "$OUT"
+assert_has "...and the backfill carries that too" "its own session-log entry: NOT completed" "$(cat "$H/logs/session-log.md")"
+
+holder_wrote "$NOT_WRAPPED" 400 completed
+rm -f "$H/logs/session-log.md"
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "idle past the threshold, no session log at all -> taken" 0 "$RC"
+assert_has "the log state says there is no log" "none (no session log at $H/logs/session-log.md)" "$OUT"
+[ -f "$H/logs/session-log.md" ] && ok "the backfill creates the log" || bad "the backfill creates the log"
+assert_has "...with a day heading and the marker" "- Session: closed · sess-beta" "$(cat "$H/logs/session-log.md" 2>/dev/null)"
+
+# A second backfill on the same day goes under the SAME day heading.
+holder_wrote "$NOT_WRAPPED" 400 completed
+printf '\n## %s\n\n### 08:00 – [gamma] – earlier today\n- Status: completed\n' "$(date +%F)" >> "$H/logs/session-log.md"
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "a log whose last day heading is today -> taken" 0 "$RC"
+[ "$(grep -c "^## $(date +%F)" "$H/logs/session-log.md")" -eq 1 ] \
+  && ok "no second heading for the same day" || bad "no second heading for the same day" "$(cat "$H/logs/session-log.md")"
+
+holder_wrote "$NOT_WRAPPED" 300 completed
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "idle 5h, under the expiry, no closing line -> BUSY (two-signal rule unchanged)" 1 "$RC"
+assert_has "the refusal says when the seat expires" "expires  : once nothing of it moves for 360 min" "$OUT"
+[ "$(held)" = "sess-beta" ] && ok "under the expiry the seat stays put" || bad "under the expiry the seat stays put"
+assert_lacks "...and nothing is backfilled" "seat expired" "$(cat "$H/logs/session-log.md")"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_EXPIRED_SEAT_MIN=30 bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "MM_EXPIRED_SEAT_MIN below MM_STALE_SEAT_MIN -> refused (r1 m7)" 1 "$RC"
+assert_has "...naming both values" "MM_EXPIRED_SEAT_MIN=30 is below MM_STALE_SEAT_MIN=60" "$OUT"
+[ "$(held)" = "sess-beta" ] && ok "...and the seat stays" || bad "an expiry under the stale threshold keeps the seat"
+mkdir -p "$H/.claude/state/morning-ritual"; date +%s > "$H/.claude/state/morning-ritual/window"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_EXPIRED_SEAT_MIN=240 bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "MM_EXPIRED_SEAT_MIN lowers the expiry -> the same seat is taken" 0 "$RC"
+assert_has "...and the threshold it applied is printed" "threshold 240 min" "$OUT"
+assert_lacks "a ritual delivered today -> no reminder on claim" "No morning ritual" "$OUT"
+rm -rf "$H/.claude/state/morning-ritual"
+
+# A foreground sub-agent writes into <sessionId>/subagents/ while the main transcript stays quiet:
+# that is activity, and the seat does not expire.
+holder_wrote "$NOT_WRAPPED" 400 in-progress
+mkdir -p "${TR%.jsonl}/subagents"; : > "${TR%.jsonl}/subagents/agent-1.jsonl"
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "transcript quiet but its session folder moved recently -> BUSY" 1 "$RC"
+assert_has "the refusal says the folder moved" "session folder" "$OUT"
+[ "$(held)" = "sess-beta" ] && ok "a session with a running sub-agent keeps its seat" || bad "a session with a running sub-agent keeps its seat"
+touch -d "500 minutes ago" "${TR%.jsonl}/subagents/agent-1.jsonl"
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "the same folder quiet past the expiry -> taken" 0 "$RC"
+rm -rf "${TR%.jsonl}"
+
+for v in abc 0 08x 999999999999999999999; do
+  holder_wrote "$NOT_WRAPPED" 400 completed
+  OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_EXPIRED_SEAT_MIN=$v bash "$ORCH" claim 2>&1)"; RC=$?
+  assert_rc "MM_EXPIRED_SEAT_MIN=$v -> refused, the seat stays" 1 "$RC"
+  assert_has "...naming the variable" "MM_EXPIRED_SEAT_MIN" "$OUT"
+done
+[ "$(held)" = "sess-beta" ] && ok "a bad expiry value never takes the seat" || bad "a bad expiry value never takes the seat"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_EXPIRED_SEAT_MIN=abc bash "$ORCH" status 2>&1)"; RC=$?
+assert_rc "status works whatever MM_EXPIRED_SEAT_MIN contains" 0 "$RC"
+assert_has "status names the expiry route" "or once nothing of it moved for" "$OUT"
+
+# Fail closed stays: a reader that answers "unknown" (no assistant text read) never expires a seat.
+printf '{"type":"user","message":{"content":"hi"}}\n' > "$TR"; touch -d "900 minutes ago" "$TR"
+printf 'sess-beta\n' > "$H/.claude/state/orchestrator"
+OUT="$(claim_alpha)"; RC=$?
+assert_rc "wrapped=unknown, idle 15h -> refused" 1 "$RC"
+assert_has "...counted as working" "counts as working" "$OUT"
+kill "$PEER" 2>/dev/null
+
+# The backfill is read back by the real reader: with a hex sessionId (what the closed marker
+# needs) the holder reads as wrapped, declared by the marker — the tab list stops asking for it.
+H="$(new_home)"; mkdir -p "$H/.claude/projects/-tmp-x" "$H/logs"
+HEX=0a1b2c3d-4e5f-4071-8293-a4b5c6d7e8f9
+sleep 300 >/dev/null 2>&1 </dev/null & HPID=$!; PEERS="$PEERS $HPID"
+printf '{"pid":%s,"name":"delta","sessionId":"%s","kind":"interactive"}\n' "$HPID" "$HEX" > "$H/.claude/sessions/$HPID.json"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\n' "$NOT_WRAPPED" > "$H/.claude/projects/-tmp-x/$HEX.jsonl"
+touch -d "400 minutes ago" "$H/.claude/projects/-tmp-x/$HEX.jsonl"
+printf '%s\n' "$HEX" > "$H/.claude/state/orchestrator"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "hex holder, no log, idle past the expiry -> taken" 0 "$RC"
+PS="$(HOME="$H" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="" python3 "$P/scripts/peer-state.py" --session-id "$HEX" --json 2>&1)"
+[ "$(printf '%s' "$PS" | jq -r '.[0].wrapped')" = yes ] && ok "peer-state reads the backfilled holder as wrapped" || bad "peer-state reads the backfilled holder as wrapped" "$PS"
+[ "$(printf '%s' "$PS" | jq -r '.[0].closed_marker != null')" = true ] && ok "...declared by the backfilled closed marker" || bad "...declared by the backfilled closed marker" "$PS"
+kill "$HPID" 2>/dev/null
+
 say "== claim: a marker write that fails is not a claim =="
 # Announcing a successful claim after a failed write leaves a session believing it holds a seat it
 # does not — the same two-coordinator state, reached from the other end.
@@ -1030,6 +1152,14 @@ say "  ${OI_LINE:-open-items matrix did not report}"
 [ "$OI_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
 say ""
+say "== morning-headless (tests/morning-headless.sh) =="
+MH_OUT="$(bash "$ROOT/tests/morning-headless.sh" 2>&1)"; MH_RC=$?
+printf '%s\n' "$MH_OUT" | grep -E '^\s+(FAIL|skip)' || true
+MH_LINE="$(printf '%s\n' "$MH_OUT" | grep -E '^RESULT:' | tail -1)"
+say "  ${MH_LINE:-morning-headless matrix did not report}"
+[ "$MH_RC" -eq 0 ] || FAIL=$((FAIL+1))
+
+say ""
 say "== heartbeat (tests/heartbeat.sh) =="
 HB_OUT="$(bash "$ROOT/tests/heartbeat.sh" 2>&1)"; HB_RC=$?
 printf '%s\n' "$HB_OUT" | grep -E '^\s+(FAIL|skip)' || true
@@ -1038,5 +1168,5 @@ say "  ${HB_LINE:-heartbeat matrix did not report}"
 [ "$HB_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
 say ""
-say "RESULT: $PASS passed, $FAIL failed (plus peer-state: ${PS_LINE:-FAILED TO RUN}; open-items: ${OI_LINE:-FAILED TO RUN}; heartbeat: ${HB_LINE:-FAILED TO RUN})"
+say "RESULT: $PASS passed, $FAIL failed (plus peer-state: ${PS_LINE:-FAILED TO RUN}; open-items: ${OI_LINE:-FAILED TO RUN}; morning-headless: ${MH_LINE:-FAILED TO RUN}; heartbeat: ${HB_LINE:-FAILED TO RUN})"
 [ "$FAIL" -eq 0 ]

@@ -41,6 +41,19 @@ signal was missing. The log it reads is `$MM_SESSION_LOG`, else the `sessionLog`
 threshold, stays what it was — ask it to release the seat; its cache is warm, so that costs it
 almost nothing. `claim` prints the evidence it read off disk; the holder is never messaged.
 
+**An expired seat.** Past `MM_EXPIRED_SEAT_MIN` (default 360 minutes) the two-signal rule no
+longer applies: a holder whose transcript AND session folder (`<sessionId>/`, where sub-agents
+write) have not moved for that long has an expired seat, whether its log entry reads completed or
+it simply did nothing — waking it would re-pay its whole context for a sentence. The first session
+your user appoints takes it with `claim`, which prints `EXPIRED SEAT` with the idle age, the log
+state and the holder's last line, then appends the holder's wrap entry to the session log
+(`- Session: closed · <its id> — backfilled by <you> at <time>`), so the tab list reads it as
+finished, and a `WRAPPED` line to its open-items drop, so no ritual resumes it later. An expiry set
+below `MM_STALE_SEAT_MIN` is refused. Never message the holder and never delete the marker by hand; a reader that cannot judge
+the holder (`unknown`, no transcript) still means no takeover. If the backfill says `NOT
+completed`, the holder's last work may be unfinished: read its transcript tail and the board
+before the day plan.
+
 **By name (fallback).** A living session whose peer name starts with `orch`, started as
 `claude -n orchestrator`. This is the route for terminal sessions. A marker always wins
 over a name; two `orch*` sessions without a marker make the roles undefined, and the hook
@@ -249,6 +262,11 @@ whatever the old seat had not filed yet. So every "for later" goes to disk the m
 - **Who deletes:** the coordinator, with `open-items.py done <file>`, which refuses unless every
   open key is on the board AND the session is gone (peer-state's liveness, PID reuse included). A
   live tab's file stays even after its wrap: wrapped tabs get reused.
+- **Your user's side:** `open-items.py todo` lists every open item owned by `user` (board line
+  `- <key> · owner: user · …` first, else the drop line), only the ones not delivered yet;
+  `todo --delivered <keys>` records the delivery. Close a user item on the board with `<key> done`.
+  Procedure and grouping: `morning-ritual` skill, step 6 — also when your user just asks for
+  their open to-dos.
 - **No board configured** (`board` unset or unreadable): nothing counts as filed and nothing can be
   deleted; the banner says so. Set it with `/middle-management-setup`, ideally to a stable path
   (a symlink you re-point when the board rotates). Rotating the board: carry the keys of every
@@ -287,7 +305,7 @@ to ready and collect the pushes as one list for the user's return.
 ## Reaching your user off-keyboard
 
 `notifyCommand` in the config is the ONE sender on the machine: the heartbeat, the
-unit-failure alarm and you all call it, and nothing builds its own transport. Whatever
+unit-failure alarm, the headless morning ritual and you all call it, and nothing builds its own transport. Whatever
 decoration the messages need (a bold first line, a parse mode, a fallback to plain when
 the rich form is rejected) lives inside that one command, so an alarm never dies of
 formatting and callers never learn a markup.
@@ -619,6 +637,23 @@ Operating it:
   `~/.config/systemd/user/`. Its state (markers, listings) lives under
   `<config dir>/state/wt/` and is yours to delete.
 - **After a plugin update, re-run setup step 6** — the units run a copy, not the plugin.
+
+## The headless morning ritual
+
+Optional (setup step 7): `scripts/morning-headless.sh` on a weekday 07:30 timer runs the
+`morning-ritual` skill unattended and sends its day plan, your user's to-do list included, through
+`notifyCommand`. What you need to know as the coordinator who sits down after it:
+
+- **Did it deliver?** `<config dir>/state/morning-ritual/window` carries today's time → yes, and the
+  to-dos it sent are in `…/delivered`, so step 6 lists only what came after. No stamp from today →
+  run the ritual yourself, step 6 included, as part of taking the seat.
+- **"no progress since <date>"** means nothing moved (session log, board, drops, repo commits) and
+  no model ran; it is not a failure.
+- **A failure** arrives as one headline, the cause (`429`, `401`, `timeout`, `budget`, `other`) and
+  the fix command. A 429 or a probe without an answer is the account's rate limit: the fix is a
+  fallback credential file named by `MM_MORNING_FALLBACK_ENV` in the unit — your user fills it,
+  you never read or print it. Details and the port of an older site-local runner: README,
+  "Headless morning ritual".
 
 ## The other half of the plugin
 

@@ -4,7 +4,9 @@ coordinator files them on the board, nothing lives in prose only.
 
 Consumers: hooks/session-role.sh (`count`, coordinator branch; the write-now line names `add`),
   skills/wrap/SKILL.md step 5 (`add`, `add --done`, `add --wrapped`), skills/morning-ritual/SKILL.md
-  steps 3 and 4 (`list`), the coordinator by hand (`list`, `done`), tests/open-items.sh.
+  steps 3 and 4 (`list`) and step 6 (`todo`, `todo --delivered`), scripts/morning-headless.sh
+  (`todo`, `todo --delivered`), the coordinator by hand (`list`, `done`, `todo`),
+  tests/open-items.sh.
 
 Usage:
   open-items.py add --owner user|coordinator|lane|external:<who> "<what> · next: <step> · src: <who, when> · <path>"
@@ -14,12 +16,18 @@ Usage:
   open-items.py count                  one banner line, or nothing when there is nothing to file
   open-items.py done <file>            delete a drop file: refused unless every open key is on the
                                        board AND the session is gone
+  open-items.py todo [--all]           your user's open to-dos (owner user*, board + drops), only the
+                                       ones not delivered yet unless --all
+  open-items.py todo --delivered <key>...   record those keys as delivered to your user
 
 Drop dir: <config dir>/open-items/ (config dir = $CLAUDE_CONFIG_DIR or ~/.claude), one file per
 session, <sid8>-session-notes.md. Board: the `board` key of <config dir>/middle-management.json, read
 through symlinks. "Filed" = the item's whole key <sid8>-W<n> appears anywhere in the board file.
 Own session: $CLAUDE_CODE_SESSION_ID, else the registry entry of the nearest ancestor process (the
 wrap skill's step 0 walk). Liveness is peer-state.py's is_live, with its PID-reuse guard.
+To-dos: a board line `- <key> · owner: <owner> · <text>` (the drop line as `list` prints it) wins
+over the drop file's line; an item is closed by its drop file's `- W<n> done` or by `<key> done`
+(closed, answered, decided, resolved, erledigt) anywhere on the board. Delivered keys: <config dir>/state/morning-ritual/delivered, `key<TAB>time`.
 """
 import fcntl, functools, glob, importlib.util, json, os, re, sys, time
 
@@ -33,6 +41,9 @@ WRAPPED = re.compile(r"^- WRAPPED\b")
 # Whole key only: b42d7700-W1 must not read as filed because b42d7700-W10 is on the board.
 BOARD_KEY = re.compile(r"(?<![\w-])(\w{8}-W\d+)(?!\w)")
 OWNER = re.compile(r"^(user|coordinator|lane|external:\S+)$")
+BOARD_ITEM = re.compile(r"^\s*(?:[-*]\s*)?(\w{8}-W\d+)\s*·\s*owner:\s*([^\s·]+)\s*·\s*(.*)$")
+BOARD_DONE = re.compile(r"(?<![\w-])(\w{8}-W\d+)(?!\w)[\s*`:.,]*(?:done|erledigt|closed|answered|decided|resolved)\b", re.I)
+DELIVERED = os.path.join(CFG, "state", "morning-ritual", "delivered")
 
 
 @functools.lru_cache(None)
@@ -244,6 +255,64 @@ def done(arg):
     print("deleted " + f)
 
 
+def todo(argv):
+    """Your user's open to-dos: every open item whose owner starts with `user` (user, user+lane),
+    from the board and the drop files, by default only those not delivered yet."""
+    if argv[:1] == ["--delivered"]:
+        keys = argv[1:]
+        if not keys or not all(re.fullmatch(r"\w{8}-W\d+", k) for k in keys):
+            sys.exit("open-items: todo --delivered needs keys like b42d7700-W2")
+        os.makedirs(os.path.dirname(DELIVERED), exist_ok=True)
+        with open(DELIVERED, "a", encoding="utf-8") as fh:
+            fh.writelines("%s\t%s\n" % (k, time.strftime("%Y-%m-%d %H:%M")) for k in keys)
+        print("delivered: %d key%s recorded in %s" % (len(keys), "s" if len(keys) > 1 else "", DELIVERED))
+        return
+    if argv not in ([], ["--all"]):
+        sys.exit(__doc__.split("\n\n")[2])
+    items, closed = {}, set()
+    for f in files():                     # drop files first, so a board line can override them
+        try:
+            lines, opn, _, _ = parse(f)
+        except (OSError, ValueError):
+            continue                      # `list` names unreadable files; a to-do list stays quiet
+        # a drop's done line closes the item even when the board still carries its line
+        closed.update("%s-W%s" % (sid8_of(f), m.group(1)) for m in map(DONE.match, lines) if m)
+        for n, ln in sorted(opn.items()):
+            _, owner, text = (ln.split(" · ", 2) + ["", ""])[:3]
+            items["%s-W%d" % (sid8_of(f), n)] = (owner[len("owner: "):], text)
+    bpath, keys = board()
+    note = ""
+    if keys is None:
+        note = " (board %s, drop files only)" % ("not configured" if not bpath else bpath + " not readable")
+    else:
+        for ln in open(bpath, encoding="utf-8", errors="replace").read().splitlines():
+            m = BOARD_ITEM.match(ln)
+            if m:
+                items[m.group(1)] = (m.group(2), m.group(3))
+            closed.update(BOARD_DONE.findall(ln))
+    opn = [(k, t) for k, (o, t) in items.items() if o.startswith("user") and k not in closed]
+    try:
+        seen = dict(l.rstrip("\n").split("\t", 1) for l in open(DELIVERED, encoding="utf-8") if "\t" in l)
+    except OSError:
+        seen = {}
+    show = opn if argv else [(k, t) for k, t in opn if k not in seen]
+    since = "since %s" % max(seen.values()) if seen else "(nothing delivered before)"
+    if not opn:
+        print("To-dos for your user: none open%s." % note)
+        return
+    if not show:
+        print("To-dos for your user: nothing new %s; %d open in total (todo --all lists them)%s."
+              % (since, len(opn), note))
+        return
+    print("To-dos for your user: %d %s; %d open in total%s%s"
+          % (len(show), "listed" if argv else "new " + since, len(opn),
+             "" if argv else " (todo --all lists every one)", note))
+    for k, t in show:
+        print("- %s · %s" % (k, t))
+    print('Once your user has them: python3 "%s" todo --delivered %s'
+          % (os.path.abspath(__file__), " ".join(k for k, _ in show)))
+
+
 def main(argv):
     cmd = argv[:1]
     if cmd == ["add"]:
@@ -254,6 +323,8 @@ def main(argv):
         count()
     elif cmd == ["done"] and len(argv) == 2:
         done(argv[1])
+    elif cmd == ["todo"]:
+        todo(argv[1:])
     else:
         sys.exit(__doc__.split("\n\n")[2])
 
