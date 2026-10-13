@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.9.0 - 2026-10-13
+
+**An expired coordinator seat is taken without waking its holder (#1).** Observed: the previous
+coordinator idle 12h26m, its session-log entry completed, no closing line in its transcript, so
+`claim` answered BUSY and the only ways out were waking it (about 500k tokens of context re-paid)
+or deleting the marker by hand. Past `MM_EXPIRED_SEAT_MIN` (default 360 minutes) a holder whose
+transcript and session folder (`<sessionId>/`, where sub-agents write) have not moved has an
+expired seat, whether its log entry reads completed or it did nothing at all. `claim` prints
+`EXPIRED SEAT` with the idle age, the log state, the signals and the holder's last line, takes the
+marker, and the winner of the marker appends the holder's wrap entry to the session log in the
+documented shape, `- Session: closed · <id> — backfilled by <name> at <time>` included, so the tab
+list reads it as finished. The holder is never messaged. Below the threshold the two-signal rule is
+unchanged; a reader answering `unknown`, no transcript, or an unreadable session folder still means
+no takeover. `status` and the BUSY refusal name the expiry route.
+
+**Your user's to-do list (#2).** `open-items.py todo` lists every open item owned by `user`
+(`user+lane…` too) from the board (a line `- <key> · owner: <owner> · <text>` wins) and the drop
+files, closed by the drop's done line or `<key> done` on the board, only the ones not delivered yet
+(`--all` for every one); `todo --delivered <keys>` records the delivery in
+`<config dir>/state/morning-ritual/delivered`. The `morning-ritual` skill gains step 6: group them
+decide / click / run / read, one line of context each with its link or command on the same line,
+then mark them delivered. It also runs alone on "todo list", "my open to-dos", "meine offenen
+To-Dos", and when a coordinator takes the seat on a morning the headless run did not deliver. The
+day plan becomes step 7 and stamps `<config dir>/state/morning-ritual/window`, the window step 1
+reads.
+
+**A headless morning ritual that fails fast and says why (#3).** Observed on one machine on two
+mornings: `claude -p` met `429 rate_limit_error` on an exhausted subscription, the CLI retried with
+backoff, and the unit died after 40 minutes with 60 journal lines as its alarm. The plugin now ships
+a portable runner, `scripts/morning-headless.sh`, with `templates/systemd/orch-morning-ritual.{service,timer}`
+(weekdays 07:30, `OnFailure=unit-failure-alarm@%n.service`) and setup step 7. Nothing moved since the
+last delivered ritual (session log, board, drops, protected-checkout commits, `MM_MORNING_WATCH`) →
+one "no progress since <date>" line and no model run. Otherwise a 25-second probe; a 429, a 401 or no
+answer loads `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` from the file `MM_MORNING_FALLBACK_ENV`
+names (read only then, never executed, never printed) and probes once more. The ritual runs under
+`--max-budget-usd` and a hard `timeout`, writes its day plan to a file, and the runner sends it,
+marks the to-dos delivered and stamps the window. A failure writes headline + cause (`429`, `401`,
+`timeout`, `budget`, `other`) + the one fix command to `<config dir>/state/unit-failure-alarm/<unit>.cause`;
+`unit-failure-alarm.sh` sends that instead of the journal tail when it exists, and consumes it. The
+README carries the mechanical port of an existing site-local runner (config keys, fallback file, env
+names, unit lines). Tests: `tests/morning-headless.sh` against a stub `claude`.
+
 ## 0.8.0 - 2026-10-09
 
 **Open items never get dropped.** A to-do said mid-session lived in that transcript only until the
