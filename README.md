@@ -60,9 +60,10 @@ rename migrates nothing — re-register it once:
 /plugin install middle-management@dr-bopp
 ```
 
-**After every plugin update, re-run `/middle-management-setup` step 5 and step 6** if you
-installed the heartbeat or the lane reaper — their units run a copy of the scripts, because the
-plugin's own cache path is versioned and goes stale with each update.
+**After every plugin update, re-run `/middle-management-setup` steps 5, 6 and 7** for whichever of
+the heartbeat, the lane reaper and the headless morning ritual you installed — their units run a
+copy of the scripts, because the plugin's own cache path is versioned and goes stale with each
+update.
 
 ### First five minutes
 
@@ -96,6 +97,7 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 | Review gate | PreToolUse hook (optional) | Holds ExitPlanMode on a real plan and a Write to any `<date>_handoff-*.md` until the review loop ran in this session within the hour. Off unless `reviewLoopGate: true`. |
 | Open-items drop | script + banner line | Every session writes each "for later" item the moment it appears, with `scripts/open-items.py add`, to its own file under `<config-dir>/open-items/`; the coordinator's banner counts what is not on the board yet, `list` shows it, and `done` deletes a file only once every key is on the board and the session is gone. A to-do no longer dies with a session that never wrapped, or with a coordinator hand-over. |
 | `morning-ritual` skill | skill | The coordinator’s day-opener: messages delta, repo state, wrap audit, board sweep, machine cleanup, your user’s to-do list, day plan. The to-do list also runs alone ("todo list", "meine offenen To-Dos"): every open `owner: user` item from the board and the drops, grouped decide / click / run / read, only what was not delivered yet (`open-items.py todo`). Coordinator sessions only; carries CUSTOMIZE markers for your team’s stack. |
+| Headless morning ritual | systemd user timer (optional, Linux) | Weekdays 07:30: nothing moved since the last delivered ritual → one "no progress since <date>" line, no model run. Otherwise a 25-second login probe (429/401/no answer → a second credential from a file the unit names), the `morning-ritual` skill under `--max-budget-usd` and a hard timeout, and the day plan through your `notifyCommand`. A failure arrives as headline + cause + fix command, not journal lines. Installed by setup step 7; see [Headless morning ritual](#headless-morning-ritual). |
 | Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. The same tick keeps waiting sessions warm: a live, unwrapped session idle 45 to 55 minutes on an open question (or a hold file) gets one "reply ok" ping, at most 3 per wait phase, so the answer does not cost it its whole context again. Installed by setup step 5. |
 
 ## How the roles work
@@ -288,6 +290,51 @@ indistinguishable from an absent file, which is why it is written out here.
 Until a log exists the role hook says so on every message instead of asking for the closed line,
 and `plugins/middle-management/templates/session-log.md` is a skeleton to start one from — copy
 it to the resolved path. One file per machine, never one per repository.
+
+## Headless morning ritual
+
+`scripts/morning-headless.sh` runs the coordinator's morning ritual with nobody at the keyboard,
+from the timer `orch-morning-ritual.timer` (weekdays 07:30, no catch-up after a reboot) that setup
+step 7 installs. Every path comes from the config (`sessionLog`, `board`,
+`protectedCheckouts[].root`, `notifyCommand`); state lives in `<config-dir>/state/morning-ritual/`
+(`window` = epoch of the last delivered ritual, `delivered` = to-do keys already sent, `runs/`).
+
+1. **Empty window.** No change in the session log, the board, the open-items drops, the commits of
+   any protected checkout (after a best-effort fetch) or `MM_MORNING_WATCH` since `window` → one
+   line `no progress since <date>`, no model run, the window keeps its date.
+2. **Probe.** `claude -p OK --max-turns 1` under `timeout` (`MM_MORNING_PROBE_SEC`, 25). A 429, a
+   401 or no answer — a rate-limited login retries with backoff and simply hangs — loads
+   `ANTHROPIC_API_KEY` and/or `CLAUDE_CODE_OAUTH_TOKEN` from the file `MM_MORNING_FALLBACK_ENV`
+   names and probes once more. The file is read only then, never executed, its values never
+   printed; it is deliberately not an `EnvironmentFile=`, which would put the key in front of the
+   primary login on every run.
+3. **The ritual**, `middle-management:morning-ritual` with its to-do step, under
+   `--max-budget-usd` (`MM_MORNING_MAX_BUDGET_USD`, 3) and `timeout` (`MM_MORNING_TIMEOUT_MIN`,
+   20). The model writes the day plan to a file; the runner sends it, records the to-dos as
+   delivered and stamps the window. Model and permission mode: `MM_MORNING_MODEL`,
+   `MM_MORNING_PERMISSION_MODE` (unset = the CLI's defaults; the run needs Bash for git and
+   `open-items.py` and may only do what your settings allow without asking).
+4. **Failure** → exit 1 with a cause file `<config-dir>/state/unit-failure-alarm/<unit>.cause`:
+   one headline, the cause (`429`, `401`, `timeout`, `budget`, `other`) and the one fix command.
+   The unit's `OnFailure=unit-failure-alarm@%n.service` sends that instead of the journal tail.
+
+**Porting a site-local runner.** A machine that already runs its own headless ritual (a wrapper
+around `claude -p` with hard-coded paths and its own sender) moves onto this one mechanically:
+
+| What the old runner had | Where it goes |
+|---|---|
+| its board path, session log, the repos it fetched | config keys `board`, `sessionLog`, `protectedCheckouts[].root` |
+| its own sender (a Telegram `curl`, a bot script) | config key `notifyCommand` (message as `$1` and on stdin); its token stays in the env file that command sources |
+| an API key or a second account's token for bad mornings | a mode-600 file of `ANTHROPIC_API_KEY=…` / `CLAUDE_CODE_OAUTH_TOKEN=…` lines (`claude setup-token` of the second account), named by `Environment=MM_MORNING_FALLBACK_ENV=` in the unit |
+| its budget, `--model`, `--permission-mode`, extra inputs, force/dry switch | `MM_MORNING_MAX_BUDGET_USD`, `MM_MORNING_MODEL`, `MM_MORNING_PERMISSION_MODE`, `MM_MORNING_WATCH`, `MM_MORNING_FORCE=1` |
+| unit `ExecStart=<old script> …` | `ExecStart=<config-dir>/middle-management-morning/morning-headless.sh`, no arguments |
+| unit `TimeoutStartSec=` sized for a hang | `MM_MORNING_TIMEOUT_MIN` + 5 to 10 minutes: the run stops itself first, with its cause |
+| — | new: `Environment=MM_MORNING_UNIT=%n`, `Environment=CLAUDE_CONFIG_DIR=…`, an `Environment=PATH=` that finds `claude`, `git`, `jq`, `python3`, `timeout` |
+| `OnFailure=unit-failure-alarm@%n.service`, the timer's `OnCalendar=` | unchanged |
+| its pre-gather step, proxy wrap + seat release + poke of the old coordinator, a watchdog unit, a journal-dump alarm, a runs log | dropped: the skill gathers, `claim` takes an expired seat and backfills its wrap, the cause file replaces the dump |
+
+Re-running setup step 7 writes exactly these unit lines; the old unit and its timer are disabled
+by hand (`systemctl --user disable --now <old>.timer`) once the new one has delivered a morning.
 
 ## Starting a project from the templates
 

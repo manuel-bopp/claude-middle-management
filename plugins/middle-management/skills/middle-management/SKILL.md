@@ -304,7 +304,7 @@ to ready and collect the pushes as one list for the user's return.
 ## Reaching your user off-keyboard
 
 `notifyCommand` in the config is the ONE sender on the machine: the heartbeat, the
-unit-failure alarm and you all call it, and nothing builds its own transport. Whatever
+unit-failure alarm, the headless morning ritual and you all call it, and nothing builds its own transport. Whatever
 decoration the messages need (a bold first line, a parse mode, a fallback to plain when
 the rich form is rejected) lives inside that one command, so an alarm never dies of
 formatting and callers never learn a markup.
@@ -636,6 +636,23 @@ Operating it:
   `~/.config/systemd/user/`. Its state (markers, listings) lives under
   `<config dir>/state/wt/` and is yours to delete.
 - **After a plugin update, re-run setup step 6** — the units run a copy, not the plugin.
+
+## The headless morning ritual
+
+Optional (setup step 7): `scripts/morning-headless.sh` on a weekday 07:30 timer runs the
+`morning-ritual` skill unattended and sends its day plan, your user's to-do list included, through
+`notifyCommand`. What you need to know as the coordinator who sits down after it:
+
+- **Did it deliver?** `<config dir>/state/morning-ritual/window` carries today's time → yes, and the
+  to-dos it sent are in `…/delivered`, so step 6 lists only what came after. No stamp from today →
+  run the ritual yourself, step 6 included, as part of taking the seat.
+- **"no progress since <date>"** means nothing moved (session log, board, drops, repo commits) and
+  no model ran; it is not a failure.
+- **A failure** arrives as one headline, the cause (`429`, `401`, `timeout`, `budget`, `other`) and
+  the fix command. A 429 or a probe without an answer is the account's rate limit: the fix is a
+  fallback credential file named by `MM_MORNING_FALLBACK_ENV` in the unit — your user fills it,
+  you never read or print it. Details and the port of an older site-local runner: README,
+  "Headless morning ritual".
 
 ## The other half of the plugin
 

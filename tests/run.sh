@@ -1140,6 +1140,14 @@ say "  ${OI_LINE:-open-items matrix did not report}"
 [ "$OI_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
 say ""
+say "== morning-headless (tests/morning-headless.sh) =="
+MH_OUT="$(bash "$ROOT/tests/morning-headless.sh" 2>&1)"; MH_RC=$?
+printf '%s\n' "$MH_OUT" | grep -E '^\s+(FAIL|skip)' || true
+MH_LINE="$(printf '%s\n' "$MH_OUT" | grep -E '^RESULT:' | tail -1)"
+say "  ${MH_LINE:-morning-headless matrix did not report}"
+[ "$MH_RC" -eq 0 ] || FAIL=$((FAIL+1))
+
+say ""
 say "== heartbeat (tests/heartbeat.sh) =="
 HB_OUT="$(bash "$ROOT/tests/heartbeat.sh" 2>&1)"; HB_RC=$?
 printf '%s\n' "$HB_OUT" | grep -E '^\s+(FAIL|skip)' || true
@@ -1148,5 +1156,5 @@ say "  ${HB_LINE:-heartbeat matrix did not report}"
 [ "$HB_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
 say ""
-say "RESULT: $PASS passed, $FAIL failed (plus peer-state: ${PS_LINE:-FAILED TO RUN}; open-items: ${OI_LINE:-FAILED TO RUN}; heartbeat: ${HB_LINE:-FAILED TO RUN})"
+say "RESULT: $PASS passed, $FAIL failed (plus peer-state: ${PS_LINE:-FAILED TO RUN}; open-items: ${OI_LINE:-FAILED TO RUN}; morning-headless: ${MH_LINE:-FAILED TO RUN}; heartbeat: ${HB_LINE:-FAILED TO RUN})"
 [ "$FAIL" -eq 0 ]

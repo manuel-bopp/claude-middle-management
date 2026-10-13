@@ -3,7 +3,7 @@
 # Consumers: hooks/session-role.sh, hooks/protect-main-checkouts.sh,
 #   hooks/block-blanket-git-add.sh, hooks/long-running-as-unit.sh, hooks/require-review-loop.sh,
 #   commands/middle-management-setup.md (via Bash),
-#   scripts/wt, tests/run.sh.
+#   scripts/wt, scripts/orchestrator.sh, scripts/morning-headless.sh, tests/run.sh.
 #
 # Usage:
 #   config-check.sh dir        print the resolved Claude config dir

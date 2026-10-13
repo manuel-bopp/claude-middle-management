@@ -1,0 +1,16 @@
+# middle-management plugin — USER unit template. /middle-management-setup step 7 installs it into
+# ~/.config/systemd/user/, then:
+#   systemctl --user enable --now orch-morning-ritual.timer
+# Persistent=false on purpose: a run caught up after a reboot at 14:00 lands in the middle of a
+# working coordinator's day. A missed morning is caught by the first coordinator of the day
+# (morning-ritual skill, step 6).
+[Unit]
+Description=middle-management: headless morning ritual - weekdays 07:30
+
+[Timer]
+OnCalendar=Mon..Fri 07:30
+Persistent=false
+Unit=orch-morning-ritual.service
+
+[Install]
+WantedBy=timers.target

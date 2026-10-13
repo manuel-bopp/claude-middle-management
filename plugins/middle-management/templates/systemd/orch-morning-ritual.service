@@ -1,0 +1,23 @@
+# middle-management plugin — USER unit template, started by orch-morning-ritual.timer, never enabled
+# itself. /middle-management-setup step 7 installs it into ~/.config/systemd/user/ with the
+# placeholders filled in. The systemd user manager inherits no shell environment, so the config dir
+# and a PATH that finds claude, git, jq, python3 and timeout are written in here.
+# MM_MORNING_FALLBACK_ENV names a mode-600 file of KEY=value lines (ANTHROPIC_API_KEY and/or
+# CLAUDE_CODE_OAUTH_TOKEN) that the runner reads ONLY after a failed probe — deliberately not an
+# EnvironmentFile=, which would put the key in front of the primary login on every run.
+# More knobs (budget, timeout, model, permission mode, watched files): Environment= lines, names
+# in the header of morning-headless.sh.
+[Unit]
+Description=middle-management: headless morning ritual
+OnFailure=unit-failure-alarm@%n.service
+
+[Service]
+Type=oneshot
+Environment=CLAUDE_CONFIG_DIR=__CONFIG_DIR__
+Environment=PATH=__PATH__
+Environment=MM_MORNING_UNIT=%n
+Environment=MM_MORNING_FALLBACK_ENV=__FALLBACK_ENV__
+ExecStart=__MORNING_DIR__/morning-headless.sh
+# The model run stops itself after MM_MORNING_TIMEOUT_MIN (default 20) with its cause on file;
+# this is only the backstop above it.
+TimeoutStartSec=30min

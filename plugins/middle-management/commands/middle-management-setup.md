@@ -336,3 +336,46 @@ keys `reaperMaxHours`, `reaperOwnerlessMinutes` and `reaperDigestHour`.
 
 Disarm with `systemctl --user disable --now lane-reaper.timer`; never run that here
 unasked.
+
+## Step 7 — headless morning ritual (optional, Linux only)
+
+A systemd **user** timer (weekdays 07:30) runs `scripts/morning-headless.sh`: when nothing moved
+since the last delivered ritual it sends one "no progress since <date>" line and starts no model
+at all; otherwise it probes the login in 25 seconds, falls back to a second credential on 429/401
+or no answer, runs the `morning-ritual` skill under a budget and a hard timeout, and sends the day
+plan (your user's to-do list included) through `notifyCommand`. A failure sends one headline, the
+cause and the fix command instead of journal lines. Offer it only when the user wants the ritual
+waiting on their phone before they sit down; otherwise skip this step and say so.
+
+Preconditions — the same four as step 5 plus `claude` and `timeout` on this PATH. Without a
+`notifyCommand` it refuses to run at all (nothing could reach anyone), so stop there.
+
+Ask two things: whether the account may fall back to a second credential when its own login is
+rate-limited — if yes, the PATH of a mode-600 file holding `ANTHROPIC_API_KEY=…` or
+`CLAUDE_CODE_OAUTH_TOKEN=…` (the user fills it themselves; never read it, never print it); and
+whether the run may act without asking (`MM_MORNING_PERMISSION_MODE`, README "Headless morning
+ritual") — without it, tool calls the user's settings do not allow are refused in the unattended run.
+
+Install — copies the runner and its helpers OUT of the plugin, for the same reason as step 5:
+
+```bash
+CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
+CFG_DIR="$(bash "$CHECK" dir)"; MR="$CFG_DIR/middle-management-morning"; UNITS="$HOME/.config/systemd/user"
+FB=""   # the fallback file path the user named, or empty
+mkdir -p "$MR" "$UNITS"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-headless.sh,config-check.sh,open-items.py,peer-state.py,unit-failure-alarm.sh} "$MR/"
+for u in orch-morning-ritual.service orch-morning-ritual.timer; do
+  sed "s|__MORNING_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g; s|__FALLBACK_ENV__|$FB|g" \
+    "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
+done
+sed "s|__HEARTBEAT_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
+  "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
+systemctl --user daemon-reload && systemctl --user enable --now orch-morning-ritual.timer
+systemctl --user list-timers orch-morning-ritual.timer --no-pager
+```
+
+Then tell the user, in plain text: budget, timeout, model and permission mode are
+`Environment=MM_MORNING_*` lines in `~/.config/systemd/user/orch-morning-ritual.service` (names in
+the header of the runner); a test run is `systemctl --user start orch-morning-ritual.service` and
+reaches their phone; **after every plugin update re-run this step**. Disarm with
+`systemctl --user disable --now orch-morning-ritual.timer`; never run that here unasked.
