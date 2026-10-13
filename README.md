@@ -123,7 +123,7 @@ changing hands · red = never.*
 12. The seat is handed over to a fresh tab, or `release`d — best at wrap time, while still warm. An empty marker is a good state.
 13. The wrap ends on three lines and nothing after them: the session's name, its topic (both in the chat's language), and the literal `Close this tab.` alone on the last line in every language — never a translation, never both languages, never a near-variant.
 14. The same wrap appends `- Session: closed · <sessionId>` to its session-log entry — keyed by id, because session names get recycled.
-15. The coordinator runs `peer-state.py --wrapped` and gets the tab list, each row carrying that session's own last line so you find the tab by what is on screen in it. Nobody is woken. The same JSON is what lets `claim` take a stale seat off disk (wrapped **and** the log says completed **and** idle past `MM_STALE_SEAT_MIN`).
+15. The coordinator runs `peer-state.py --wrapped` and gets the tab list, each row carrying that session's own last line so you find the tab by what is on screen in it. Nobody is woken. The same JSON is what lets `claim` take a stale seat off disk (wrapped **and** the log says completed **and** idle past `MM_STALE_SEAT_MIN`), or an expired one (nothing of the holder moved for `MM_EXPIRED_SEAT_MIN`, default 6 h: its wrap entry is backfilled for it).
 
 </details>
 
@@ -143,7 +143,10 @@ changing hands · red = never.*
    closing block and appends `- Session: closed · <sessionId>` to the session log,
    and the coordinator reads both back with `scripts/peer-state.py --wrapped` to tell you
    which tabs to close — nobody is messaged, and those same two signals are what let
-   `claim` take over a seat whose holder wrapped last night. The plugin ships that wrap as
+   `claim` take over a seat whose holder wrapped last night. A holder quiet past
+   `MM_EXPIRED_SEAT_MIN` (default 360 minutes; transcript and session folder both still) has an
+   expired seat even without its closing line: `claim` takes it, prints what it read, and
+   appends the holder's wrap entry with its closed marker ("backfilled by …"), never messaging it. The plugin ships that wrap as
    the `middle-management:wrap` skill; a personal `~/.claude/skills/wrap` still wins on `/wrap`.
 6. Waiting is read off disk the same way: `scripts/peer-state.py --waiting` lists the live
    sessions that MAY be parked on a permission prompt (a long-running tool reads the same; a
@@ -247,7 +250,9 @@ behind your back.
 (`peer-state.py --wrapped`, which sessions are finished and can be closed instead of messaged),
 and `/orchestrator claim` over a seat whose holder wrapped last night — that takeover needs the
 holder's own closing line **and** its log entry reading `completed`, so with no log there is no
-takeover, and `claim` says so and names this path.
+takeover, and `claim` says so and names this path. The one write by someone else: a seat that
+expired (nothing of the holder moved for `MM_EXPIRED_SEAT_MIN`) gets the holder's wrap entry
+appended by the session that took it, in the shape below, marked "backfilled by <name> at <time>".
 
 **The format is frozen** — the reader matches it literally. En dash `–` between the parts of the
 entry header, middle dot `·` in the closed line:

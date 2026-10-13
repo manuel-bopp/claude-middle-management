@@ -41,6 +41,18 @@ signal was missing. The log it reads is `$MM_SESSION_LOG`, else the `sessionLog`
 threshold, stays what it was — ask it to release the seat; its cache is warm, so that costs it
 almost nothing. `claim` prints the evidence it read off disk; the holder is never messaged.
 
+**An expired seat.** Past `MM_EXPIRED_SEAT_MIN` (default 360 minutes) the two-signal rule no
+longer applies: a holder whose transcript AND session folder (`<sessionId>/`, where sub-agents
+write) have not moved for that long has an expired seat, whether its log entry reads completed or
+it simply did nothing — waking it would re-pay its whole context for a sentence. The first session
+your user appoints takes it with `claim`, which prints `EXPIRED SEAT` with the idle age, the log
+state and the holder's last line, then appends the holder's wrap entry to the session log
+(`- Session: closed · <its id> — backfilled by <you> at <time>`), so the tab list reads it as
+finished. Never message the holder and never delete the marker by hand; a reader that cannot judge
+the holder (`unknown`, no transcript) still means no takeover. If the backfill says `NOT
+completed`, the holder's last work may be unfinished: read its transcript tail and the board
+before the day plan.
+
 **By name (fallback).** A living session whose peer name starts with `orch`, started as
 `claude -n orchestrator`. This is the route for terminal sessions. A marker always wins
 over a name; two `orch*` sessions without a marker make the roles undefined, and the hook
