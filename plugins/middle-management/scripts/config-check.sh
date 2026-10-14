@@ -80,6 +80,15 @@ validate() {
           and ((.serve // "") | type == "string")
           and ((.worktreeDir // "") | type == "string")
         ))
+    # Scopes (README "Scopes"): the name becomes a directory under state/scopes/, a root of / would
+    # swallow every session; scripts/scope.py refuses both on its own as well.
+    and ((.scopes // []) | (type == "array")
+          and all((type == "object")
+            and (.name | type == "string" and test("\\A[A-Za-z0-9][A-Za-z0-9_-]*\\z") and . != "default")
+            and (.root | type == "string" and startswith("/") and (sub("/+$"; "") | length) > 0)
+            and (.board | type == "string" and startswith("/")))
+          and ((map(.name) | unique | length) == length)
+          and ((map(.root | sub("/+$"; "")) | unique | length) == length))
   ' "$f" >/dev/null 2>&1 || return 1
   return 0
 }

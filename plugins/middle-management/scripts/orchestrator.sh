@@ -4,7 +4,8 @@
 #   stale-marker hint printed by hooks/session-role.sh, tests/run.sh.
 #   The marker it writes is read by hooks/session-role.sh; the wrap entry it backfills on an
 #   expired seat is read by scripts/peer-state.py.
-#   Calls scripts/peer-state.py (stale-seat check on claim, holder line on status).
+#   Calls scripts/peer-state.py (stale-seat check on claim, holder line on status) and, only
+#   when the config has a "scopes" key, scripts/scope.py (which seat this session's scope uses).
 #
 # Why a marker file and not the session name: an editor tab title never reaches the
 # session registry, and `claude -n <name>` only exists at start — but the coordinator
@@ -34,6 +35,17 @@ done
   exit 1; }
 MY_ID=$(jq -r '.sessionId' "$REG/$me.json")
 MY_NAME=$(jq -r '.name // "unnamed"' "$REG/$me.json")
+
+# Scopes (README "Scopes"): with a non-empty "scopes" key the seat is the one of THIS session's
+# scope, decided by the directory it was started in (its registry cwd). No key: nothing here runs.
+# Trade-off: with scopes, status and release need python3 too; the escape hatch is removing the key.
+SCOPE=""
+if jq -e '(.scopes | arrays | length) > 0' "$(bash "$DIR/config-check.sh" file)" >/dev/null 2>&1; then
+  S=$(python3 "$DIR/scope.py" of "$(jq -r '.cwd | if type == "string" then . else "" end' "$REG/$me.json")" 2>/dev/null) || {
+    echo "Scopes are configured, but this session's scope could not be resolved ($DIR/scope.py, python3). Nothing changed."; exit 1; }
+  IFS=$'\t' read -r SCOPE SDIR _ <<<"$S"
+  MARKER="$SDIR/orchestrator"
+fi
 
 # Alive = a registry entry with this sessionId, kind "interactive" and a pid that answers
 # kill -0 — the same rule hooks/session-role.sh applies (the sessionId is the identity, .name
@@ -187,6 +199,24 @@ backfill() {
 }
 
 HID=$(held_id); HNAME=""; [ -n "$HID" ] && HNAME=$(alive_name "$HID")
+# A holder alive in ANOTHER scope (a root was added, moved or nested over its start dir) does not
+# hold this seat: the role hook already calls it "not visibly alive", so claim and release <id> must
+# work here too. Fail closed: only a successful resolution to a different scope clears HNAME.
+HSCOPE=""
+if [ -n "$SCOPE" ] && [ -n "$HNAME" ]; then
+  HCWD=$(cat "$REG"/*.json 2>/dev/null \
+    | jq -r --arg id "$HID" 'select(.sessionId==$id and .kind == "interactive")
+        | [.pid, (.cwd | if type == "string" and . != "" then . else "-" end)] | @tsv' 2>/dev/null \
+    | { while IFS=$'\t' read -r pid c; do kill -0 "$pid" 2>/dev/null && { printf '%s' "$c"; break; }; done; })
+  HS=$(python3 "$DIR/scope.py" of "$HCWD" 2>/dev/null) && [ "${HS%%$'\t'*}" != "$SCOPE" ] \
+    && { HSCOPE="${HS%%$'\t'*}"; HNAME=""; }
+fi
+moved_note() {  # the reason a living holder does not count, when that is the reason
+  if [ -n "$HSCOPE" ]; then
+    echo "(The holder $HID is alive, but it now belongs to scope $HSCOPE, so it no longer holds this seat.)"
+  fi
+}
+if [ -n "$SCOPE" ]; then echo "Scope: $SCOPE (seat marker $MARKER)"; fi
 
 case "${1:-status}" in
   claim)
@@ -287,6 +317,7 @@ case "${1:-status}" in
     # NB: an `[ … ] && echo` chain here would make a successful claim exit 1.
     if [ -n "$HID" ] && [ -z "$HNAME" ]; then
       echo "(The previous holder is no longer running — marker taken over.)"
+      moved_note
     fi
     # Issue #2: the first coordinator of the day delivers the ritual (the user's to-do list at least)
     # when the headless run did not. The window is the epoch of the last delivered ritual.
@@ -335,6 +366,7 @@ case "${1:-status}" in
     echo "This session: \"$MY_NAME\" ($MY_ID)"
     if [ -z "$HID" ];      then echo "Coordinator:  none — the role regime is OFF."
     elif [ -z "$HNAME" ];  then echo "Coordinator:  the marker points at a session that is not visibly alive ($HID) — 'claim' takes it over, 'release $HID' clears it."
+      moved_note
     elif [ "$HID" = "$MY_ID" ]; then echo "Coordinator:  this session."
     else
       echo "Coordinator:  \"$HNAME\""

@@ -1,6 +1,6 @@
 ---
 name: middle-management
-description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work — appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, whether an approval that arrives through that channel counts, when a lane's dev server or worktree may be cleaned up and when it may not, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
+description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work, such as appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, whether an approval that arrives through that channel counts, when a lane's dev server or worktree may be cleaned up and when it may not, a second coordinator for another project root (scopes), or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
 version: 0.4.0
 ---
 
@@ -68,6 +68,24 @@ reachable remotely: set `"remoteControlAtStartup": false` in the user-scope
 reminds the coordinator to type `/remote-control` in its tab — no script can do that —
 and a fresh coordinator starts as `claude --rc -n orchestrator`.
 
+**Scopes (optional).** One config dir normally has one seat. A `scopes` key in the config
+(README, "Scopes"; `/middle-management-setup` adds one) gives a further project root its own,
+independent seat, board and workers. A session's scope is the one of the directory it was
+STARTED in (its registry entry, not where it later `cd`s): the longest listed root that is that
+directory or one of its parents, and a linked git worktree that matches no root counts as the
+same subpath of its main checkout. Everything else is the scope `default`, whose marker stays
+`<config-dir>/state/orchestrator`; a named scope's marker is
+`<config-dir>/state/scopes/<name>/orchestrator`. `/orchestrator claim|release|status` act on the
+caller's scope and print `Scope: <name>` first; the banners read `ORCHESTRATOR of scope <name>` /
+`WORKER of scope <name>` and name that scope's coordinator. Workers message only their own
+scope's coordinator; coordinators of different scopes may message each other directly (the other
+scope's holder: `cat <config-dir>/state/scopes/<name>/orchestrator`, then `peer-state.py
+--session-id <id>`), never each other's workers. The tab list is per scope too:
+`peer-state.py --wrapped --scope <name>`. A holder whose start dir moves into another scope (a
+root was added or nested over it) no longer holds its old seat. The heartbeat watches every seat.
+Machine-wide stay the registry, the one session log, the open-items drop dir, `notifyCommand`,
+staging, protected checkouts with `/wt`, and the heartbeat timer.
+
 ## The two roles
 
 **Worker.** Peer messages go ONLY to the coordinator, never to another worker — anything
@@ -80,6 +98,7 @@ wrap convention: touched docs, log entry, local commit) are ONE motion — nobod
 remind you. This plugin ships one as the `middle-management:wrap` skill, so a team without
 its own has a routine that writes what the tab list reads; a personal `~/.claude/skills/wrap`
 takes precedence on the bare `/wrap`.
+With scopes, "the coordinator" is your own scope's: never message another scope's coordinator.
 
 **You are the sub-orchestrator of your own lane.** Plan review, build, diff review,
 screenshots and report writing run in sub-agents with fresh context, and every sub-agent
@@ -126,6 +145,8 @@ session that connects workers. You track who works on what and what is pending. 
 the sole writer of the board. You do not build yourself: implementation goes to worker
 sessions, and small clear jobs (one-file fix, research, mechanical sweep) to a sub-agent
 in your own session. Your context stays lean.
+With scopes, your workers, board and cleanup are your scope's only; the coordinator of another
+scope is the one session outside it you may message directly.
 
 **Your tab is the user's one window.** Each message here lands the delta plus the asks,
 each ask with your default — not a play-by-play of what a sub-agent is doing, and no
@@ -271,6 +292,12 @@ whatever the old seat had not filed yet. So every "for later" goes to disk the m
   deleted; the banner says so. Set it with `/middle-management-setup`, ideally to a stable path
   (a symlink you re-point when the board rotates). Rotating the board: carry the keys of every
   item still open over to the new board, otherwise the inbox lists them all again.
+- **With scopes:** a drop file belongs to the scope of the cwd in its header line (the writing
+  session's start dir). Only that scope's coordinator counts, lists, files and deletes it, against
+  its own scope's board; a key written on another scope's board is not filed, and `done` refuses
+  another scope's file. Unreadable or headerless files go to the default scope's coordinator.
+  Adding or moving a root re-homes existing drop files, so a new scope's board carries over the
+  keys already filed elsewhere, as for a rotated board.
 
 ## The autonomous loop (optional)
 
@@ -458,6 +485,13 @@ coordinator releases the seat, the new one claims it.
 - **"override marker active"** — someone allowed a direct edit in a protected checkout
   and left the marker behind. Delete the file the warning names; the guard is off for the
   whole machine until then.
+- **"scopes are configured but scope.py failed"**: python3 is missing or the script is
+  unreadable, so no session gets a role. Fix that, or remove the `scopes` key
+  (`/middle-management-setup`).
+- **A session shows the wrong scope**: its scope is its START directory (a worktree counts as
+  the same subpath of its main checkout), not where it is now. Restart it in the right directory.
+- **"the holder now belongs to another scope"**: a root was added or nested over the seat
+  holder's start dir. From a session of the old scope, `claim` the seat or `release <id>` it.
 
 State lives in the Claude config dir (`CLAUDE_CONFIG_DIR` when set, otherwise `~/.claude`);
 `bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" dir` prints the resolved one. It
@@ -536,6 +570,8 @@ turn get an answer: one `stat` and one tail-read of the transcript under
 `notifyCommand` and a **poke**: a peer message written straight into the session's own Unix
 socket by `poke-session.py` — no `claude` process, no model call, no quota. Then at most one
 poke per hour, giving up after 24 h; a new answer closes the episode with one "back" line.
+With scopes, each named seat's state lives under `<config-dir>/state/scopes/<name>/orch-heartbeat/`,
+its alarms carry `scope <name>`, and its poke names the scope's roster reader and board.
 
 A poke that exits 0 was **handed over**, not delivered — the CLI acknowledges no peer
 frame. So anything whose only copy travels through a poke is gone when the session drops

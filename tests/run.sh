@@ -31,11 +31,12 @@ new_home() {  # [$1 = registry name of THIS process, default alpha] -> fresh fak
   echo "$T"
 }
 PEERS=""
-add_peer() {  # $1=home [$2=name, default beta] [$3=kind, default interactive] -> live peer (a sleep), echoes its pid
+add_peer() {  # $1=home [$2=name, default beta] [$3=kind, default interactive] [$4=cwd] -> live peer (a sleep), echoes its pid
   # stdout/stderr detached: a sleep inheriting the capture pipe would block $(add_peer …)
   sleep 300 >/dev/null 2>&1 </dev/null & SPID=$!
   PEERS="$PEERS $SPID"
-  printf '{"pid":%s,"name":"%s","sessionId":"sess-%s","kind":"%s"}\n' "$SPID" "${2:-beta}" "${2:-beta}" "${3:-interactive}" \
+  local c=""; [ -n "${4:-}" ] && c=",\"cwd\":\"$4\""
+  printf '{"pid":%s,"name":"%s","sessionId":"sess-%s","kind":"%s"%s}\n' "$SPID" "${2:-beta}" "${2:-beta}" "${3:-interactive}" "$c" \
     > "$1/.claude/sessions/$SPID.json"
   echo "$SPID"
 }
@@ -44,8 +45,9 @@ trap cleanup EXIT
 role() {  # $1=home $2=my session_id [$3=extra env assignments via env]
   printf '{"session_id":"%s"}' "$2" | HOME="$1" CLAUDE_CONFIG_DIR="" bash "$ROLE" 2>&1
 }
-as_peer() {  # $1=home $2=name, rest = orchestrator.sh args — run as ANOTHER session (its own registry entry)
-  HOME="$1" CLAUDE_CONFIG_DIR="" bash -c 'printf "{\"pid\":%s,\"name\":\"%s\",\"sessionId\":\"sess-%s\",\"kind\":\"interactive\"}\n" "$$" "$1" "$1" > "$HOME/.claude/sessions/$$.json"
+as_peer() {  # $1=home $2=name, rest = orchestrator.sh args — run as ANOTHER session (its own registry entry; cwd from $AS_CWD)
+  HOME="$1" CLAUDE_CONFIG_DIR="" AS_CWD="${AS_CWD:-}" bash -c 'c=""; [ -n "$AS_CWD" ] && c=",\"cwd\":\"$AS_CWD\""
+    printf "{\"pid\":%s,\"name\":\"%s\",\"sessionId\":\"sess-%s\",\"kind\":\"interactive\"%s}\n" "$$" "$1" "$1" "$c" > "$HOME/.claude/sessions/$$.json"
     bash "$2" "${@:3}"; rc=$?; rm -f "$HOME/.claude/sessions/$$.json"; exit $rc' _ "$2" "$ORCH" "${@:3}" 2>&1
 }
 edit_json() { printf '{"tool_input":{"file_path":"%s"}}' "$1"; }
@@ -1134,6 +1136,169 @@ assert_rc "a real run over a fresh lane exits 0" 0 "$RC"
 [ -d "$W2/.worktrees-app/fresh" ] && ok "the fresh worktree is still there" || bad "the fresh worktree is still there" "$OUT"
 git -C "$W2/app" rev-parse --verify --quiet refs/heads/fresh >/dev/null \
   && ok "the fresh branch is still there" || bad "the fresh branch is still there" "$OUT"
+
+say "== scopes: one coordinator seat per project root (README \"Scopes\") =="
+SCOPEPY="$P/scripts/scope.py"
+mine() {  # $1=home [$2=cwd]: rewrite THIS process's registry entry (alpha) with a start dir
+  printf '{"pid":%s,"name":"alpha","sessionId":"sess-alpha","kind":"interactive"%s}\n' "$$" "${2:+,\"cwd\":\"$2\"}" \
+    > "$1/.claude/sessions/$$.json"
+}
+# S1 no scopes key: the 0.8.0 files and banners
+H="$(new_home)"; mkdir -p "$H/logs"; : > "$H/logs/session-log.md"
+S1P="$(add_peer "$H" beta)"
+jq '.cwd = ""' "$H/.claude/sessions/$S1P.json" > "$H/e" && mv "$H/e" "$H/.claude/sessions/$S1P.json"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "S1 claim without scopes succeeds" 0 "$RC"
+[ "$(cat "$H/.claude/state/orchestrator" 2>/dev/null)" = sess-alpha ] && ok "S1 marker at the 0.8.0 path" || bad "S1 marker at the 0.8.0 path" "$(ls -R "$H/.claude/state")"
+[ -e "$H/.claude/state/scopes" ] && bad "S1 no state/scopes dir" || ok "S1 no state/scopes dir"
+assert_lacks "S1 claim prints no Scope line" "Scope:" "$OUT"
+assert_lacks "S1 status prints no Scope line" "Scope:" "$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" status 2>&1)"
+OUT="$(role "$H" "sess-alpha")"
+assert_has "S1 banner is the plain ORCHESTRATOR one" 'Session role: ORCHESTRATOR ("alpha", by marker)' "$OUT"
+assert_lacks "S1 banner names no scope" "of scope" "$OUT"
+assert_has "S1 a peer with an empty registry cwd still shows by name" "Current workers: beta" "$OUT"
+kill "$S1P" 2>/dev/null
+
+# S0 acceptance 1, byte for byte: without a scopes key the hook and the seat script print exactly
+# what 0.8.0 (commit 8c9fdbf) printed, for a coordinator, a worker, a stale marker and no seat.
+OLD="$(mktemp -d -p "$TMPBASE")"
+if git -C "$ROOT" archive 8c9fdbf plugins/middle-management 2>/dev/null | tar -x -C "$OLD" 2>/dev/null; then
+  OP="$OLD/plugins/middle-management"
+  H="$(new_home)"; mkdir -p "$H/logs" "$H/ad" "$H/.claude/open-items"; : > "$H/logs/session-log.md"
+  printf '# board\n' > "$H/board.md"
+  printf '{"board":"%s/board.md","notifyCommand":"true"}' "$H" > "$H/.claude/middle-management.json"
+  printf '# beta · cafe0003-x · %s/ad\n- W1 · owner: user · decide it\n' "$H" > "$H/.claude/open-items/cafe0003-session-notes.md"
+  mine "$H" "$H/ad"; G0B="$(add_peer "$H" beta interactive "$H/ad")"; G0G="$(add_peer "$H" gamma)"
+  sleep 300 >/dev/null 2>&1 </dev/null & G0N=$!
+  printf '{"pid":%s,"sessionId":"sess-nameless","kind":"interactive","cwd":""}\n' "$G0N" > "$H/.claude/sessions/$G0N.json"
+  golden() {  # golden <label> <sessionId>: old and new hook, same home, same stdin
+    local old
+    new="$(printf '{"session_id":"%s"}' "$2" | HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_PLUGIN_ROOT="$P" bash "$ROLE" 2>&1)"
+    old="$(printf '{"session_id":"%s"}' "$2" | HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_PLUGIN_ROOT="$OP" bash "$OP/hooks/session-role.sh" 2>&1 | sed "s|$OP|$P|g")"
+    [ "$new" = "$old" ] && ok "S0 byte-identical to 0.8.0: $1" || bad "S0 byte-identical to 0.8.0: $1" "$(diff <(printf '%s\n' "$old") <(printf '%s\n' "$new"))"
+  }
+  ostatus() { HOME="$H" CLAUDE_CONFIG_DIR="" bash "$1" status 2>&1 | sed "s|$OP|$P|g"; }
+  golden "no seat (alpha)" sess-alpha
+  printf 'sess-gone\n' > "$H/.claude/state/orchestrator"
+  golden "stale marker (beta)" sess-beta
+  [ "$(ostatus "$ORCH")" = "$(ostatus "$OP/scripts/orchestrator.sh")" ] && ok "S0 status byte-identical: stale marker" || bad "S0 status byte-identical: stale marker"
+  HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim >/dev/null 2>&1
+  golden "coordinator (alpha)" sess-alpha
+  assert_has "S0 ...a full coordinator banner with the inbox line was compared" "Open-items inbox: 1 unfiled" "$new"
+  golden "worker (beta)" sess-beta
+  assert_has "S0 ...a full worker banner was compared" 'Session role: WORKER ("beta")' "$new"
+  golden "nameless worker" sess-nameless
+  [ "$(ostatus "$ORCH")" = "$(ostatus "$OP/scripts/orchestrator.sh")" ] && ok "S0 status byte-identical: holder" || bad "S0 status byte-identical: holder"
+  [ "$(find "$H/.claude/state" | sort)" = "$(printf '%s\n' "$H/.claude/state" "$H/.claude/state/orchestrator")" ] \
+    && ok "S0 state dir holds the marker only" || bad "S0 state dir holds the marker only" "$(find "$H/.claude/state")"
+  kill "$G0B" "$G0G" "$G0N" 2>/dev/null
+else
+  say "  skip- S0 golden diff: commit 8c9fdbf is not in this clone"
+fi
+
+# S2 the shape filter
+H="$(new_home)"
+vcfg() { printf '%s' "$1" > "$H/.claude/middle-management.json"; HOME="$H" CLAUDE_CONFIG_DIR="" bash "$P/scripts/config-check.sh" validate; echo $?; }
+for c in '{"name":"ff","root":"x","board":"/b"}' '{"name":"ff","root":"/","board":"/b"}' '{"name":"ff","root":"//","board":"/b"}' \
+         '{"name":"default","root":"/x","board":"/b"}' '{"name":"a/b","root":"/x","board":"/b"}' '{"name":"x\n","root":"/x","board":"/b"}' \
+         '{"name":"ff","root":"/x"}' '{"name":"ff","root":"/x","board":"/b"},{"name":"gg","root":"/x/","board":"/b"}' \
+         '{"name":"ff","root":"/x","board":"/b"},{"name":"ff","root":"/y","board":"/b"}'; do
+  [ "$(vcfg "{\"scopes\":[$c]}")" = 1 ] && ok "S2 invalid: $c" || bad "S2 invalid: $c"
+done
+[ "$(vcfg '{"scopes":[{"name":"ff","root":"/x","board":"/b"},{"name":"ff-1_x","root":"/x/y","board":"/b"}]}')" = 0 ] \
+  && ok "S2 nested roots are valid" || bad "S2 nested roots are valid"
+
+# S3 the resolver: segment boundary, nesting, git worktree subpath, refused entries
+H="$(new_home)"; mkdir -p "$H/ff/sub" "$H/ffother"
+git -C "$H/ff" init -q; echo x > "$H/ff/sub/f"; git -C "$H/ff" add sub/f
+git -C "$H/ff" -c user.email=t@t -c user.name=t commit -qm init
+git -C "$H/ff" worktree add -q "$H/wt/x" 2>/dev/null
+printf '{"board":"/b0","scopes":[{"name":"ff","root":"%s/ff","board":"/b1"},{"name":"ffsub","root":"%s/ff/sub","board":"/b2"},{"name":"slash","root":"//","board":"/b3"},{"name":"ff/../x","root":"%s/ffother","board":"/b4"}]}' \
+  "$H" "$H" "$H" > "$H/.claude/middle-management.json"
+sof() { HOME="$H" CLAUDE_CONFIG_DIR="" python3 "$SCOPEPY" of "$1" 2>&1; }
+assert_has "S3 the root itself -> ff" "ff	$H/.claude/state/scopes/ff	/b1" "$(sof "$H/ff")"
+assert_has "S3 a subdir -> ff" "ff	" "$(sof "$H/ff/sub/../")"
+assert_has "S3 a nested root wins below it" "ffsub	$H/.claude/state/scopes/ffsub	/b2" "$(sof "$H/ff/sub")"
+assert_has "S3 ffother is not under ff (segment boundary) and its bad entry is ignored" "default	$H/.claude/state	/b0" "$(sof "$H/ffother")"
+assert_has "S3 empty path -> default" "default	" "$(sof "")"
+assert_has "S3 root // swallows nothing" "default	" "$(sof "$H")"
+assert_has "S3 a linked worktree of ff -> ff" "ff	" "$(sof "$H/wt/x")"
+assert_has "S3 the worktree's sub -> the nested scope" "ffsub	" "$(sof "$H/wt/x/sub")"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" python3 "$SCOPEPY" list)"
+assert_lacks "S3 list skips the refused entries" "slash" "$OUT"
+assert_lacks "S3 list never yields a path-like name" "ff/../x" "$OUT"
+
+# S4 two seats at once
+H="$(new_home)"; mkdir -p "$H/ad" "$H/ff/sub" "$H/logs"; : > "$H/logs/session-log.md"
+printf '# board\n' > "$H/board.md"; printf '# ff board\n' > "$H/ffboard.md"
+printf '{"board":"%s/board.md","scopes":[{"name":"ff","root":"%s/ff","board":"%s/ffboard.md"}]}' "$H" "$H" "$H" > "$H/.claude/middle-management.json"
+mine "$H" "$H/ad"
+S4B="$(add_peer "$H" beta interactive "$H/ff")"; S4G="$(add_peer "$H" gamma interactive "$H/ff/sub")"; S4D="$(add_peer "$H" delta interactive "$H/ad")"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "S4 alpha claims the default seat" 0 "$RC"
+assert_has "S4 ...and is told its scope" "Scope: default" "$OUT"
+OUT="$(AS_CWD="$H/ff" as_peer "$H" beta claim)"; RC=$?
+assert_rc "S4 beta claims the ff seat at the same time" 0 "$RC"
+assert_has "S4 ...told scope ff" "Scope: ff" "$OUT"
+assert_lacks "S4 ...never BUSY across scopes" "BUSY" "$OUT"
+[ "$(cat "$H/.claude/state/scopes/ff/orchestrator" 2>/dev/null)" = sess-beta ] && ok "S4 ff marker names beta" || bad "S4 ff marker names beta" "$(ls -R "$H/.claude/state")"
+[ "$(cat "$H/.claude/state/orchestrator" 2>/dev/null)" = sess-alpha ] && ok "S4 default marker still names alpha" || bad "S4 default marker still names alpha"
+OUT="$(role "$H" "sess-alpha")"
+assert_has "S4 alpha: ORCHESTRATOR of scope default" 'Session role: ORCHESTRATOR of scope default ("alpha", by marker)' "$OUT"
+assert_has "S4 alpha's workers: delta" "delta" "$(printf '%s\n' "$OUT" | grep '^Current workers')"
+assert_lacks "S4 alpha's workers: not beta" "beta" "$(printf '%s\n' "$OUT" | grep '^Current workers')"
+assert_lacks "S4 alpha's workers: not gamma" "gamma" "$(printf '%s\n' "$OUT" | grep '^Current workers')"
+assert_has "S4 alpha's board is the top-level one" "board $H/board.md" "$OUT"
+OUT="$(role "$H" "sess-beta")"
+assert_has "S4 beta: ORCHESTRATOR of scope ff" 'Session role: ORCHESTRATOR of scope ff ("beta", by marker)' "$OUT"
+assert_has "S4 beta's tab list hint carries --scope ff" "--wrapped --scope ff and hand" "$OUT"
+assert_has "S4 beta's waiting hint carries --scope ff" "--waiting --scope ff lists" "$OUT"
+assert_has "S4 beta's board is the ff one" "board $H/ffboard.md" "$OUT"
+assert_has "S4 beta may message the other coordinator" "you may message that coordinator directly" "$OUT"
+assert_has "S4 beta's workers: gamma only" "|Current workers: gamma |" "|$(printf '%s\n' "$OUT" | grep '^Current workers')|"
+assert_has "S4 gamma's coordinator is beta" 'Session role: WORKER of scope ff ("gamma"). The coordinator is "beta".' "$(role "$H" "sess-gamma")"
+assert_has "S4 delta's coordinator is alpha" 'Session role: WORKER of scope default ("delta"). The coordinator is "alpha".' "$(role "$H" "sess-delta")"
+OUT="$(AS_CWD="$H/ff" as_peer "$H" epsilon claim)"; RC=$?
+assert_rc "S4 a second ff claim is refused" 1 "$RC"
+assert_has "S4 ...BUSY naming beta" 'BUSY: the coordinator is already "beta"' "$OUT"
+OUT="$(AS_CWD="$H/ff" as_peer "$H" beta release)"; RC=$?
+assert_rc "S4 beta releases its seat" 0 "$RC"
+[ -e "$H/.claude/state/scopes/ff/orchestrator" ] && bad "S4 the ff marker is gone" || ok "S4 the ff marker is gone"
+[ "$(cat "$H/.claude/state/orchestrator" 2>/dev/null)" = sess-alpha ] && ok "S4 ...the default one stays" || bad "S4 ...the default one stays"
+
+# S5 scopes configured, no python3: fail closed (no banner, no claim)
+printf 'sess-alpha\n' > "$H/.claude/state/orchestrator"
+OUT="$(printf '{"session_id":"sess-alpha"}' | HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$NOPY" bash "$ROLE" 2>&1)"; RC=$?
+assert_rc "S5 hook rc 0 without python3" 0 "$RC"
+assert_has "S5 ...says scope.py failed" "scope.py failed" "$OUT"
+assert_lacks "S5 ...and prints no role" "Session role" "$OUT"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$NOPY" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "S5 claim refused without python3" 1 "$RC"
+assert_has "S5 ...could not be resolved" "could not be resolved" "$OUT"
+[ "$(cat "$H/.claude/state/orchestrator")" = sess-alpha ] && [ ! -e "$H/.claude/state/scopes/ff/orchestrator" ] \
+  && ok "S5 markers unchanged" || bad "S5 markers unchanged"
+kill "$S4B" "$S4G" "$S4D" 2>/dev/null
+
+# S6 a holder whose start dir moves into another scope no longer holds the old seat
+s6() {  # fresh home: default seat held by live beta started in <H>/ff, then scope ff is added over it
+  H="$(new_home)"; mkdir -p "$H/ad" "$H/ff" "$H/logs"; : > "$H/logs/session-log.md"; mine "$H" "$H/ad"
+  S6B="$(add_peer "$H" beta interactive "$H/ff")"; printf 'sess-beta\n' > "$H/.claude/state/orchestrator"
+  printf '{"scopes":[{"name":"ff","root":"%s/ff","board":"%s/ffboard.md"}]}' "$H" "$H" > "$H/.claude/middle-management.json"
+}
+s6
+assert_has "S6 alpha sees the stale hint" "the coordinator marker of scope default points at a session that is not visibly alive (sess-beta)" "$(role "$H" "sess-alpha")"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" status 2>&1)"
+assert_has "S6 status names the holder's new scope" "it now belongs to scope ff" "$OUT"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" release sess-beta 2>&1)"; RC=$?
+assert_rc "S6 release <id> works" 0 "$RC"
+[ -e "$H/.claude/state/orchestrator" ] && bad "S6 the default marker is gone" "$OUT" || ok "S6 the default marker is gone"
+kill "$S6B" 2>/dev/null
+s6
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "S6 claim over the moved holder works" 0 "$RC"
+[ "$(cat "$H/.claude/state/orchestrator")" = sess-alpha ] && ok "S6 ...marker names alpha" || bad "S6 ...marker names alpha" "$OUT"
+assert_has "S6 ...and says why" "it now belongs to scope ff, so it no longer holds this seat" "$OUT"
+kill "$S6B" 2>/dev/null
 
 say ""
 say "== peer-state (tests/peer-state.sh) =="

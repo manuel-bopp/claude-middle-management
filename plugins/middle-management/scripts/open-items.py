@@ -28,8 +28,12 @@ wrap skill's step 0 walk). Liveness is peer-state.py's is_live, with its PID-reu
 To-dos: a board line `- <key> · owner: <owner> · <text>` (the drop line as `list` prints it) wins
 over the drop file's line; an item is closed by its drop file's `- W<n> done` or by `<key> done`
 (closed, answered, decided, resolved, erledigt) anywhere on the board. Delivered keys: <config dir>/state/morning-ritual/delivered, `key<TAB>time`.
+Scopes (README "Scopes", the `scopes` key): the board is the one of the caller's scope, and `count`,
+`list` and `done` see only the drop files of the caller's scope, by the cwd in each file's header
+line. Without the key every function behaves as before.
 """
 import fcntl, functools, glob, importlib.util, json, os, re, sys, time
+import scope   # beside this file
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
@@ -54,6 +58,38 @@ def peer_state():
     return mod
 
 
+@functools.lru_cache(None)
+def scope_cfg():
+    """(config, its named scopes): one config read per run."""
+    c = scope.config()
+    return c, scope.scopes(c)
+
+
+@functools.lru_cache(None)
+def scope_of(cwd):
+    return scope.of(cwd, scope_cfg()[1])
+
+
+@functools.lru_cache(None)
+def my_scope():
+    """None without scopes (then nothing below changes), else the scope of this session's start dir."""
+    if not scope_cfg()[1]:
+        return None
+    c = own_session()[1].get("cwd")
+    return scope_of(c if isinstance(c, str) else "")
+
+
+def file_scope(path):
+    """The scope of the cwd in the header line `# name · sid · cwd`; default when there is none."""
+    try:
+        first = open(path, encoding="utf-8", errors="replace").readline().rstrip("\n")
+    except OSError:
+        return "default"
+    if not (first.startswith("# ") and " · " in first):
+        return "default"
+    return scope_of(first.rsplit(" · ", 1)[1])
+
+
 def board():
     """(path or "", the set of keys on it or None). One read and one scan per run.
     None = unset or unreadable: nothing counts as filed."""
@@ -61,6 +97,8 @@ def board():
         p = json.load(open(os.path.join(CFG, "middle-management.json"), encoding="utf-8")).get("board")
     except (OSError, ValueError, AttributeError):
         p = None
+    if my_scope():
+        p = scope.info(my_scope(), scope_cfg()[0])[1]
     if not (isinstance(p, str) and p):
         return "", None
     p = os.path.expanduser(p)
@@ -180,7 +218,8 @@ def add(argv):
 
 
 def files():
-    return sorted(glob.glob(os.path.join(DROP, "*" + SUFFIX)))
+    fs = sorted(glob.glob(os.path.join(DROP, "*" + SUFFIX)))
+    return fs if my_scope() is None else [f for f in fs if file_scope(f) == my_scope()]
 
 
 def not_configured(bpath, n):
@@ -238,6 +277,9 @@ def done(arg):
     f = arg if os.path.isfile(arg) else os.path.join(DROP, os.path.basename(arg))
     if not (os.path.isfile(f) and f.endswith(SUFFIX)):
         sys.exit("open-items: no drop file %s" % arg)
+    if my_scope() and file_scope(f) != my_scope():
+        sys.exit("open-items: refused, %s belongs to scope %s; its coordinator files and deletes it"
+                 % (f, file_scope(f)))
     bpath, keys = board()
     try:
         todo = unfiled(f, keys)

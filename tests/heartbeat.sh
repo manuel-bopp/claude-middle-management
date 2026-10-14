@@ -7,6 +7,7 @@
 #   D  the configured notifyCommand and the unit-failure alarm
 #   E  the real poke sender's envelope against a fake socket
 #   F  keep-warm: which waiting sessions get the "reply ok" ping, the cap, the off switch
+#   G  scopes: one child tick per named scope, its own state dir, alarm tag and poke roster
 # The master setup this plugin derives from also re-runs the classifier against real stalled
 # transcripts (its section A); those files are private and stay there.
 # Alarms and pokes are redirected into files with OHB_ALARM_SINK / OHB_POKE_SINK; section D
@@ -401,6 +402,70 @@ is "D5 tick unit carries the config dir"   "$(grep -c '^Environment=CLAUDE_CONFI
 is "D5 alarm unit carries the config dir"  "$(grep -c '^Environment=CLAUDE_CONFIG_DIR=/tmp/cfg$' "$ENVDIR/unit-failure-alarm@.service")" 1
 is "D5 tick unit runs the copied script"   "$(grep -c '^ExecStart=/tmp/hb/orch-heartbeat.sh$' "$ENVDIR/orch-heartbeat.service")" 1
 is "D5 timer starts the tick unit"         "$(grep -c '^Unit=orch-heartbeat.service$' "$ENVDIR/orch-heartbeat.timer")" 1
+
+# ---------------------------------------------------------------------- G. scopes -----------
+# README "Scopes": one child tick per named scope, with that scope's marker and state dir. The
+# config goes to both paths: the tick reads OHB_CONFIG, scope.py reads <CLAUDE_CONFIG_DIR>.
+echo "G. scopes: every seat is watched"
+FFSID=ffffffff-2222-3333-4444-555555555555
+FFST=$ENVDIR/state/scopes/ff/orch-heartbeat
+gcfg() { jq -n --arg r "$ENVDIR/ff" --arg b "$ENVDIR/ffboard.md" '{scopes: [{name: "ff", root: $r, board: $b}]}' \
+  | tee "$ENVDIR/mm.json" > "$ENVDIR/middle-management.json"; }
+ffsess() {  # ffsess <name> <minutes stuck>: a live session started in <ENVDIR>/ff with a stalled transcript
+  local pid ps
+  sleep 300 >/dev/null 2>&1 </dev/null & pid=$!; GPIDS="$GPIDS $pid"
+  ps=$(rest=$(cat /proc/$pid/stat); rest=${rest#*') '}; printf '%s' "$rest" | awk '{print $20}')
+  printf '{"pid":%d,"sessionId":"%s","kind":"interactive","name":"%s","procStart":"%s","cwd":"%s/ff"}\n' \
+    "$pid" "$FFSID" "$1" "$ps" "$ENVDIR" > "$ENVDIR/reg/ff.json"
+  { a "$(( $2 + 1 )) min ago"; u "$2 min ago"; } > "$ENVDIR/projects/p/$FFSID.jsonl"; aged "$ENVDIR/projects/p/$FFSID.jsonl" "$2"
+}
+GPIDS=""
+gtick() { CLAUDE_CONFIG_DIR=$ENVDIR tick; }
+stubsender() { printf 'import os,sys\nopen(os.environ["PBODY"]+"-"+sys.argv[1],"w").write(open(sys.argv[2]).read())\n' > "$ENVDIR/hb/poke-session.py"; }
+# G1 default healthy, ff stuck: one alarm and one poke, both for ff, in ff's own state dir
+setup; gcfg; transcript 3 < <( { u "20 min ago"; a "3 min ago"; } )
+mkdir -p "$ENVDIR/ff" "$ENVDIR/state/scopes/ff"; ffsess ffcoord 60; printf '%s\n' "$FFSID" > "$ENVDIR/state/scopes/ff/orchestrator"
+is "G1 exit 0"                         "$(gtick)" 0
+is "G1 exactly one alarm"              "$(alarms)" 1
+is "G1 the alarm names scope ff"       "$(grep -c 'scope ff\] coordinator "ffcoord" stuck since' "$ENVDIR/alarms")" 1
+is "G1 one poke, for the ff seat"      "$(cat "$ENVDIR/pokes")" "$FFSID poke#1"
+is "G1 episode in the ff state dir"    "$([ -e "$FFST/$FFSID.json" ] && echo yes || echo no)" yes
+is "G1 none in the default state dir"  "$(ls "$ENVDIR/hbstate"/*.json 2>/dev/null | wc -l)" 0
+is "G1 default last-tick"              "$(cut -d' ' -f2- "$ENVDIR/hbstate/last-tick")" "healthy (orchtest)"
+is "G1 ff last-tick"                   "$(cut -d' ' -f2- "$FFST/last-tick" | cut -d' ' -f1-3)" "stuck 60m, alarmed"
+# G1b the poke's first line hands the scope's roster reader and board (both scopes)
+setup; gcfg; transcript 60 < <( { a "61 min ago"; u "60 min ago"; } )
+mkdir -p "$ENVDIR/ff" "$ENVDIR/state/scopes/ff"; ffsess ffcoord 60; printf '%s\n' "$FFSID" > "$ENVDIR/state/scopes/ff/orchestrator"
+stubsender; PBODY=$ENVDIR/body POKE_SINK_OVERRIDE="" gtick >/dev/null
+is "G1b ff poke: roster and board"     "$(head -1 "$ENVDIR/body-$FFSID" | grep -c "Only sessions of scope ff are yours: peer-state.py --scope ff. Its board is $ENVDIR/ffboard.md.")" 1
+is "G1b default poke: scope default"   "$(head -1 "$ENVDIR/body-$SID" | grep -c 'Only sessions of scope default are yours: peer-state.py --scope default.$')" 1
+is "G1b two alarms, one per seat"      "$(alarms)" 2
+# G2 keep-warm is machine-wide: one ping per tick, not one per scope
+setup; gcfg; transcript 3 < <( { u "20 min ago"; a "3 min ago"; } ); mkdir -p "$ENVDIR/ff" "$ENVDIR/kw"
+K=aaaaaaaa-0000-0000-0000-00000000000k; peers 50 '"question"'
+gtick >/dev/null
+is "G2 one keep-warm ping per tick"    "$(grep -c keepwarm "$ENVDIR/pokes")" 1
+# G3 no scopes key: no scope state, no scope wording
+setup; transcript 60 < <( { a "61 min ago"; u "60 min ago"; } )
+stubsender; PBODY=$ENVDIR/body POKE_SINK_OVERRIDE="" gtick >/dev/null
+is "G3 no state/scopes dir"            "$([ -e "$ENVDIR/state/scopes" ] && echo yes || echo no)" no
+is "G3 no scope in the journal"        "$(grep -c scope "$ENVDIR/journal")" 0
+is "G3 no scope in the alarm"          "$(grep -c scope "$ENVDIR/alarms")" 0
+is "G3 the poke's first line as before" "$(head -1 "$ENVDIR/body-$SID" | sed 's/since [0-9:]*/since X/')" 'HEARTBEAT POKE #1 - your session ("orchtest") has had no answer since X.'
+# G4 an orch* name in ff with no ff marker coordinates ff, never the default scope
+setup worker-xx; gcfg; rm -f "$ENVDIR/state/orchestrator"; mkdir -p "$ENVDIR/ff"; ffsess orch-ff 60
+gtick >/dev/null
+is "G4 one poke, from the ff child"    "$(cat "$ENVDIR/pokes")" "$FFSID poke#1"
+is "G4 the alarm names scope ff"       "$(grep -c 'scope ff\]' "$ENVDIR/alarms")" 1
+is "G4 default regime is off"          "$(cut -d' ' -f2- "$ENVDIR/hbstate/last-tick")" regime-off
+# G5 scopes configured, scope.py cannot run: the default seat is still watched (by name here)
+setup; gcfg; rm -f "$ENVDIR/state/orchestrator"; transcript 3 < <( { u "20 min ago"; a "3 min ago"; } )
+GNOPY=$TMP/nopy; mkdir -p "$GNOPY"; ln -s /usr/bin/* /bin/* "$GNOPY"/ 2>/dev/null; rm -f "$GNOPY"/python3*
+PATH=$GNOPY gtick >/dev/null
+is "G5 one alarm: scope.py list failed" "$(grep -c 'scope.py list failed' "$ENVDIR/alarms")" 1
+is "G5 default seat still healthy"     "$(cut -d' ' -f2- "$ENVDIR/hbstate/last-tick")" "healthy (orchtest)"
+is "G5 no other alarm (no internal error)" "$(alarms)" 1
+for p in $GPIDS; do kill "$p" 2>/dev/null; done
 
 # ------------------------------------------------- E. the poke sender's envelope ------------
 # The real poke-session.py against a fake socket. C and D only COUNT pokes (the sender is

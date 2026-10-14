@@ -2,7 +2,8 @@
 """peer-state.py - what every Claude Code session on this machine is doing, read from disk alone.
 
 Consumers: scripts/orchestrator.sh (stale-seat check), scripts/orch-heartbeat.sh (keep-warm,
-  reads --json from its installed copy), the coordinator by hand, the middle-management skill.
+  reads --json from its installed copy), the coordinator by hand, the middle-management skill,
+  the role hook's banner (hooks/session-role.sh prints the --wrapped/--waiting [--scope] hint).
   Nothing else calls it.
 
 Why it exists: asking a session how it is doing costs THAT session its whole conversation as
@@ -11,7 +12,7 @@ fresh input tokens once it has fallen out of cache - measured on one machine in 
 sessions to close their tab. Everything below comes from the registry, the transcript file and
 the session log. No socket, no message, no model turn: the target session pays nothing.
 
-Usage: peer-state.py [--all|--wrapped|--waiting] [--name N] [--session-id ID] [--cwd PATH] [--json]
+Usage: peer-state.py [--all|--wrapped|--waiting] [--name N] [--session-id ID] [--cwd PATH] [--scope NAME] [--json]
   (no flags)        table of LIVE sessions, most recently active first
   --all             include sessions whose process is gone
   --wrapped         only sessions that read as finished, as a list to act on (implies --all)
@@ -24,6 +25,8 @@ Usage: peer-state.py [--all|--wrapped|--waiting] [--name N] [--session-id ID] [-
                     when the registry entry is already gone   -> exit 1 if there is none
   --cwd PATH        only sessions working in PATH **or anywhere below it** (prefix match on whole
                     path segments, so /x/Repo does not match /x/RepoOther)
+  --scope NAME      only sessions of this coordinator scope, by the directory each was started in
+                    (its registry entry); "default" = every session outside the listed roots
   --json            every field, for shell consumers
 Env: CLAUDE_CONFIG_DIR (default ~/.claude). The session log is resolved in three steps -
   $MM_SESSION_LOG, then "sessionLog" in <config dir>/middle-management.json (~ allowed), then
@@ -715,6 +718,9 @@ def main():
     ap.add_argument("--waiting", action="store_true", help="only live sessions that may be waiting "
                     "on their user: MAY be parked on a permission prompt (a long tool reads the same), or "
                     "ending on a question")
+    ap.add_argument("--scope", help="only sessions of this coordinator scope, by the directory each "
+                                    "was started in (its registry entry); default = every session "
+                                    "outside the roots listed under scopes")
     ap.add_argument("--json", action="store_true", help="machine-readable, all fields")
     a = ap.parse_args()
 
@@ -747,6 +753,19 @@ def main():
         want = os.path.abspath(os.path.expanduser(a.cwd)).rstrip(os.sep) + os.sep
         rows = [r for r in rows
                 if r["cwd"] and (os.path.abspath(r["cwd"]) + os.sep).startswith(want)]
+    if a.scope:
+        import scope              # beside this file; only this flag needs it
+        ss = scope.scopes()
+        known = ["default"] + [e["name"] for e in ss]
+        if a.scope not in known:
+            print("peer-state: no scope %r (known: %s)" % (a.scope, ", ".join(known)), file=sys.stderr)
+            return 2
+
+        def reg_cwd(r):           # the REGISTRY cwd, never the transcript fallback in row["cwd"]
+            c = (reg.get(r["session_id"]) or {}).get("cwd")
+            return c if isinstance(c, str) else ""
+        memo = {c: scope.of(c, ss) for c in {reg_cwd(r) for r in rows}}   # one git call per cwd
+        rows = [r for r in rows if memo[reg_cwd(r)] == a.scope]
     if a.wrapped:
         rows = [r for r in rows if r["wrapped"] == "yes"]
     elif a.waiting:

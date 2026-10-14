@@ -131,7 +131,7 @@ changing hands · red = never.*
 
 1. Your user tells one session "you are the coordinator"; that session runs
    `/orchestrator claim`, which records its session id in
-   `<config-dir>/state/orchestrator`.
+   `<config-dir>/state/orchestrator` (one marker per scope, see [Scopes](#scopes)).
 2. On every user message, the role hook reads that marker plus Claude Code's live
    session registry and announces the session's role with its contract. Workers talk
    ONLY to the coordinator; the coordinator plans, routes, and does not build.
@@ -221,11 +221,72 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   work happens in worktrees under `worktreeDir`. `base` is the branch new worktree
   branches start from — setup always writes it explicitly, and `serve` is the dev-server
   command `/wt <name> run <topic>` starts when the caller passes none.
+- `scopes` (optional): a second, independent coordinator regime per project root, with its own
+  seat and board. See [Scopes](#scopes).
 - No config file = roles **plus the staging guard**: blanket staging is blocked out of the box,
   because sessions share a checkout long before anyone configures one. The worktree part is what
   stays completely silent. Working solo? `surgicalStaging: false` turns the guard off.
-- User-global on purpose: the coordinator seat is per machine, and protected checkouts
-  are absolute paths independent of any one project. One board per machine for now.
+- User-global on purpose: protected checkouts are absolute paths independent of any one
+  project, and one seat and one board per scope; without `scopes`, that is one per machine.
+
+## Scopes
+
+One config dir normally means one coordinator for every session on the machine. When two
+projects on the same machine need independent coordinators (own seat, own board, own workers),
+list the second project's root under `scopes`:
+
+```json
+{
+  "board": "/home/you/handoffs/main-board.md",
+  "scopes": [
+    { "name": "ff", "root": "/home/you/ff-static-ads", "board": "/home/you/handoffs/ff-board.md" }
+  ]
+}
+```
+
+- `name`: letters, digits, `-` and `_`, not `default`, unique (it becomes a directory name).
+  `root`: absolute, not `/`, unique; nesting is allowed. `board`: absolute, required.
+- **Which scope a session belongs to:** the scope of the directory it was STARTED in (its entry
+  in `<config-dir>/sessions/`), never where it later `cd`s. The longest root that is that
+  directory or one of its parents wins, on whole path segments. A session started in a linked
+  git worktree that matches no root counts as the same subpath of its main checkout, so a lane
+  worktree of `ff` belongs to `ff`. Everything else is the implicit scope `default`, which keeps
+  today's top-level keys and today's paths.
+- A scope has no coordinator until one of its sessions runs `/orchestrator claim`; until then its
+  sessions get no banner, exactly like a machine without a seat.
+
+| Per scope | Machine-wide (unchanged) |
+|---|---|
+| the seat marker: `default` = `<config-dir>/state/orchestrator`, a named scope = `<config-dir>/state/scopes/<name>/orchestrator` | the session registry and the session log (one log for all scopes; no per-scope `sessionLog` in 0.9.0) |
+| the board (`default` = the top-level `board`) | the open-items drop dir (each file belongs to the scope of the cwd in its header line) |
+| the role banners, the coordinator's worker list and the `orch*` name route | `notifyCommand`, `surgicalStaging`, `protectedCheckouts`, `/wt` and the lane reaper |
+| the tab list: `peer-state.py --wrapped --scope <name>` (also `--waiting`, `--all`) | the long-runner hook, the review gate, keep-warm |
+| the open-items inbox and `done` | the heartbeat timer and its installed copy |
+| the heartbeat's watch of the seat (state under `<scope dir>/orch-heartbeat/`, alarms tagged `scope <name>`) and its poke's roster | override markers in `<config-dir>/state/` |
+
+- **Messaging across scopes:** a worker messages only its own scope's coordinator; the
+  coordinators of two scopes may message each other directly about anything that crosses
+  scopes; nobody messages another scope's workers, stops its servers or removes its worktrees.
+- **Open items:** a drop file belongs to the scope of the cwd in its header line (the writing
+  session's start dir). Only that scope's coordinator counts, lists, files and deletes it, against
+  its own board; a key written on another scope's board is not filed. Unreadable or headerless
+  files fall to the default scope's coordinator. Adding or moving a root re-homes existing drop
+  files with it, so a new scope's board must carry over the keys already filed elsewhere, as for
+  a rotated board.
+- **Changing scopes while seats are held:** a seat whose holder's start dir now resolves to
+  another scope no longer counts as held: the old scope's sessions see it as not visibly alive
+  and may `claim` it or `release <id>` it. So release the seats a change would move before you
+  add, nest, remove or rename a scope (`/middle-management-setup` lists them). A removed or
+  renamed scope leaves `<config-dir>/state/scopes/<old>/` behind; once its seat is released you
+  may delete it (re-adding the old name would otherwise revive it).
+- **Requirements:** `python3` resolves scopes once a `scopes` key exists (the role hook,
+  `/orchestrator` including `status` and `release`, the heartbeat); git 2.31 or newer for the
+  worktree mapping (older git maps no worktree, never a wrong one). Without the key nothing of
+  this runs and every file, banner and marker path stays as before.
+- **Upgrade:** the default scope is untouched (no migration, the current coordinator keeps its
+  seat). Sessions pick up a new scope with their next message once they run 0.9.0 hooks; older
+  sessions only after a restart. Where the heartbeat is installed, re-run step 5 of
+  `/middle-management-setup` so its copy gets `scope.py`.
 
 ## The session log
 
@@ -407,7 +468,8 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
 - `jq`, `bash`, `python3`, GNU `date` (`date -d`), POSIX `ps`/`kill`. Linux tested; macOS
   expected-compatible but untested; Windows via WSL. `python3` is not heartbeat-only: it runs
   `peer-state.py`, which the coordinator is pointed at on every message and which
-  `/orchestrator claim` needs to judge a stale seat. GNU `date` is what `/wt <name> hold
+  `/orchestrator claim` needs to judge a stale seat, and it resolves [scopes](#scopes) once a
+  `scopes` key exists. GNU `date` is what `/wt <name> hold
   <topic> <hours>` and the lane reaper do their timestamp and age math with — they refuse
   rather than answer wrongly where `date` is not GNU (macOS: `brew install coreutils`, then
   `gdate` on `PATH` as `date`); `/wt list` degrades its date columns to `-` instead, and

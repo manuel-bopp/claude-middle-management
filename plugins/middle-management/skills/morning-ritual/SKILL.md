@@ -18,6 +18,12 @@ convention). Those carry a **CUSTOMIZE** marker: fill them with your team's actu
 stack the first time you run this, and keep your concretization in your own notes
 or a fork of this file.
 
+With scopes (a `scopes` key in the config; middle-management skill, "Scopes"), every step is
+your scope's: sessions from `peer-state.py --all --scope <yours>`, your scope's board (the one
+your banner names) in step 4, and in step 5 only resources owned by your scope's sessions.
+Another scope's lanes, servers and worktrees are never yours to clean, even when your board does
+not name them; cross-scope findings go to that scope's coordinator.
+
 ## 1. Messages delta — CUSTOMIZE
 
 Window: since the last ritual run — the epoch in `<config dir>/state/morning-ritual/window`
@@ -94,7 +100,7 @@ wrote to its drop file that is not on the board yet. File each by putting its ke
 in a board line, then `open-items.py done <file>` for every file it marks "all filed, session
 gone" (rules: middle-management skill, "Open items").
 
-Then fold overnight movement into the board (config `.board`; the coordinator is its only
+Then fold overnight movement into the board (your board: the banner names it; the coordinator is its only
 writer): externally resolved items (merged PRs, answered threads, arrived reports),
 the wrap-audit result, new sessions your user started this morning. Dated morning
 block; if the board lives in a git repo, commit surgically — the board file plus
