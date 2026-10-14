@@ -202,14 +202,18 @@ HID=$(held_id); HNAME=""; [ -n "$HID" ] && HNAME=$(alive_name "$HID")
 # A holder alive in ANOTHER scope (a root was added, moved or nested over its start dir) does not
 # hold this seat: the role hook already calls it "not visibly alive", so claim and release <id> must
 # work here too. Fail closed: only a successful resolution to a different scope clears HNAME.
-HSCOPE=""
+HSCOPE=""; HUNKNOWN=""
 if [ -n "$SCOPE" ] && [ -n "$HNAME" ]; then
   HCWD=$(cat "$REG"/*.json 2>/dev/null \
     | jq -r --arg id "$HID" 'select(.sessionId==$id and .kind == "interactive")
         | [.pid, (.cwd | if type == "string" and . != "" then . else "-" end)] | @tsv' 2>/dev/null \
     | { while IFS=$'\t' read -r pid c; do kill -0 "$pid" 2>/dev/null && { printf '%s' "$c"; break; }; done; })
-  [ -n "$HCWD" ] && HS=$(python3 "$DIR/scope.py" of "$HCWD" 2>/dev/null) && [ "${HS%%$'\t'*}" != "$SCOPE" ] \
-    && { HSCOPE="${HS%%$'\t'*}"; HNAME=""; }
+  if [ -n "$HCWD" ]; then
+    # rc 3 = its worktree could not be resolved (git failed): unknown scope, so no takeover at all.
+    if HS=$(python3 "$DIR/scope.py" of "$HCWD" 2>/dev/null); then
+      [ "${HS%%$'\t'*}" != "$SCOPE" ] && { HSCOPE="${HS%%$'\t'*}"; HNAME=""; }
+    else HUNKNOWN=1; fi
+  fi
 fi
 moved_note() {  # the reason a living holder does not count, when that is the reason
   if [ -n "$HSCOPE" ]; then
@@ -220,6 +224,11 @@ if [ -n "$SCOPE" ]; then echo "Scope: $SCOPE (seat marker $MARKER)"; fi
 
 case "${1:-status}" in
   claim)
+    if [ -n "$HUNKNOWN" ] && [ "$HID" != "$MY_ID" ]; then
+      echo "BUSY: the coordinator \"$HNAME\" is alive, but its scope cannot be resolved right now (scope.py: git failed on"
+      echo "its worktree $HCWD). The seat stays where it is; try again once git answers."
+      exit 1
+    fi
     if [ -n "$HNAME" ] && [ "$HID" != "$MY_ID" ]; then
       # Its tab is open — but it may have wrapped last night and simply never been closed.
       # Ask the disk instead of the session: only a holder that demonstrably wrapped AND has

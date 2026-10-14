@@ -296,8 +296,9 @@ list the second project's root under `scopes`:
   this runs and every file, banner and marker path stays as before.
 - **Upgrade:** the default scope is untouched (no migration, the current coordinator keeps its
   seat). Sessions pick up a new scope with their next message once they run 0.10.0 hooks; older
-  sessions only after a restart. Where the heartbeat is installed, re-run step 5 of
-  `/middle-management-setup` so its copy gets `scope.py`.
+  sessions only after a restart. Where the heartbeat or the headless ritual is installed, re-run
+  step 5 or step 7 of `/middle-management-setup` so the copy gets `scope.py`; an older headless
+  copy is scope-blind (its `todo` lists and marks every scope's items).
 
 ## The session log
 

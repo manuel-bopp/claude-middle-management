@@ -12,6 +12,8 @@ Usage:
   scope.py of PATH     one line: name<TAB>state dir<TAB>board (the board may be empty, it is last)
   scope.py list        the same line for every named scope; nothing when there is none
   scope.py filter NAME stdin "<path><TAB><rest>" lines -> <rest> of every line whose path is in NAME
+  exit 3 = git failed or timed out on a path inside a linked worktree: the scope is unknown and
+  every caller fails closed (no banner, no claim, the holder keeps its seat), never "default"
 
 Rules: "scopes" in <config dir>/middle-management.json is a list of {name, root, board}. A path
 belongs to the named scope with the longest root that is the path or one of its parents (whole
@@ -64,16 +66,36 @@ def _longest(path, ss):
     return best and best["name"]
 
 
+class Unknown(Exception):
+    """git could not answer for a path that looks like a linked worktree: never guess "default"."""
+
+
+def _linked(path):
+    """True when the nearest .git above path is a FILE, the mark of a linked worktree."""
+    while True:
+        g = os.path.join(path, ".git")
+        if os.path.exists(g):
+            return os.path.isfile(g)
+        if os.path.dirname(path) == path:
+            return False
+        path = os.path.dirname(path)
+
+
 def _in_main(path):
-    """The same subpath of the main checkout when path is inside a linked git worktree, else None."""
+    """The same subpath of the main checkout when path is inside a linked git worktree, else None.
+    Fails closed: when git errors or times out on a path whose .git is a file, raise Unknown."""
     try:
         r = subprocess.run(["git", "-C", path, "rev-parse", "--path-format=absolute",
                             "--git-common-dir", "--show-toplevel"],
                            capture_output=True, text=True, timeout=2)
         common, top = r.stdout.splitlines() if r.returncode == 0 else (None, None)
     except (OSError, ValueError, subprocess.TimeoutExpired):
+        common = top = None
+    if not (common and top):
+        if _linked(path):
+            raise Unknown(path)
         return None
-    if not (common and top and common.endswith("/.git")):
+    if not common.endswith("/.git"):
         return None
     return os.path.normpath(os.path.join(os.path.dirname(common), os.path.relpath(path, top)))
 
@@ -108,23 +130,27 @@ def main(argv):
 
     def line(n):
         return "%s\t%s\t%s" % ((n,) + info(n, c))
-    if argv[:1] == ["of"] and len(argv) == 2:
-        print(line(of(argv[1], ss)))
-    elif argv == ["list"]:
-        for s in ss:
-            print(line(s["name"]))
-    elif argv[:1] == ["filter"] and len(argv) == 2:
-        memo = {}     # one git call per distinct path, not per line
-        for ln in sys.stdin.read().splitlines():
-            path, tab, rest = ln.partition("\t")
-            if tab:
-                if path not in memo:
-                    memo[path] = of(path, ss)
-                if memo[path] == argv[1]:
-                    print(rest)
-    else:
-        print(__doc__.split("\n\n")[2], file=sys.stderr)
-        return 2
+    try:
+        if argv[:1] == ["of"] and len(argv) == 2:
+            print(line(of(argv[1], ss)))
+        elif argv == ["list"]:
+            for s in ss:
+                print(line(s["name"]))
+        elif argv[:1] == ["filter"] and len(argv) == 2:
+            memo = {}     # one git call per distinct path, not per line
+            for ln in sys.stdin.read().splitlines():
+                path, tab, rest = ln.partition("\t")
+                if tab:
+                    if path not in memo:
+                        memo[path] = of(path, ss)
+                    if memo[path] == argv[1]:
+                        print(rest)
+        else:
+            print(__doc__.split("\n\n")[2], file=sys.stderr)
+            return 2
+    except Unknown as e:
+        print("scope.py: git could not resolve the worktree %s, scope unknown" % e, file=sys.stderr)
+        return 3
     return 0
 
 

@@ -764,7 +764,11 @@ def main():
         def reg_cwd(r):           # the REGISTRY cwd, never the transcript fallback in row["cwd"]
             c = (reg.get(r["session_id"]) or {}).get("cwd")
             return c if isinstance(c, str) else ""
-        memo = {c: scope.of(c, ss) for c in {reg_cwd(r) for r in rows}}   # one git call per cwd
+        try:
+            memo = {c: scope.of(c, ss) for c in {reg_cwd(r) for r in rows}}   # one git call per cwd
+        except scope.Unknown as e:
+            print("peer-state: git could not resolve the worktree %s, scope unknown" % e, file=sys.stderr)
+            return 3
         rows = [r for r in rows if memo[reg_cwd(r)] == a.scope]
     if a.wrapped:
         rows = [r for r in rows if r["wrapped"] == "yes"]

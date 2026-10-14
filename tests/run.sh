@@ -1337,6 +1337,37 @@ assert_lacks "S7 ...no expiry route" "EXPIRED SEAT" "$OUT"
 assert_lacks "S7 ...and no backfill for a session that is still working" "seat expired" "$(cat "$H/logs/session-log.md")"
 kill "$S7B" 2>/dev/null
 
+# S8 a worktree git cannot resolve (rebase check M1): the scope is UNKNOWN, never "default", and
+# nobody moves a seat on it. Broken git = a wrapper that fails every call.
+H="$(new_home)"; mkdir -p "$H/ff/sub" "$H/ad" "$H/logs" "$H/.claude/state/scopes/ff"; : > "$H/logs/session-log.md"
+git -C "$H/ff" init -q; echo x > "$H/ff/sub/f"; git -C "$H/ff" add sub/f
+git -C "$H/ff" -c user.email=t@t -c user.name=t commit -qm init
+git -C "$H/ff" worktree add -q "$H/wt/x" 2>/dev/null
+printf '{"scopes":[{"name":"ff","root":"%s/ff","board":"%s/ffboard.md"}]}' "$H" "$H" > "$H/.claude/middle-management.json"
+BG="$(mktemp -d -p "$TMPBASE")"; printf '#!/bin/sh\nexit 1\n' > "$BG/git"; chmod +x "$BG/git"
+HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$BG:$PATH" python3 "$SCOPEPY" of "$H/wt/x" >/dev/null 2>&1; RC=$?
+assert_rc "S8 broken git on a linked worktree -> rc 3 (unknown), not default" 3 "$RC"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$BG:$PATH" python3 "$SCOPEPY" of "$H/ad" 2>&1)"; RC=$?
+assert_rc "S8 ...a plain directory still resolves" 0 "$RC"
+assert_has "S8 ...to default" "default	" "$OUT"
+mine "$H" "$H/wt/x"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$BG:$PATH" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "S8 a caller started in that worktree cannot claim" 1 "$RC"
+assert_has "S8 ...could not be resolved" "could not be resolved" "$OUT"
+[ ! -e "$H/.claude/state/orchestrator" ] && [ ! -e "$H/.claude/state/scopes/ff/orchestrator" ] \
+  && ok "S8 ...no marker written in any scope" || bad "S8 ...no marker written in any scope" "$OUT"
+mine "$H" "$H/ff"; S8B="$(add_peer "$H" beta interactive "$H/wt/x")"; printf 'sess-beta\n' > "$H/.claude/state/scopes/ff/orchestrator"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$BG:$PATH" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "S8 a holder in that worktree keeps its seat" 1 "$RC"
+assert_has "S8 ...BUSY, scope unknown" "its scope cannot be resolved right now" "$OUT"
+[ "$(cat "$H/.claude/state/scopes/ff/orchestrator")" = sess-beta ] && ok "S8 ...ff marker unchanged" || bad "S8 ...ff marker unchanged" "$OUT"
+OUT="$(printf '{"session_id":"sess-alpha"}' | HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$BG:$PATH" bash "$ROLE" 2>&1)"
+assert_has "S8 the hook fails closed (no role)" "scope.py failed" "$OUT"
+assert_lacks "S8 ...prints no role" "Session role" "$OUT"
+HOME="$H" CLAUDE_CONFIG_DIR="" PATH="$BG:$PATH" python3 "$P/scripts/peer-state.py" --all --scope ff >/dev/null 2>&1; RC=$?
+assert_rc "S8 peer-state --scope refuses (rc 3)" 3 "$RC"
+kill "$S8B" 2>/dev/null
+
 say ""
 say "== peer-state (tests/peer-state.sh) =="
 PS_OUT="$(bash "$ROOT/tests/peer-state.sh" 2>&1)"; PS_RC=$?

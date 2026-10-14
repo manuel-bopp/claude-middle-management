@@ -204,6 +204,9 @@ Window: since $SINCE.
 Limits of this run: read and report only. Write no file at all (no board, no session log), kill and delete nothing, push nothing, message no session, send nothing outward: this script sends your report. Step 3 backfills, step 4 filings and step 5 clean-ups become lines in the report for the coordinator.
 Step 6: its input is already gathered in $RUN/todo.txt (the output of open-items.py todo); group it as the step says and end every to-do line with its key. What does not fit becomes one line \"+N more: open-items.py todo --all\". Do NOT run todo --delivered and do not stamp the window: this script marks exactly the keys your report carries.
 Step 7: your final message is the day plan, step 6 included, plain text of at most 3500 characters, and nothing else."
+# With scopes this run serves the default scope only (README "Scopes"); the prompt says so.
+[ "$(cfg '(.scopes | arrays | length) > 0')" = true ] && PROMPT="$PROMPT
+Scopes are configured: you serve scope default only. Sessions: peer-state.py --scope default; board: the top-level \"board\" key ($(cfg '.board // "none"')); window: $WINDOW_FILE. Sessions, lanes, servers and worktrees of other scopes are not yours: leave them out of the report."
 ( cd "$RUN" && timeout -k 30 "${TMO_MIN}m" claude -p "$PROMPT" --output-format json \
     --max-budget-usd "$BUDGET" ${MM_MORNING_MODEL:+--model "$MM_MORNING_MODEL"} \
     ${MM_MORNING_PERMISSION_MODE:+--permission-mode "$MM_MORNING_PERMISSION_MODE"} \

@@ -372,4 +372,7 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except scope.Unknown as e:      # fail closed: never file or count against a guessed scope
+        sys.exit("open-items: git could not resolve the worktree %s, scope unknown" % e)

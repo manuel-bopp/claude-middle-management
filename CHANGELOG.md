@@ -33,6 +33,7 @@ same marker path, no `state/scopes/` directory, and no python3 start on the new 
 sessions keep the old hooks until they are restarted. Where the heartbeat or the headless ritual
 is installed, re-run step 5 or step 7 of `/middle-management-setup` so the copy gets `scope.py`
 (the new `open-items.py` imports it).
+
 ## 0.9.0 - 2026-10-13
 
 **An expired coordinator seat is taken without waking its holder (#1).** Observed: the previous
