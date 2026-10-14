@@ -17,6 +17,8 @@
 # Alive = a registry entry with kind "interactive" whose pid answers kill -0. On the marker
 # route the sessionId is the identity and .name is display only; scripts/orchestrator.sh
 # follows the same rule (liveness rule F1).
+# With a "scopes" key in the config (README "Scopes") the marker, the board and the session list
+# are those of this session's scope, resolved by scripts/scope.py from its registry cwd.
 set -u
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -59,14 +61,29 @@ fi
 # --- role detection ---------------------------------------------------------------
 MY_ID=$(jq -r '.session_id // ""')
 
-# name<TAB>sessionId of every living interactive session. The (possibly empty) name comes LAST
-# in the jq array: `read` with a tab IFS collapses empty fields, so a nameless session would
+# cwd<TAB>name<TAB>sessionId of every living interactive session. The (possibly empty) name comes
+# LAST in the jq array: `read` with a tab IFS collapses empty fields, so a nameless session would
 # otherwise get its sessionId in the name column and no id at all (found 04.09.2026, case F1).
-LIVE=$(cat "$REG"/*.json 2>/dev/null \
-  | jq -r 'select(.pid and .sessionId and .kind == "interactive") | [.pid, .sessionId, .name // ""] | @tsv' 2>/dev/null \
-  | while IFS=$'\t' read -r pid sid name; do
-      kill -0 "$pid" 2>/dev/null && printf '%s\t%s\n' "$name" "$sid"
+# The cwd column is never empty ("-") for the same reason.
+RAW=$(cat "$REG"/*.json 2>/dev/null \
+  | jq -r 'select(.pid and .sessionId and .kind == "interactive")
+      | [.pid, .sessionId, (.cwd | if type == "string" and . != "" then . else "-" end), .name // ""] | @tsv' 2>/dev/null \
+  | while IFS=$'\t' read -r pid sid cwd name; do
+      kill -0 "$pid" 2>/dev/null && printf '%s\t%s\t%s\n' "$cwd" "$name" "$sid"
     done)
+# LIVE = name<TAB>sessionId: every session, or with scopes only those of this session's scope (by
+# the directory each was started in). A failing resolver fails closed: no banner, never a wrong one.
+SCOPE=""; OF=""; PS_SCOPE=""
+if [ -n "$RAW" ] && jq -e '(.scopes | arrays | length) > 0' "$CFG_FILE" >/dev/null 2>&1; then
+  MY_CWD=$(printf '%s\n' "$RAW" | awk -F'\t' -v id="$MY_ID" '$3==id{print $1; exit}')
+  S=$(python3 "$PLUGIN_ROOT/scripts/scope.py" of "$MY_CWD" 2>/dev/null) \
+    && LIVE=$(printf '%s\n' "$RAW" | python3 "$PLUGIN_ROOT/scripts/scope.py" filter "${S%%$'\t'*}" 2>/dev/null) \
+    || { printf 'middle-management: scopes are configured but %s/scripts/scope.py failed (python3?), no role this message; fix it or remove the scopes key (/middle-management-setup)\n' "$PLUGIN_ROOT"; exit 0; }
+  IFS=$'\t' read -r SCOPE SDIR BOARD <<<"$S"
+  MARKER="$SDIR/orchestrator"; OF=" of scope $SCOPE"; PS_SCOPE=" --scope $SCOPE"
+else
+  LIVE=$(printf '%s\n' "$RAW" | cut -f2-)
+fi
 [ -z "$LIVE" ] && exit 0
 
 name_of() { printf '%s\n' "$LIVE" | awk -F'\t' -v id="$1" '$2==id{print $1; exit}'; }
@@ -88,7 +105,7 @@ NAMED_COUNT=$(printf '%s' "$NAMED" | grep -c .)
 if [ -z "$ORCH_SRC" ]; then
   if [ "$NAMED_COUNT" -eq 0 ]; then
     # Both exits, with a human gate: this hint fires in EVERY living session.
-    [ -n "$STALE" ] && printf 'middle-management: the coordinator marker points at a session that is not visibly alive (%s) — until someone acts there is no coordinator. Workers keep working their lane, hold every outward coordination the regime routes through the coordinator (posts, tickets, pull requests, asks to the user), close their books when done or blocked, and report to whoever claims next. ONLY if your user wants THIS session to coordinate:\n  take over:   bash %s/scripts/orchestrator.sh claim\n  regime OFF:  bash %s/scripts/orchestrator.sh release %s   (the id is also printed by status)\nOtherwise ignore this.\n' "$MID" "$PLUGIN_ROOT" "$PLUGIN_ROOT" "$MID"
+    [ -n "$STALE" ] && printf 'middle-management: the coordinator marker%s points at a session that is not visibly alive (%s) — until someone acts there is no coordinator. Workers keep working their lane, hold every outward coordination the regime routes through the coordinator (posts, tickets, pull requests, asks to the user), close their books when done or blocked, and report to whoever claims next. ONLY if your user wants THIS session to coordinate:\n  take over:   bash %s/scripts/orchestrator.sh claim\n  regime OFF:  bash %s/scripts/orchestrator.sh release %s   (the id is also printed by status)\nOtherwise ignore this.\n' "$OF" "$MID" "$PLUGIN_ROOT" "$PLUGIN_ROOT" "$MID"
     exit 0
   fi
   if [ "$NAMED_COUNT" -gt 1 ]; then
@@ -108,8 +125,8 @@ MY_NAME=$(name_of "$MY_ID")
 # Marker route: identity by sessionId. Name route: by name, but never an empty one.
 if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
    || { [ "$ORCH_SRC" = name ] && [ -n "$MY_NAME" ] && [ "$MY_NAME" = "$ORCH" ]; }; then
-  printf 'Session role: ORCHESTRATOR ("%s", by %s). You plan with your user and route the work —\n' \
-    "${MY_NAME:-unnamed}" "$([ "$ORCH_SRC" = marker ] && echo marker || echo name)"
+  printf 'Session role: ORCHESTRATOR%s ("%s", by %s). You plan with your user and route the work —\n' \
+    "$OF" "${MY_NAME:-unnamed}" "$([ "$ORCH_SRC" = marker ] && echo marker || echo name)"
   printf 'you do NOT build yourself. Directly allowed: planning/decision docs, chat/GitHub coordination,\n'
   printf 'tasking workers and sub-agents. NOT yourself: product/repo code, repo git surgery, builds/tests —\n'
   printf 'delegate those. Small clear jobs (one-file fix, research, mechanical sweep) go to a sub-agent in\n'
@@ -123,15 +140,20 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
   printf 'pattern) — not when memory runs out. Morning ritual, step 5.\n'
   printf 'Stopping a lane unit and removing its merged, clean, pushed worktree is housekeeping, not\n'
   printf 'destruction — done unasked; anything dirty, unpushed or unmerged stays and goes to your user.\n'
+  if [ -n "$SCOPE" ]; then
+    printf 'Scope %s: your workers, your board and your cleanup are this scope'"'"'s only. Other scopes\n' "$SCOPE"
+    printf 'have their own coordinator; you may message that coordinator directly about anything that\n'
+    printf 'crosses scopes, never its workers, and you never stop their servers or remove their worktrees.\n'
+  fi
   printf 'One lane = one session: a new lane gets a FRESH session — ask your user to open one and name\n'
   printf 'the model; never stack a second lane into a running session (exception: after ~30 minutes of\n'
   printf 'silence from your user, and only for safe, reversible work). A wrapped session is closed for\n'
-  printf 'good. After every wrap, run python3 "%s/scripts/peer-state.py" --wrapped and hand\n' "$PLUGIN_ROOT"
+  printf 'good. After every wrap, run python3 "%s/scripts/peer-state.py" --wrapped%s and hand\n' "$PLUGIN_ROOT" "$PS_SCOPE"
   printf 'your user the tab list it prints: topic, idle age and the last line each session wrote — the\n'
   printf 'text at the bottom of that tab, which is how your user finds it. NEVER peer-message a session\n'
   printf 'that reads as wrapped, and read state off disk before messaging one idle a while: the message\n'
   printf 'makes that session re-pay its ENTIRE context in fresh input tokens.\n'
-  printf 'The same reader with --waiting lists sessions WAITING on their user: "permission" = MAY be parked\n'
+  printf 'The same reader with --waiting%s lists sessions WAITING on their user: "permission" = MAY be parked\n' "$PS_SCOPE"
   printf 'on a permission prompt (a long-running tool reads the same), "question" = its last turn asks\n'
   printf 'something. Do not message such a session; check the tab'"'"'s last line (peer-state.py\n'
   printf -- '--session-id) before telling your user which tab and why.\n'
@@ -149,11 +171,11 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
   [ -n "$BOARD" ] && printf 'You are the sole writer of the board %s; workers read it and report to you.\n' "$BOARD"
   # The open-items inbox: one python run, silent at 0. A failed count must not read as "inbox empty",
   # so it prints one fallback line instead (no traceback); the prompt never fails.
-  python3 "$PLUGIN_ROOT/scripts/open-items.py" count 2>/dev/null \
+  CLAUDE_CODE_SESSION_ID="$MY_ID" python3 "$PLUGIN_ROOT/scripts/open-items.py" count 2>/dev/null \
     || printf 'Open-items inbox: the count failed; run python3 "%s/scripts/open-items.py" list\n' "$PLUGIN_ROOT"
   printf 'Current workers: %s\n' "$(printf '%s\n' "$LIVE" | cut -f1 | grep -vxF "$ORCH" | tr '\n' ' ')"
 else
-  printf 'Session role: WORKER ("%s"). The coordinator is "%s".\n' "${MY_NAME:-unnamed}" "${ORCH:-unnamed}"
+  printf 'Session role: WORKER%s ("%s"). The coordinator is "%s".\n' "$OF" "${MY_NAME:-unnamed}" "${ORCH:-unnamed}"
   printf 'Peer messages go ONLY to "%s" — never to other workers; anything another session needs\n' "${ORCH:-unnamed}"
   printf 'goes through the coordinator. When you finish or block, report there yourself.\n'
   printf 'You are the SUB-ORCHESTRATOR of your lane: plan review, build, diff review, screenshots and\n'

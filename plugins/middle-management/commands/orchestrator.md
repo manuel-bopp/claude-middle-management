@@ -21,15 +21,18 @@ the marker that decides which one.
    there instead.
 
 2. Relay the script's output to the user as it is — it is short and already plain text.
-   Do not paraphrase it away, do not add invented detail.
+   Do not paraphrase it away, do not add invented detail. With scopes, the first line names
+   the scope the command acted on; relay it.
 
 3. Add one sentence of context only where it helps:
    - after a successful `claim`: the role banner switches with the next message in every
-     session on this machine.
+     session of its scope (with a `scopes` key; README, "Scopes"), otherwise in every session
+     on this machine.
    - on `BUSY` / `REFUSED`: say which session holds the seat and that only that session
      (or the user) can hand it over. Do not retry, and never delete the marker by hand.
-     A `REFUSED` that prints `release <id>` means the holder is not visibly alive: rerun
-     with that id ONLY when the user confirms the coordinator session is gone.
+     A `REFUSED` that prints `release <id>` means the holder is not visibly alive, or alive in
+     another scope (the script says so); then `claim` or `release <id>` work. Rerun with that id
+     ONLY when the user confirms the coordinator session is gone or moved.
    - when a `claim` takes the seat from a holder that is still running: the script found two
      signals agreeing that the holder finished — its own closing line AND its session-log entry
      reading completed — plus an idle age past `MM_STALE_SEAT_MIN` (default 60 minutes), and

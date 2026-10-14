@@ -18,10 +18,12 @@ this message.** Work the checklist, then stop.
      you would have written below, touch nothing else, stop.
    - It says there is no coordinator → the regime is off. Do nothing, stop.
 3. **Reconcile board against roster.** Read the newest block of the board (CUSTOMIZE: the path
-   configured as `board` by `/middle-management-setup`) and compare it with the live sessions
-   (`<config dir>/sessions/*.json`; live = `kill -0 <pid>` and `kind == "interactive"`).
-4. **Poke the workers whose turn may have died the same way.** For each live worker with an open
-   lane, send ONE peer message, no reply requested: "your coordinator's turn died and was
+   configured as `board` by `/middle-management-setup`; a poke for a named scope names that
+   scope's board in its first line, and that board wins) and compare it with the live sessions
+   of your scope when the first line names one (`peer-state.py --scope <name>`), else all of
+   `<config dir>/sessions/*.json` (live = `kill -0 <pid>` and `kind == "interactive"`).
+4. **Poke the workers whose turn may have died the same way.** For each live worker of that
+   roster with an open lane, send ONE peer message, no reply requested: "your coordinator's turn died and was
    re-triggered; if your last turn ended in an API error, continue your lane now; keep working,
    hold outward coordination, close your books when done or blocked — do not answer this
    message." Workers that are gone: list them, do not resume them.

@@ -465,6 +465,30 @@ assert_has "every row carries the documented keys, with the documented types" "C
 ps_ --all --json | python3 -m json.tool > /dev/null 2>&1
 assert_rc "--json round-trips through a strict parser" 0 $?
 
+say "== --scope: the sessions of one coordinator scope, by their registry start dir =="
+S="$(mktemp -d -p "$TMPBASE")"; mkdir -p "$S/.claude/sessions" "$S/.claude/projects/p" "$S/ff" "$S/ad"
+printf '{"scopes":[{"name":"ff","root":"%s/ff","board":"%s/b.md"}]}' "$S" "$S" > "$S/.claude/middle-management.json"
+printf '{"pid":999961,"sessionId":"61000000-1","cwd":"%s/ff","name":"in-ff","kind":"interactive","updatedAt":5}\n' "$S" > "$S/.claude/sessions/61.json"
+printf '{"pid":999962,"sessionId":"62000000-1","cwd":"%s/ad","name":"in-ad","kind":"interactive","updatedAt":5}\n' "$S" > "$S/.claude/sessions/62.json"
+# no registry cwd, but its transcript records say ff: the registry decides (default), as in the hook
+printf '{"pid":999963,"sessionId":"63000000-1","name":"no-cwd","kind":"interactive","updatedAt":5}\n' > "$S/.claude/sessions/63.json"
+printf '{"type":"assistant","cwd":"%s/ff","message":{"content":[{"type":"text","text":"hi"}]}}\n' "$S" > "$S/.claude/projects/p/63000000-1.jsonl"
+pss() { HOME="$S" CLAUDE_CONFIG_DIR="" MM_SESSION_LOG="$S/log.md" python3 "$PS" "$@" 2>&1; }
+OUT="$(pss --all --scope ff)"
+assert_has "--scope ff lists the ff session" "in-ff" "$OUT"
+assert_lacks "--scope ff skips the other one" "in-ad" "$OUT"
+assert_lacks "--scope ff skips a session with no registry cwd (transcript cwd ignored)" "no-cwd" "$OUT"
+OUT="$(pss --all --scope default)"
+assert_has "--scope default lists the session outside every root" "in-ad" "$OUT"
+assert_has "--scope default lists the session with no registry cwd" "no-cwd" "$OUT"
+assert_lacks "--scope default skips the ff session" "in-ff" "$OUT"
+OUT="$(pss --all)"
+assert_has "no --scope lists both (ff)" "in-ff" "$OUT"
+assert_has "no --scope lists both (ad)" "in-ad" "$OUT"
+OUT="$(pss --all --scope nosuch)"; RC=$?
+assert_rc "--scope of an unknown name -> rc 2" 2 "$RC"
+assert_has "...and says so" "no scope 'nosuch'" "$OUT"
+
 say ""
 say "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -4,8 +4,10 @@
 #            orch-heartbeat.timer; both installed as USER units by /middle-management-setup,
 #            which copies this script's directory to <config dir>/middle-management-heartbeat/);
 #            tests/heartbeat.sh (drives every branch against fixtures);
-#            by hand: `orch-heartbeat.sh classify <transcript.jsonl>` when triaging a stall.
-#            Nothing else calls this script.
+#            by hand: `orch-heartbeat.sh classify <transcript.jsonl>` when triaging a stall;
+#            itself, once per named scope (README "Scopes"), with OHB_SCOPE set.
+#            Nothing else calls this script. Calls poke-session.py, peer-state.py and, only with
+#            a "scopes" key in the config, scope.py (all beside it).
 #
 # One tick does:
 #   who coordinates  ->  is that session alive (liveness rule F1, incl. the procStart PID-reuse
@@ -59,6 +61,7 @@ ALARM_SINK=${OHB_ALARM_SINK:-}
 POKE_SINK=${OHB_POKE_SINK:-}
 
 TICK_NOTE=started
+SCOPED=""; jq -e '(.scopes | arrays | length) > 0' "$CFG_FILE" >/dev/null 2>&1 && SCOPED=1
 
 log() { printf '%s\n' "$*" >&2; }   # goes to the journal
 
@@ -68,7 +71,7 @@ log() { printf '%s\n' "$*" >&2; }   # goes to the journal
 # different contracts, and coupling them would make the heartbeat's alarm path depend on a
 # script whose job is "a systemd unit failed".
 alarm() {
-  local text="[$(hostname -s 2>/dev/null || echo host)] $1" cmd rc=0
+  local text="[$(hostname -s 2>/dev/null || echo host)${OHB_SCOPE:+ scope $OHB_SCOPE}] $1" cmd rc=0
   if [ -n "$ALARM_SINK" ]; then
     printf '%s\n' "$text" >> "$ALARM_SINK" || log "heartbeat: alarm sink unwritable - $text"
     return 0
@@ -203,8 +206,14 @@ poke() { # poke <sessionId> <name> <stuck_since_epoch> <poke_number>
   local text; text=$(sed '1,/^---$/d' "$POKE_PROMPT")   # unreadable file => ERR trap, loudly
   [ -n "$text" ] || text=$(cat "$POKE_PROMPT")
   body=$(mktemp)   # after the text, so a missing prompt file leaves no temp file behind
-  { printf 'HEARTBEAT POKE #%s - your session ("%s") has had no answer since %s.\n' \
+  { printf 'HEARTBEAT POKE #%s - your session ("%s") has had no answer since %s.' \
       "$n" "$name" "$(hhmm "$since")"
+    # With scopes the checklist's roster and board are this scope's (step 3 of the prompt).
+    if [ -n "$SCOPED" ]; then
+      printf ' Only sessions of scope %s are yours: peer-state.py --scope %s.' "${OHB_SCOPE:-default}" "${OHB_SCOPE:-default}"
+      if [ -n "${OHB_SCOPE:-}" ]; then printf ' Its board is %s.' "${OHB_BOARD:-}"; fi
+    fi
+    printf '\n'
     printf '%s\n' "$text"; } > "$body"
   python3 "$POKE_SENDER" "$id" "$body" >&2 || rc=$?
   rm -f "$body"
@@ -326,8 +335,34 @@ trap 'rc=$?; if [ "$BASHPID" != "$$" ]; then exit $rc; fi
         alarm "heartbeat: internal error (exit $rc, line $LINENO) - journalctl --user -u orch-heartbeat.service"; fi
       TICK_NOTE="error(exit $rc)"; exit 0' ERR
 
-# 0. Keep-warm runs first and never ends the tick: every branch below may exit early.
-keep_warm || log "keep-warm: failed this tick"
+# 0. Keep-warm runs first and never ends the tick: every branch below may exit early. It is
+# machine-wide, so only the top-level tick runs it, never a scope's child tick.
+[ -n "${OHB_SCOPE:-}" ] || keep_warm || log "keep-warm: failed this tick"
+
+# 0b. Scopes (README "Scopes"): one child tick per named scope, with that scope's marker and state
+# dir; then this tick goes on with the default seat exactly as without scopes. If scope.py fails,
+# the default seat is still watched.
+if [ -n "$SCOPED" ] && [ -z "${OHB_SCOPE:-}" ]; then
+  LIST=$(python3 "$DIR/scope.py" list) || { LIST=""; should_alarm scopes 3600 \
+    && alarm "heartbeat: scopes are configured but scope.py list failed, only the default seat is watched"; }
+  while IFS=$'\t' read -r sn sd sb; do
+    [ -n "$sn" ] || continue
+    log "heartbeat: scope $sn"
+    OHB_SCOPE=$sn OHB_BOARD=$sb OHB_MARKER=$sd/orchestrator OHB_STATE_DIR=$sd/orch-heartbeat \
+      bash "$DIR/orch-heartbeat.sh" tick || log "heartbeat: the tick of scope $sn failed"
+  done <<<"$LIST"
+fi
+
+# The scope's sessions only: "<cwd>\t<rest>" in, "<rest>" out. Unscoped, or scope.py failing in
+# the TOP-LEVEL tick: everything, as without scopes, so "only the default seat is watched" stays
+# true. In a named scope's child a failure yields no candidates: that seat then rests on its marker.
+in_scope() {
+  local inp out; inp=$(cat)
+  if [ -n "$SCOPED" ] && out=$(printf '%s\n' "$inp" | python3 "$DIR/scope.py" filter "${OHB_SCOPE:-default}"); then
+    printf '%s\n' "$out"
+  elif [ -z "${OHB_SCOPE:-}" ]; then printf '%s\n' "$inp" | cut -f2-
+  fi
+}
 
 # 1. Who coordinates? Marker first, then the name fallback session-role.sh implements.
 ID=""; NAME=""; SRC=""
@@ -344,10 +379,12 @@ if [ -z "$ID" ] || [ "$LIVENESS" = 1 ]; then
   # The (possibly empty) name stays LAST in the jq array: `read` with tab-IFS collapses empty
   # middle fields, so a nameless registry entry would otherwise shift its sessionId into the
   # name column (same fix as hooks/session-role.sh).
+  # The cwd column is never empty ("-") for the same reason; in_scope drops it again.
   NAMED=$(cat "$REG"/*.json 2>/dev/null \
-    | jq -r 'select(.pid and .kind == "interactive") | [.pid, (.sessionId // ""), (.name // "")] | @tsv' 2>/dev/null \
-    | while IFS=$'\t' read -r p s n; do kill -0 "$p" 2>/dev/null && printf '%s\t%s\n' "$n" "$s"; done \
-    | grep -i '^orch' || true)
+    | jq -r 'select(.pid and .kind == "interactive")
+        | [.pid, (.sessionId // ""), (.cwd | if type == "string" and . != "" then . else "-" end), (.name // "")] | @tsv' 2>/dev/null \
+    | while IFS=$'\t' read -r p s c n; do kill -0 "$p" 2>/dev/null && printf '%s\t%s\t%s\n' "$c" "$n" "$s"; done \
+    | in_scope | grep -i '^orch' || true)
   COUNT=$(printf '%s' "$NAMED" | grep -c . || true)
   if [ "$COUNT" -gt 1 ]; then
     should_alarm "ambiguous" 3600 && \

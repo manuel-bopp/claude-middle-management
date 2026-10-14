@@ -31,12 +31,15 @@ Schema (nothing else is valid):
     { "name": "app", "root": "/abs/path/repo", "base": "origin/main",
       "install": "npm install", "serve": "npm run dev",
       "worktreeDir": "/abs/path/.worktrees-app" }
+  ],
+  "scopes": [
+    { "name": "ff", "root": "/abs/path/project", "board": "/abs/path/ff-board.md" }
   ]
 }
 ```
 
 `name`, `root` and `base` are required per entry; `install`, `serve` and
-`worktreeDir` are optional. Every top-level key except `protectedCheckouts` is
+`worktreeDir` are optional. `name`, `root`, `board` are required per scope entry. Every top-level key except `protectedCheckouts` is
 optional and has the default shown above; write only the ones the user decides
 on, and leave the rest out.
 
@@ -49,6 +52,11 @@ bash "$CHECK" validate; echo "validate status: $?"
 [ -f "$CFG" ] && cat "$CFG"
 LOG="$(bash "$CHECK" session-log)"; CHOSEN=$?
 echo "session log: $LOG ($([ "$CHOSEN" -eq 0 ] && echo configured || echo default), $([ -f "$LOG" ] && echo exists || echo "does not exist yet"))"
+CFG_DIR="$(bash "$CHECK" dir)"
+jq -r '.scopes[]? | [.name, .root, .board] | @tsv' "$CFG" 2>/dev/null | while IFS=$'\t' read -r n r b; do
+  m="$CFG_DIR/state/scopes/$n/orchestrator"
+  echo "scope $n: root $r ($([ -d "$r" ] && echo exists || echo MISSING)), board $b ($([ -f "$b" ] && echo exists || echo "does not exist yet")), seat $m ($([ -s "$m" ] && echo "held by $(head -1 "$m")" || echo free))"
+done
 ```
 
 Status codes: `0` valid · `1` invalid (unparseable or wrong shape) · `2` no
@@ -63,7 +71,10 @@ effective worktree directory (the configured `worktreeDir`, or the sibling
 default `<parent of root>/.worktrees-<name>`). Also report the board path,
 whether `surgicalStaging` is on, and the session-log line the block printed —
 its path, whether it was configured or defaulted, and whether the file is
-there. With no config yet, say "none yet" instead of inventing defaults.
+there. Per scope (README, "Scopes"): its name, root (exists?), board (exists?),
+seat marker and current holder, as the `scope` lines print them (`/orchestrator
+status` only covers the caller's own scope). With no config yet, say "none yet"
+instead of inventing defaults.
 
 Done when the user has seen the current state. Never skip this: step 3 rewrites
 the whole file, so entries you did not read here would be lost.
@@ -166,6 +177,30 @@ repositories; the user names them.
     until the skill's marker is under an hour old, so a session drafts in its
     scratch dir, runs the loop, then writes the file.
 
+13. **Scopes (optional).** Ask whether a project on this machine needs its own,
+    independent coordinator (own seat, own board); most machines need none. Per
+    scope: `root` = the project directory, canonical via `cd "<path>" && pwd -P`,
+    must exist, must differ from every other root (nesting is fine, the longest
+    root wins); `name` = basename of the root unless the user picks one (letters,
+    digits, `-`, `_`; not `default`; unique); `board` = absolute path, required;
+    offer to create a missing board file with a title line. Where the headless ritual
+    is installed, re-run step 7 afterwards so its copy gets `scope.py`. Explain the rule in
+    two sentences: a session belongs to the scope of the directory it was started
+    in (a linked worktree counts as the same subpath of its main checkout), every
+    other session to the scope `default`; a scope gets a coordinator only when one
+    of its sessions runs `/orchestrator claim`.
+    Before adding, editing, nesting, removing or renaming any scope, list every
+    held seat (default and named, from step 1) whose holder's start dir would
+    resolve to a DIFFERENT scope after the change, and every seat of a scope being
+    removed or renamed; tell the user to release those seats first
+    (`/orchestrator release` in the holder). If they do not, the change still
+    works (the old scope's sessions may `claim` the seat or `release <id>` it),
+    but the holder keeps believing it coordinates until its next message. A
+    removed or renamed scope leaves `<config dir>/state/scopes/<old>/` behind:
+    inert once its seat is released; an alarmed heartbeat episode in it never
+    gets its closing alarm; the user may delete the directory then (re-adding the
+    old name would otherwise revive it).
+
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped
 from the file.
@@ -192,7 +227,14 @@ cat > "$CFG" <<'JSON'
   ]
 }
 JSON
-if bash "$CHECK" validate; then
+# With scopes: every root must exist and resolve to its own scope (validate cannot stat paths).
+scopes_ok() {
+  jq -r '.scopes[]? | [.name, .root] | @tsv' "$CFG" | while IFS=$'\t' read -r n r; do
+    [ -d "$r" ] && [ "$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/scope.py" of "$r" | cut -f1)" = "$n" ] \
+      || { echo "scope $n: FAILED (root missing, or it resolves to another scope)"; exit 1; }
+  done
+}
+if bash "$CHECK" validate && scopes_ok; then
   rm -f "$CFG.bak"; echo "written and valid: $CFG"
 elif [ -f "$CFG.bak" ]; then
   mv "$CFG.bak" "$CFG"; echo "invalid — previous config restored, nothing changed"
@@ -204,11 +246,18 @@ fi
 If validation failed, show the user the JSON you tried to write and what the
 schema requires, then correct it and run the block again.
 
+A `scope <name>: FAILED` line means a scope root is missing or resolves to another
+scope (a longer root shadows it); the block then restores the backup exactly as for
+an invalid config. Fix the root and run the block again.
+
 ## Step 4 — summarise
 
 Tell the user what is protected now: per checkout the name, root, base and
 effective worktree directory; whether blanket staging is blocked; the board
-path. Add the two operational facts: implementation work goes into a worktree
+path; per scope its root, board and seat marker
+(`<config dir>/state/scopes/<name>/orchestrator`), and that 0.10.0 sessions pick
+a new scope up on their next message, older-version sessions only after a
+restart. Add the two operational facts: implementation work goes into a worktree
 via `/wt <name> new <topic>`, and the config takes effect immediately — the
 hooks read it on every run, so no restart is needed.
 
@@ -244,7 +293,7 @@ silently — then arms the timer:
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; HB="$CFG_DIR/middle-management-heartbeat"; UNITS="$HOME/.config/systemd/user"
 mkdir -p "$HB" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{orch-heartbeat.sh,poke-session.py,peer-state.py,unit-failure-alarm.sh} "$HB/"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{orch-heartbeat.sh,poke-session.py,peer-state.py,scope.py,unit-failure-alarm.sh} "$HB/"
 [ -e "$HB/orch-heartbeat-poke.md" ] || cp "${CLAUDE_PLUGIN_ROOT}/scripts/orch-heartbeat-poke.md" "$HB/"
 # The units carry the resolved config dir: the systemd user manager inherits no shell environment,
 # so a CLAUDE_CONFIG_DIR set in the shell would otherwise never reach the tick.
@@ -364,7 +413,7 @@ CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; MR="$CFG_DIR/middle-management-morning"; UNITS="$HOME/.config/systemd/user"
 FB=""   # the fallback file path the user named, or empty
 mkdir -p "$MR" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-headless.sh,config-check.sh,open-items.py,peer-state.py,unit-failure-alarm.sh} "$MR/"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-headless.sh,config-check.sh,open-items.py,peer-state.py,scope.py,unit-failure-alarm.sh} "$MR/"
 for u in orch-morning-ritual.service orch-morning-ritual.timer; do
   sed "s|__MORNING_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g; s|__FALLBACK_ENV__|$FB|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"

@@ -18,9 +18,20 @@ convention). Those carry a **CUSTOMIZE** marker: fill them with your team's actu
 stack the first time you run this, and keep your concretization in your own notes
 or a fork of this file.
 
+With scopes (a `scopes` key in the config; middle-management skill, "Scopes"), every step is
+your scope's: sessions from `peer-state.py --all --scope <yours>`, your scope's board (the one
+your banner names) in step 4, and in step 5 only resources owned by your scope's sessions.
+Another scope's lanes, servers and worktrees are never yours to clean, even when your board does
+not name them; cross-scope findings go to that scope's coordinator. Step 6 (`open-items.py todo`)
+already reads your scope's board and drop files. Your window file is your scope's:
+`<config dir>/state/scopes/<name>/morning-ritual/window` for a named scope (the default scope keeps
+`<config dir>/state/morning-ritual/window`); stamp that one in step 7. The headless runner serves
+the default scope only, so a named scope's coordinator runs this ritual itself.
+
 ## 1. Messages delta — CUSTOMIZE
 
-Window: since the last ritual run — the epoch in `<config dir>/state/morning-ritual/window`
+Window: since the last ritual run, the epoch in `<state dir>/morning-ritual/window` (`<state dir>` =
+`<config dir>/state`, or with scopes your scope's: `scope.py of "$PWD" | cut -f2` prints it)
 (`date -d @$(cat …)`; macOS `date -r $(cat …)`), written at the end of step 7 and by the headless runner; no file → yesterday
 evening.
 
@@ -94,7 +105,7 @@ wrote to its drop file that is not on the board yet. File each by putting its ke
 in a board line, then `open-items.py done <file>` for every file it marks "all filed, session
 gone" (rules: middle-management skill, "Open items").
 
-Then fold overnight movement into the board (config `.board`; the coordinator is its only
+Then fold overnight movement into the board (config `.board`, or with scopes your scope's board, which the banner names; the coordinator is its only
 writer): externally resolved items (merged PRs, answered threads, arrived reports),
 the wrap-audit result, new sessions your user started this morning. Dated morning
 block; if the board lives in a git repo, commit surgically — the board file plus
@@ -179,4 +190,4 @@ with what unblocks it, (d) ready lanes they could open worker sessions for, (e) 
 to-do list. Lead with the delta; reference docs by path instead of retelling them.
 
 Once it is out, stamp the window for the next ritual:
-`mkdir -p "<config dir>/state/morning-ritual" && date +%s > "<config dir>/state/morning-ritual/window"`.
+`mkdir -p "<state dir>/morning-ritual" && date +%s > "<state dir>/morning-ritual/window"` (step 1 names `<state dir>`).

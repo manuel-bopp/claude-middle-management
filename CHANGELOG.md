@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.10.0 - 2026-10-14
+
+**Scopes: an independent coordinator per project root.** One config dir used to mean one seat,
+one board and one worker list for every session on the machine. The new optional `scopes` key
+lists further project roots, each with a `name` and its own `board`; a session belongs to the
+scope of the directory it was started in (its registry entry; the longest root wins, a linked git
+worktree counts as the same subpath of its main checkout), everything else is the implicit scope
+`default` with today's keys and paths. Per scope: the seat marker
+(`<config-dir>/state/scopes/<name>/orchestrator`; `default` keeps `<config-dir>/state/orchestrator`),
+the board, the role banners (`ORCHESTRATOR of scope <name>`, `WORKER of scope <name>`), the
+coordinator's worker list and `orch*` name route, `/orchestrator claim|release|status` (it prints
+`Scope:`), the tab list (`peer-state.py --scope <name>`), the open-items inbox and `done` (a drop
+file belongs to the scope of the cwd in its header line), and the heartbeat, which runs one child
+tick per named scope with its own state dir, tags its alarms `scope <name>` and hands the poked
+coordinator its scope's roster and board. A holder whose start dir now resolves to another scope
+no longer holds its old seat. Machine-wide as before: the session registry, one session log for
+all scopes (no per-scope `sessionLog` in 0.10.0), the open-items drop dir, `notifyCommand`,
+`surgicalStaging`, protected checkouts with `/wt` and the reaper, keep-warm and the heartbeat
+timer. Workers message only their own scope's coordinator; the coordinators of two scopes may
+message each other directly. New `scripts/scope.py` is the one resolver; with a `scopes` key the
+role hook, `/orchestrator` (`status` and `release` included) and the heartbeat need `python3`.
+With 0.9.0's seat expiry and to-do list: `claim`'s stale and expired takeover (and its wrap
+backfill) only look at the holder of the caller's scope's marker, a holder alive in another scope
+simply no longer holds the seat and is never backfilled; `open-items.py todo` reads the caller's
+scope's board and drop files; the ritual's `window` (and `claim`'s "no morning ritual" line) is per
+scope; the headless runner and its timer serve the default scope only. `config-check.sh validate` learns the shape (name, absolute root other than `/`, absolute board,
+no duplicate name or root). `/middle-management-setup` can add a scope.
+
+**Upgrade.** No `scopes` key = identical behaviour and files: the same banners byte for byte, the
+same marker path, no `state/scopes/` directory, and no python3 start on the new paths. Running
+sessions keep the old hooks until they are restarted. Where the heartbeat or the headless ritual
+is installed, re-run step 5 or step 7 of `/middle-management-setup` so the copy gets `scope.py`
+(the new `open-items.py` imports it).
+
 ## 0.9.0 - 2026-10-13
 
 **An expired coordinator seat is taken without waking its holder (#1).** Observed: the previous

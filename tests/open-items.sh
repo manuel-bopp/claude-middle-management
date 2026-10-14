@@ -179,6 +179,38 @@ OUT="$(oi "$A" todo --delivered "not-a-key")"; RC=$?
 assert_rc "--delivered with a malformed key -> refused" 1 "$RC"
 OUT="$(oi "$A" todo --bogus)"; RC=$?
 assert_rc "an unknown todo flag -> usage" 1 "$RC"
+say "== scopes: each coordinator sees its own scope's drop files, against its own board =="
+H2="$(mktemp -d -p "$TMPBASE")"; C2="$H2/.claude"; mkdir -p "$C2/sessions" "$H2/ff" "$H2/ad"
+printf '# board\n' > "$H2/b.md"; printf '# ff board\n' > "$H2/b2.md"
+printf '{"board":"%s/b.md","scopes":[{"name":"ff","root":"%s/ff","board":"%s/b2.md"}]}' "$H2" "$H2" "$H2" > "$C2/middle-management.json"
+SA=cccccccc-3333-4000-8000-000000000003   # live, started in <H2>/ad: scope default
+SF=dddddddd-4444-4000-8000-000000000004   # live, started in <H2>/ff: scope ff
+for s_ in "$SA:ad" "$SF:ff"; do
+  sleep 300 >/dev/null 2>&1 </dev/null & p_=$!; PEERS="$PEERS $p_"
+  printf '{"pid":%s,"sessionId":"%s","name":"n","cwd":"%s/%s","kind":"interactive"}\n' "$p_" "${s_%%:*}" "$H2" "${s_#*:}" > "$C2/sessions/$p_.json"
+done
+oi2() { local s="$1"; shift; HOME="$H2" CLAUDE_CONFIG_DIR="" CLAUDE_CODE_SESSION_ID="$s" python3 "$OI" "$@" 2>&1; }
+oi2 "$SF" add --owner user "an ff item" >/dev/null; oi2 "$SA" add --owner user "an ad item" >/dev/null
+assert_has "the ff session's count sees only its own file" "1 unfiled in 1 file" "$(oi2 "$SF" count)"
+assert_has "the default session's count never counts the ff file" "1 unfiled in 1 file" "$(oi2 "$SA" count)"
+printf -- '- dddddddd-W1 · user · an ff item\n' >> "$H2/b.md"
+assert_has "an ff key on the default board is NOT filed" "1 unfiled in 1 file" "$(oi2 "$SF" count)"
+printf -- '- dddddddd-W1 · user · an ff item\n' >> "$H2/b2.md"
+OUT="$(oi2 "$SF" count)"
+[ -z "$OUT" ] && ok "on the ff board -> filed, silent" || bad "on the ff board -> filed, silent" "$OUT"
+OUT="$(oi2 "$SA" list)"
+assert_lacks "the default coordinator's list skips the ff file" "dddddddd" "$OUT"
+OUT="$(oi2 "$SA" done "$C2/open-items/dddddddd-session-notes.md")"; RC=$?
+assert_rc "done of another scope's file -> refused" 1 "$RC"
+assert_has "...naming its scope" "belongs to scope ff" "$OUT"
+printf -- '- dddddddd-W5\n' >> "$H2/b2.md"; printf -- '- dddddddd-W9\n' >> "$H2/b.md"
+assert_has "add numbers against the scope's own board (W5 there, W9 elsewhere)" "dddddddd-W6" "$(oi2 "$SF" add --owner user "next")"
+OUT="$(oi2 "$SF" todo --all)"
+assert_has "todo in scope ff lists the ff session's user item" "dddddddd-W1" "$OUT"
+assert_lacks "todo in scope ff skips the default scope's item" "cccccccc-W1" "$OUT"
+OUT="$(oi2 "$SA" todo --all)"
+assert_has "todo in the default scope lists its own item" "cccccccc-W1" "$OUT"
+assert_lacks "todo in the default scope skips the ff item" "dddddddd-W1" "$OUT"
 
 say ""
 say "RESULT: $PASS passed, $FAIL failed"
