@@ -1289,6 +1289,9 @@ s6
 assert_has "S6 alpha sees the stale hint" "the coordinator marker of scope default points at a session that is not visibly alive (sess-beta)" "$(role "$H" "sess-alpha")"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" status 2>&1)"
 assert_has "S6 status names the holder's new scope" "it now belongs to scope ff" "$OUT"
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" release 2>&1)"; RC=$?
+assert_rc "S6 release without the id is refused" 1 "$RC"
+assert_has "S6 ...and says the holder moved scope" "it now belongs to scope ff" "$OUT"
 OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" release sess-beta 2>&1)"; RC=$?
 assert_rc "S6 release <id> works" 0 "$RC"
 [ -e "$H/.claude/state/orchestrator" ] && bad "S6 the default marker is gone" "$OUT" || ok "S6 the default marker is gone"
@@ -1298,6 +1301,7 @@ OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
 assert_rc "S6 claim over the moved holder works" 0 "$RC"
 [ "$(cat "$H/.claude/state/orchestrator")" = sess-alpha ] && ok "S6 ...marker names alpha" || bad "S6 ...marker names alpha" "$OUT"
 assert_has "S6 ...and says why" "it now belongs to scope ff, so it no longer holds this seat" "$OUT"
+assert_lacks "S6 ...not the contradictory 'no longer running' line" "no longer running" "$OUT"
 kill "$S6B" 2>/dev/null
 
 say ""

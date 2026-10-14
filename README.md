@@ -250,7 +250,9 @@ list the second project's root under `scopes`:
   in `<config-dir>/sessions/`), never where it later `cd`s. The longest root that is that
   directory or one of its parents wins, on whole path segments. A session started in a linked
   git worktree that matches no root counts as the same subpath of its main checkout, so a lane
-  worktree of `ff` belongs to `ff`. Everything else is the implicit scope `default`, which keeps
+  worktree of `ff` belongs to `ff`, but only while that worktree exists: once it is removed, a
+  session still running from it and the drop file it wrote (its header names the worktree path)
+  fall back to scope `default`. Everything else is the implicit scope `default`, which keeps
   today's top-level keys and today's paths.
 - A scope has no coordinator until one of its sessions runs `/orchestrator claim`; until then its
   sessions get no banner, exactly like a machine without a seat.

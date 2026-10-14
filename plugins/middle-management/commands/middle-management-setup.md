@@ -226,7 +226,14 @@ cat > "$CFG" <<'JSON'
   ]
 }
 JSON
-if bash "$CHECK" validate; then
+# With scopes: every root must exist and resolve to its own scope (validate cannot stat paths).
+scopes_ok() {
+  jq -r '.scopes[]? | [.name, .root] | @tsv' "$CFG" | while IFS=$'\t' read -r n r; do
+    [ -d "$r" ] && [ "$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/scope.py" of "$r" | cut -f1)" = "$n" ] \
+      || { echo "scope $n: FAILED (root missing, or it resolves to another scope)"; exit 1; }
+  done
+}
+if bash "$CHECK" validate && scopes_ok; then
   rm -f "$CFG.bak"; echo "written and valid: $CFG"
 elif [ -f "$CFG.bak" ]; then
   mv "$CFG.bak" "$CFG"; echo "invalid — previous config restored, nothing changed"
@@ -238,16 +245,9 @@ fi
 If validation failed, show the user the JSON you tried to write and what the
 schema requires, then correct it and run the block again.
 
-With scopes, also check that each root exists and resolves to its own scope;
-a failure restores the backup like an invalid config:
-
-```bash
-CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"; CFG="$(bash "$CHECK" file)"
-jq -r '.scopes[]? | [.name, .root] | @tsv' "$CFG" | while IFS=$'\t' read -r n r; do
-  [ -d "$r" ] && [ "$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/scope.py" of "$r" | cut -f1)" = "$n" ] \
-    && echo "scope $n: ok" || echo "scope $n: FAILED (root missing, or it resolves to another scope)"
-done
-```
+A `scope <name>: FAILED` line means a scope root is missing or resolves to another
+scope (a longer root shadows it); the block then restores the backup exactly as for
+an invalid config. Fix the root and run the block again.
 
 ## Step 4 — summarise
 

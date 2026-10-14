@@ -208,7 +208,7 @@ if [ -n "$SCOPE" ] && [ -n "$HNAME" ]; then
     | jq -r --arg id "$HID" 'select(.sessionId==$id and .kind == "interactive")
         | [.pid, (.cwd | if type == "string" and . != "" then . else "-" end)] | @tsv' 2>/dev/null \
     | { while IFS=$'\t' read -r pid c; do kill -0 "$pid" 2>/dev/null && { printf '%s' "$c"; break; }; done; })
-  HS=$(python3 "$DIR/scope.py" of "$HCWD" 2>/dev/null) && [ "${HS%%$'\t'*}" != "$SCOPE" ] \
+  [ -n "$HCWD" ] && HS=$(python3 "$DIR/scope.py" of "$HCWD" 2>/dev/null) && [ "${HS%%$'\t'*}" != "$SCOPE" ] \
     && { HSCOPE="${HS%%$'\t'*}"; HNAME=""; }
 fi
 moved_note() {  # the reason a living holder does not count, when that is the reason
@@ -316,8 +316,8 @@ case "${1:-status}" in
     fi
     # NB: an `[ … ] && echo` chain here would make a successful claim exit 1.
     if [ -n "$HID" ] && [ -z "$HNAME" ]; then
-      echo "(The previous holder is no longer running — marker taken over.)"
-      moved_note
+      if [ -n "$HSCOPE" ]; then moved_note
+      else echo "(The previous holder is no longer running — marker taken over.)"; fi
     fi
     # Issue #2: the first coordinator of the day delivers the ritual (the user's to-do list at least)
     # when the headless run did not. The window is the epoch of the last delivered ritual.
@@ -349,6 +349,7 @@ case "${1:-status}" in
       if [ "${2:-}" != "$HID" ]; then
         echo "REFUSED: the marker points at $HID — this session is not the holder, and the holder"
         echo "is not visibly alive right now (ended OR in the middle of a reconnect)."
+        moved_note
         echo "Only if your user says the coordinator session is gone:"
         echo "  bash $SELF release $HID"
         exit 1
