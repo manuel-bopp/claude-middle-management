@@ -254,7 +254,7 @@ an invalid config. Fix the root and run the block again.
 Tell the user what is protected now: per checkout the name, root, base and
 effective worktree directory; whether blanket staging is blocked; the board
 path; per scope its root, board and seat marker
-(`<config dir>/state/scopes/<name>/orchestrator`), and that 0.9.0 sessions pick
+(`<config dir>/state/scopes/<name>/orchestrator`), and that 0.10.0 sessions pick
 a new scope up on their next message, older-version sessions only after a
 restart. Add the two operational facts: implementation work goes into a worktree
 via `/wt <name> new <topic>`, and the config takes effect immediately — the
@@ -412,7 +412,7 @@ CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; MR="$CFG_DIR/middle-management-morning"; UNITS="$HOME/.config/systemd/user"
 FB=""   # the fallback file path the user named, or empty
 mkdir -p "$MR" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-headless.sh,config-check.sh,open-items.py,peer-state.py,unit-failure-alarm.sh} "$MR/"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-headless.sh,config-check.sh,open-items.py,peer-state.py,scope.py,unit-failure-alarm.sh} "$MR/"
 for u in orch-morning-ritual.service orch-morning-ritual.timer; do
   sed "s|__MORNING_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g; s|__FALLBACK_ENV__|$FB|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"

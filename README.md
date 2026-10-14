@@ -259,7 +259,7 @@ list the second project's root under `scopes`:
 
 | Per scope | Machine-wide (unchanged) |
 |---|---|
-| the seat marker: `default` = `<config-dir>/state/orchestrator`, a named scope = `<config-dir>/state/scopes/<name>/orchestrator` | the session registry and the session log (one log for all scopes; no per-scope `sessionLog` in 0.9.0) |
+| the seat marker: `default` = `<config-dir>/state/orchestrator`, a named scope = `<config-dir>/state/scopes/<name>/orchestrator` | the session registry and the session log (one log for all scopes; no per-scope `sessionLog` in 0.10.0) |
 | the board (`default` = the top-level `board`) | the open-items drop dir (each file belongs to the scope of the cwd in its header line) |
 | the role banners, the coordinator's worker list and the `orch*` name route | `notifyCommand`, `surgicalStaging`, `protectedCheckouts`, `/wt` and the lane reaper |
 | the tab list: `peer-state.py --wrapped --scope <name>` (also `--waiting`, `--all`) | the long-runner hook, the review gate, keep-warm |
@@ -281,12 +281,21 @@ list the second project's root under `scopes`:
   add, nest, remove or rename a scope (`/middle-management-setup` lists them). A removed or
   renamed scope leaves `<config-dir>/state/scopes/<old>/` behind; once its seat is released you
   may delete it (re-adding the old name would otherwise revive it).
+- **Morning ritual:** the interactive ritual is per scope (its sessions, board, cleanup and
+  `open-items.py todo` are the caller's scope's; its `window` file lives under the scope's state
+  dir, so `claim`'s "no morning ritual was delivered today" line is per scope too). The headless
+  runner and its timer serve the **default scope only**: they run in no session, so `todo`
+  resolves to the default board. A named scope's coordinator runs the ritual itself. The
+  delivered-keys file stays machine-wide (keys are unique per session).
+- **Expired seats:** `claim`'s stale and expired takeover (and its wrap backfill) only ever look
+  at the holder of the caller's own scope's marker. A holder alive in another scope is not
+  expired, it simply no longer holds the seat, so it is never backfilled.
 - **Requirements:** `python3` resolves scopes once a `scopes` key exists (the role hook,
   `/orchestrator` including `status` and `release`, the heartbeat); git 2.31 or newer for the
   worktree mapping (older git maps no worktree, never a wrong one). Without the key nothing of
   this runs and every file, banner and marker path stays as before.
 - **Upgrade:** the default scope is untouched (no migration, the current coordinator keeps its
-  seat). Sessions pick up a new scope with their next message once they run 0.9.0 hooks; older
+  seat). Sessions pick up a new scope with their next message once they run 0.10.0 hooks; older
   sessions only after a restart. Where the heartbeat is installed, re-run step 5 of
   `/middle-management-setup` so its copy gets `scope.py`.
 
@@ -361,6 +370,7 @@ from the timer `orch-morning-ritual.timer` (weekdays 07:30, no catch-up after a 
 step 7 installs. Every path comes from the config (`sessionLog`, `board`,
 `protectedCheckouts[].root`, `notifyCommand`); state lives in `<config-dir>/state/morning-ritual/`
 (`window` = epoch of the last delivered ritual, `delivered` = to-do keys already sent, `runs/`).
+With [scopes](#scopes) it serves the default scope only.
 
 1. **Empty window.** No change in the session log, the board, the open-items drops, the commits of
    any protected checkout (after a best-effort fetch) or `MM_MORNING_WATCH` since `window` → one

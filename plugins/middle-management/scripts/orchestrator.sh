@@ -321,7 +321,9 @@ case "${1:-status}" in
     fi
     # Issue #2: the first coordinator of the day delivers the ritual (the user's to-do list at least)
     # when the headless run did not. The window is the epoch of the last delivered ritual.
-    WIN="$(cat "$CFG_DIR/state/morning-ritual/window" 2>/dev/null)"; case "$WIN" in ''|*[!0-9]*) WIN=0 ;; esac
+    # With scopes the window is this seat's scope's (<scope state dir>/morning-ritual/window); for
+    # the default scope that is <config dir>/state/morning-ritual/window, as without scopes.
+    WIN="$(cat "$(dirname "$MARKER")/morning-ritual/window" 2>/dev/null)"; case "$WIN" in ''|*[!0-9]*) WIN=0 ;; esac
     MIDNIGHT=$(( $(date +%s) - 10#$(date +%H) * 3600 - 10#$(date +%M) * 60 - 10#$(date +%S) ))
     if [ "$WIN" -lt "$MIDNIGHT" ]; then
       echo "No morning ritual was delivered today — run middle-management:morning-ritual now (step 6, your user's to-do list, at least)."

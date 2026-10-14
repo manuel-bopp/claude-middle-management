@@ -22,7 +22,11 @@ With scopes (a `scopes` key in the config; middle-management skill, "Scopes"), e
 your scope's: sessions from `peer-state.py --all --scope <yours>`, your scope's board (the one
 your banner names) in step 4, and in step 5 only resources owned by your scope's sessions.
 Another scope's lanes, servers and worktrees are never yours to clean, even when your board does
-not name them; cross-scope findings go to that scope's coordinator.
+not name them; cross-scope findings go to that scope's coordinator. Step 6 (`open-items.py todo`)
+already reads your scope's board and drop files. Your window file is your scope's:
+`<config dir>/state/scopes/<name>/morning-ritual/window` for a named scope (the default scope keeps
+`<config dir>/state/morning-ritual/window`); stamp that one in step 7. The headless runner serves
+the default scope only, so a named scope's coordinator runs this ritual itself.
 
 ## 1. Messages delta — CUSTOMIZE
 

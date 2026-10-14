@@ -2,7 +2,9 @@
 # middle-management plugin — the coordinator's morning ritual as an unattended `claude -p` run.
 # Consumers: templates/systemd/orch-morning-ritual.service (started by orch-morning-ritual.timer;
 #   /middle-management-setup step 7 copies this script next to config-check.sh, open-items.py,
-#   peer-state.py and unit-failure-alarm.sh), manual runs, tests/morning-headless.sh.
+#   peer-state.py, scope.py and unit-failure-alarm.sh), manual runs, tests/morning-headless.sh.
+#   With a "scopes" key it serves the DEFAULT scope only (README "Scopes"): it runs in no session,
+#   so open-items.py todo resolves to the default scope's board and drop files.
 #   Calls config-check.sh (paths), open-items.py (todo, todo --delivered), the notifyCommand config
 #   key (every message it sends); leaves the cause file unit-failure-alarm.sh sends on failure.
 #

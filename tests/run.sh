@@ -1160,9 +1160,9 @@ assert_has "S1 a peer with an empty registry cwd still shows by name" "Current w
 kill "$S1P" 2>/dev/null
 
 # S0 acceptance 1, byte for byte: without a scopes key the hook and the seat script print exactly
-# what 0.8.0 (commit 8c9fdbf) printed, for a coordinator, a worker, a stale marker and no seat.
+# what upstream 0.9.0 (commit 8d41d58) printed, for a coordinator, a worker, a stale marker and no seat.
 OLD="$(mktemp -d -p "$TMPBASE")"
-if git -C "$ROOT" archive 8c9fdbf plugins/middle-management 2>/dev/null | tar -x -C "$OLD" 2>/dev/null; then
+if git -C "$ROOT" archive 8d41d58 plugins/middle-management 2>/dev/null | tar -x -C "$OLD" 2>/dev/null; then
   OP="$OLD/plugins/middle-management"
   H="$(new_home)"; mkdir -p "$H/logs" "$H/ad" "$H/.claude/open-items"; : > "$H/logs/session-log.md"
   printf '# board\n' > "$H/board.md"
@@ -1175,7 +1175,7 @@ if git -C "$ROOT" archive 8c9fdbf plugins/middle-management 2>/dev/null | tar -x
     local old
     new="$(printf '{"session_id":"%s"}' "$2" | HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_PLUGIN_ROOT="$P" bash "$ROLE" 2>&1)"
     old="$(printf '{"session_id":"%s"}' "$2" | HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_PLUGIN_ROOT="$OP" bash "$OP/hooks/session-role.sh" 2>&1 | sed "s|$OP|$P|g")"
-    [ "$new" = "$old" ] && ok "S0 byte-identical to 0.8.0: $1" || bad "S0 byte-identical to 0.8.0: $1" "$(diff <(printf '%s\n' "$old") <(printf '%s\n' "$new"))"
+    [ "$new" = "$old" ] && ok "S0 byte-identical to upstream 0.9.0: $1" || bad "S0 byte-identical to upstream 0.9.0: $1" "$(diff <(printf '%s\n' "$old") <(printf '%s\n' "$new"))"
   }
   ostatus() { HOME="$H" CLAUDE_CONFIG_DIR="" bash "$1" status 2>&1 | sed "s|$OP|$P|g"; }
   golden "no seat (alpha)" sess-alpha
@@ -1193,7 +1193,7 @@ if git -C "$ROOT" archive 8c9fdbf plugins/middle-management 2>/dev/null | tar -x
     && ok "S0 state dir holds the marker only" || bad "S0 state dir holds the marker only" "$(find "$H/.claude/state")"
   kill "$G0B" "$G0G" "$G0N" 2>/dev/null
 else
-  say "  skip- S0 golden diff: commit 8c9fdbf is not in this clone"
+  say "  skip- S0 golden diff: commit 8d41d58 is not in this clone"
 fi
 
 # S2 the shape filter
@@ -1303,6 +1303,39 @@ assert_rc "S6 claim over the moved holder works" 0 "$RC"
 assert_has "S6 ...and says why" "it now belongs to scope ff, so it no longer holds this seat" "$OUT"
 assert_lacks "S6 ...not the contradictory 'no longer running' line" "no longer running" "$OUT"
 kill "$S6B" 2>/dev/null
+
+# S7 upstream 0.9.0's expired seat, per scope: only the holder of the caller's scope's marker can
+# expire; a holder alive in another scope is never backfilled; the ritual window is per scope.
+s7() {  # $1 = holder's start dir under the new home (ff or ad): ff seat held by beta, quiet 400 min, log completed, no closing line
+  H="$(new_home)"; mkdir -p "$H/ff" "$H/ad" "$H/logs" "$H/.claude/projects/-tmp-x" "$H/.claude/state/scopes/ff"
+  mine "$H" "$H/ff"; S7B="$(add_peer "$H" beta interactive "$H/$1")"
+  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"Bundle live, more tomorrow."}],"usage":{"input_tokens":7}}}\n' \
+    > "$H/.claude/projects/-tmp-x/sess-beta.jsonl"
+  touch -d "400 minutes ago" "$H/.claude/projects/-tmp-x/sess-beta.jsonl"
+  printf '### 09:10 – [beta] – Lane\n- Status: completed\n' > "$H/logs/session-log.md"
+  printf 'sess-beta\n' > "$H/.claude/state/scopes/ff/orchestrator"; printf 'sess-other\n' > "$H/.claude/state/orchestrator"
+  printf '{"scopes":[{"name":"ff","root":"%s/ff","board":"%s/ffboard.md"}]}' "$H" "$H" > "$H/.claude/middle-management.json"
+}
+s7 ff
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "S7 an expired holder of the SAME scope loses the ff seat" 0 "$RC"
+assert_has "S7 ...through the expiry route" "EXPIRED SEAT" "$OUT"
+assert_has "S7 ...with its wrap backfilled" "BACKFILLED" "$OUT"
+[ "$(cat "$H/.claude/state/scopes/ff/orchestrator")" = sess-alpha ] && [ "$(cat "$H/.claude/state/orchestrator")" = sess-other ] \
+  && ok "S7 ff marker taken, default marker untouched" || bad "S7 ff marker taken, default marker untouched" "$OUT"
+assert_has "S7 no ritual window for ff -> the reminder" "No morning ritual was delivered today" "$OUT"
+mkdir -p "$H/.claude/state/morning-ritual"; date +%s > "$H/.claude/state/morning-ritual/window"
+assert_has "S7 the default scope's window does not count for ff" "No morning ritual was delivered today" "$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"
+mkdir -p "$H/.claude/state/scopes/ff/morning-ritual"; date +%s > "$H/.claude/state/scopes/ff/morning-ritual/window"
+assert_lacks "S7 ff's own window today -> no reminder" "No morning ritual" "$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"
+kill "$S7B" 2>/dev/null
+s7 ad
+OUT="$(HOME="$H" CLAUDE_CONFIG_DIR="" bash "$ORCH" claim 2>&1)"; RC=$?
+assert_rc "S7 a holder alive in ANOTHER scope (quiet 400 min) does not block the ff claim" 0 "$RC"
+assert_has "S7 ...it moved, it did not expire" "it now belongs to scope default" "$OUT"
+assert_lacks "S7 ...no expiry route" "EXPIRED SEAT" "$OUT"
+assert_lacks "S7 ...and no backfill for a session that is still working" "seat expired" "$(cat "$H/logs/session-log.md")"
+kill "$S7B" 2>/dev/null
 
 say ""
 say "== peer-state (tests/peer-state.sh) =="
