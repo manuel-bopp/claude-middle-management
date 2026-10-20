@@ -25,7 +25,7 @@ mkdir -p "$C/sessions"
 A=aaaaaaaa-1111-4000-8000-000000000001   # this session: live
 Z=bbbbbbbb-2222-4000-8000-000000000002   # another session: gone
 # oi <sessionId> args...: run as that session
-oi() { local s="$1"; shift; HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_CODE_SESSION_ID="$s" python3 "$OI" "$@" 2>&1; }
+oi() { local s="$1"; shift; HOME="$H" CLAUDE_CONFIG_DIR="" T3CODE_HOME="" MM_SESSION_LOG="$H/session-log.md" CLAUDE_CODE_SESSION_ID="$s" python3 "$OI" "$@" 2>&1; }
 sleep 300 >/dev/null 2>&1 </dev/null & LIVEPID=$!; PEERS="$PEERS $LIVEPID"
 printf '{"pid":%s,"sessionId":"%s","name":"alpha","cwd":"/tmp/x","kind":"interactive"}\n' "$LIVEPID" "$A" > "$C/sessions/$LIVEPID.json"
 printf '{"pid":999999,"sessionId":"%s","name":"zulu","cwd":"/tmp/z","kind":"interactive"}\n' "$Z" > "$C/sessions/999999.json"
@@ -103,6 +103,25 @@ OUT="$(oi "$A" list)"
 assert_has "bbbbbbbb-W10 on the board does not file bbbbbbbb-W1" "bbbbbbbb-W1 " "$OUT"
 assert_has "a gone session without WRAPPED -> died unwrapped" "died unwrapped" "$OUT"
 assert_has "list names the header" "# zulu · $Z" "$OUT"
+
+say "== list: a gone T3 session is asleep, not dead (plan 1.5) =="
+Y=cccccccc-3333-4000-8000-000000000003; YF="$D/cccccccc-session-notes.md"
+TH=mcp:11111111-2222-4000-8000-000000000003
+printf '# yankee · %s · /tmp/y\n- W1 · owner: user · asleep lane question\n' "$Y" > "$YF"
+mkdir -p "$H/.t3/userdata/logs/provider"
+printf '{"session_id":"%s"}\n' "$Y" > "$H/.t3/userdata/logs/provider/events.${TH/:/-}.log"
+OUT="$(oi "$A" list)"
+assert_has "a provider log names it -> asleep in T3 thread <id>, wake it" "$YF · asleep in T3 thread $TH → wake via t3_thread_send $TH" "$OUT"
+assert_lacks "...never died unwrapped / resume" "$YF · died unwrapped" "$OUT"
+assert_has "...the other gone session still reads died unwrapped" "bbbbbbbb-session-notes.md · died unwrapped" "$OUT"
+rm -f "$H/.t3/userdata/logs/provider/events.${TH/:/-}.log"
+mkdir -p "$C/state"; printf '{"sessionId":"%s","threadId":"%s"}\n' "$Y" "$TH" > "$C/state/orchestrator.t3.json"
+OUT="$(oi "$A" list)"
+assert_has "a sidecar names it (no provider log) -> asleep in T3" "$YF · asleep in T3 (named by a coordinator sidecar" "$OUT"
+printf '## 2026-10-20\n\n### 10:00 – [yankee] – done\n- Status: completed\n- Session: closed · %s\n' "$Y" > "$H/session-log.md"
+OUT="$(oi "$A" list)"
+assert_has "a closed marker -> not asleep, the old verdict" "$YF · died unwrapped" "$OUT"
+rm -f "$YF" "$C/state/orchestrator.t3.json" "$H/session-log.md"
 OUT="$(oi "$A" add --owner user "next after board keys")"
 assert_has "numbering also skips keys already on the board (W10) -> W11" "aaaaaaaa-W11" "$OUT"
 

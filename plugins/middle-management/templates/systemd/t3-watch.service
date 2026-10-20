@@ -1,0 +1,19 @@
+# middle-management plugin: USER unit template, started by t3-watch.timer, never enabled itself.
+# One tick of the T3 Code watcher (scripts/t3-watch.py): limits, pending clicks, stuck runs, lost
+# reports, failures, and the topics tick. /middle-management-setup installs it into
+# ~/.config/systemd/user/ with the placeholders filled in (step 8); __T3WATCH_DIR__ is a COPY of the
+# scripts t3-watch.py, t3-wake.sh, topics.py, open-items.py, peer-state.py, config-check.sh, scope.py,
+# unit-failure-alarm.sh, because the plugin cache path changes with every update.
+# Environment= is written by that step because the systemd user manager inherits no shell
+# environment: without it the watcher finds neither its config dir nor curl, jq and claude (probe).
+# TimeoutStartSec: one probe call may take 2 min and the topics tick 2 min per scope.
+[Unit]
+Description=middle-management: T3 Code watcher tick
+OnFailure=unit-failure-alarm@%n.service
+
+[Service]
+Type=oneshot
+Environment=CLAUDE_CONFIG_DIR=__CONFIG_DIR__
+Environment=PATH=__PATH__
+ExecStart=/usr/bin/env python3 __T3WATCH_DIR__/t3-watch.py
+TimeoutStartSec=10min

@@ -1,7 +1,7 @@
 ---
 description: Claim, release, or show the coordinator seat for parallel Claude Code sessions (middle-management)
-argument-hint: "[claim|release [<sessionId>]|status]"
-allowed-tools: ["Bash"]
+argument-hint: "[claim [--thread <id>]|release [<sessionId>]|status|t3-bind ...|t3-handover ...]"
+allowed-tools: ["Bash", "mcp__t3-code__t3_thread_list", "mcp__t3-code__schedule_task", "mcp__t3-code__update_scheduled_task", "mcp__t3-code__delete_scheduled_task", "mcp__t3-code__t3_thread_send", "mcp__t3-code__t3_thread_launch"]
 ---
 
 # Coordinator seat
@@ -60,6 +60,33 @@ the marker that decides which one.
    - on the "no session registry entry" error: the script ran outside this session's
      process tree (a sandboxed bash does that) — rerun it as a normal Bash call in this
      session.
+
+## T3 Code (this session runs in a T3 thread: `T3CODE_HOME` is set)
+
+A worker's report reaches a T3 coordinator only through its report task, a webhook bound to the
+coordinator's thread (README, "T3 Code"). A script cannot call MCP tools, so you do these steps:
+
+1. **Claim:** `t3_thread_list` gives `currentThreadId`. Run
+   `orchestrator.sh claim --thread <currentThreadId>`. A successor the holder named with
+   `t3-handover` takes the seat this way even while the holder is alive.
+2. **Report task:** `schedule_task` with `type: webhook`, bound to this thread, prompt exactly
+   `{{body.prompt}}` (t3-wake.sh puts "Report from <from> (thread <id>): <text>" there, and a bare
+   `Keepalive`, never wrapped).
+3. **Bind:** `orchestrator.sh t3-bind --thread <id> --title <title> --task <taskId> --model <model>`,
+   with the task's URL on **stdin** (never in argv, never printed, never in a reply). It writes the
+   sidecar 0600 and, on a takeover, wakes the previous holder once.
+4. **Model or effort change:** `update_scheduled_task` on the report task (or claim + t3-bind again).
+   A webhook run keeps the model the task was created with.
+5. **Handover:** launch the successor thread (`t3_thread_launch`), then
+   `orchestrator.sh t3-handover --to-thread <id> --to-title <title>`. Keep seat and report task
+   until the successor has claimed; forward late reports to it with `t3_thread_send`.
+6. **Release / wrap:** `orchestrator.sh release` (it deletes the sidecar and prints the task id),
+   then `delete_scheduled_task <that id>`.
+7. **Asleep holder:** a `REFUSED ... asleep in T3 thread` means the holder's process ended but its
+   thread still holds the seat. Wake it with `t3_thread_send <threadId>`. `--t3-asleep-ok` on `claim`
+   or `release <id>` only on your user's explicit word; then delete the old report task it prints.
+
+`status` shows thread, title, report task, an open handover and the previous holder, never the URL.
 
 Only run `claim` when the user asked for THIS session to coordinate. A hook hint that a
 previous coordinator ended is not that request.

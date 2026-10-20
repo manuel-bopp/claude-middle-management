@@ -2,7 +2,9 @@
 # middle-management plugin — UserPromptSubmit hook.
 # Consumers: hooks/hooks.json (UserPromptSubmit registration). Reads the coordinator
 # marker written by scripts/orchestrator.sh; resolves every path through
-# scripts/config-check.sh; runs scripts/open-items.py count in the coordinator branch.
+# scripts/config-check.sh; runs scripts/open-items.py count in the coordinator branch. Reads the
+# T3 sidecar <marker dir>/orchestrator.t3.json (written by scripts/orchestrator.sh t3-bind) for the
+# T3 lines; never its reportUrl.
 #
 # Exactly ONE session coordinates, every other session is a worker. Two sources for
 # "who coordinates", in this order:
@@ -18,7 +20,9 @@
 # route the sessionId is the identity and .name is display only; scripts/orchestrator.sh
 # follows the same rule (liveness rule F1).
 # With a "scopes" key in the config (README "Scopes") the marker, the board and the session list
-# are those of this session's scope, resolved by scripts/scope.py from its registry cwd.
+# are those of this session's scope, resolved by scripts/scope.py from its registry cwd. With
+# "scopeMode": "per-root" every project root is a scope, and a session outside all of them
+# (scope "none") is standalone: no banner.
 set -u
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -74,12 +78,13 @@ RAW=$(cat "$REG"/*.json 2>/dev/null \
 # LIVE = name<TAB>sessionId: every session, or with scopes only those of this session's scope (by
 # the directory each was started in). A failing resolver fails closed: no banner, never a wrong one.
 SCOPE=""; OF=""; PS_SCOPE=""
-if [ -n "$RAW" ] && jq -e '(.scopes | arrays | length) > 0' "$CFG_FILE" >/dev/null 2>&1; then
+if [ -n "$RAW" ] && jq -e '([.scopes | arrays | .[]] | length > 0) or (.scopeMode == "per-root")' "$CFG_FILE" >/dev/null 2>&1; then
   MY_CWD=$(printf '%s\n' "$RAW" | awk -F'\t' -v id="$MY_ID" '$3==id{print $1; exit}')
   S=$(python3 "$PLUGIN_ROOT/scripts/scope.py" of "$MY_CWD" 2>/dev/null) \
     && LIVE=$(printf '%s\n' "$RAW" | python3 "$PLUGIN_ROOT/scripts/scope.py" filter "${S%%$'\t'*}" 2>/dev/null) \
     || { printf 'middle-management: scopes are configured but %s/scripts/scope.py failed (python3?), no role this message; fix it or remove the scopes key (/middle-management-setup)\n' "$PLUGIN_ROOT"; exit 0; }
   IFS=$'\t' read -r SCOPE SDIR BOARD <<<"$S"
+  [ "$SCOPE" = none ] && exit 0      # per-root: outside every project root = standalone
   MARKER="$SDIR/orchestrator"; OF=" of scope $SCOPE"; PS_SCOPE=" --scope $SCOPE"
 else
   LIVE=$(printf '%s\n' "$RAW" | cut -f2-)
@@ -89,12 +94,21 @@ fi
 name_of() { printf '%s\n' "$LIVE" | awk -F'\t' -v id="$1" '$2==id{print $1; exit}'; }
 
 ORCH=""; ORCH_ID=""; ORCH_SRC=""; STALE=""
+# T3 Code (plan 1.1, 1.5): the seat's thread binding. side reads a field, never reportUrl.
+SIDE="$(dirname "$MARKER")/orchestrator.t3.json"
+side() { jq -r "$1" "$SIDE" 2>/dev/null; }
+SIDE_SID=""; [ -f "$SIDE" ] && SIDE_SID=$(side '.sessionId // empty')
+T3T=$(side '"T3 thread \"\(.title // "?")\" (\(.threadId // "?"))"')
 if [ -f "$MARKER" ]; then
   MID=$(head -1 "$MARKER" | tr -d '[:space:]')
   if [ -n "$MID" ]; then
     # alive = the id is in LIVE (not: it has a name) — a nameless coordinator is still one
     if printf '%s\n' "$LIVE" | cut -f2 | grep -qxF "$MID"; then
       ORCH_ID="$MID"; ORCH="$(name_of "$MID")"; ORCH_SRC="marker"
+    # Asleep is not gone (plan 1.5): T3 ended the idle coordinator's process, its thread still wakes
+    # on every message, so this is not a stale seat and nobody is offered its release.
+    elif [ -n "$SIDE_SID" ] && [ "$SIDE_SID" = "$MID" ]; then
+      ORCH_ID="$MID"; ORCH="asleep"; ORCH_SRC="t3"
     else STALE=1; fi
   fi
 fi
@@ -140,6 +154,24 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
   printf 'pattern) — not when memory runs out. Morning ritual, step 5.\n'
   printf 'Stopping a lane unit and removing its merged, clean, pushed worktree is housekeeping, not\n'
   printf 'destruction — done unasked; anything dirty, unpushed or unmerged stays and goes to your user.\n'
+  if [ -n "${T3CODE_HOME:-}" ]; then
+    if [ "$SIDE_SID" = "$MY_ID" ]; then
+      printf 'T3 Code: your seat is bound to %s, report task %s. Worker reports arrive by\n' "$T3T" "$(side '.reportTaskId // "?"')"
+      printf 'themselves as turns of this thread (their Stop hook). Task or ask a worker with t3_thread_send <its thread id>\n'
+      printf '(that wakes it, also after settle); never peer-message or poke a T3 thread, and do not t3_thread_wait after\n'
+      printf 't3_thread_send: the answer comes by itself. After a model or effort change: update_scheduled_task on the\n'
+      printf 'report task (or claim + t3-bind again), else the report turns keep the old model. Handover: launch the\n'
+      printf 'successor thread, then orchestrator.sh t3-handover --to-thread <id> --to-title <t>; keep seat and report task\n'
+      printf 'until it claims. Once a wake "seat taken over by ..." arrives you are a worker: forward every report that\n'
+      printf 'still reaches you to the successor with t3_thread_send, finish your wrap, delete your report task last.\n'
+      printf 'Book every worker report that is not in the topics state yet, and every answer or OK of your user:\n'
+      printf 'python3 "%s/scripts/topics.py" entry --topic <key> ... or answer --topic <key> "<text>".\n' "$PLUGIN_ROOT"
+      printf 'A message that is exactly "Keepalive": answer exactly "OK" and nothing else.\n'
+    else
+      printf 'T3 Code: this seat has no thread binding yet, so no worker report reaches you. Create the report task\n'
+      printf 'and run orchestrator.sh t3-bind (/orchestrator, T3 branch).\n'
+    fi
+  fi
   if [ -n "$SCOPE" ]; then
     printf 'Scope %s: your workers, your board and your cleanup are this scope'"'"'s only. Other scopes\n' "$SCOPE"
     printf 'have their own coordinator; you may message that coordinator directly about anything that\n'
@@ -175,9 +207,33 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
     || printf 'Open-items inbox: the count failed; run python3 "%s/scripts/open-items.py" list\n' "$PLUGIN_ROOT"
   printf 'Current workers: %s\n' "$(printf '%s\n' "$LIVE" | cut -f1 | grep -vxF "$ORCH" | tr '\n' ' ')"
 else
-  printf 'Session role: WORKER%s ("%s"). The coordinator is "%s".\n' "$OF" "${MY_NAME:-unnamed}" "${ORCH:-unnamed}"
-  printf 'Peer messages go ONLY to "%s" — never to other workers; anything another session needs\n' "${ORCH:-unnamed}"
-  printf 'goes through the coordinator. When you finish or block, report there yourself.\n'
+  if [ -n "$SIDE_SID" ] && [ "$SIDE_SID" = "$ORCH_ID" ]; then
+    # The coordinator lives in a T3 thread: named by thread title + id, not by its changing peer name.
+    if [ "$ORCH_SRC" = t3 ]; then
+      printf 'Session role: WORKER%s ("%s"). The coordinator is asleep in %s; it is not gone, the next report wakes it.\n' "$OF" "${MY_NAME:-unnamed}" "$T3T"
+    else
+      printf 'Session role: WORKER%s ("%s"). The coordinator is %s ("%s").\n' "$OF" "${MY_NAME:-unnamed}" "$T3T" "${ORCH:-unnamed}"
+    fi
+    if [ -n "${T3CODE_HOME:-}" ]; then
+      printf 'Your report = the last text of your turn: the Stop hook delivers it to the coordinator. Never SendMessage\n'
+      printf 'or poke a T3 coordinator, never message other workers. Tools first, report last: only the final text\n'
+      printf 'block of a turn arrives. If the hook says "report NOT delivered", send it yourself with t3_thread_send.\n'
+      printf 'Book every READY / LIVE / blocked / question report first (key = lane dir or branch, the first entry creates it):\n'
+      printf 'python3 "%s/scripts/topics.py" entry --status <s> [--stage ready|live] [--waits-on "user · <q> · rec: <r>"] "<headline>"\n' "$PLUGIN_ROOT"
+      printf 'A message that is exactly "Keepalive": answer exactly "OK" and nothing else.\n'
+    else
+      printf 'Peer messages do not reach a T3 thread. Report with: bash "%s/scripts/t3-wake.sh" "%s" <file with the report>\n' "$PLUGIN_ROOT" "${MY_NAME:-worker}"
+      printf '(exit 0 = delivered); never message other workers.\n'
+    fi
+    if [ "$(side '.previous.sessionId // empty')" = "$MY_ID" ]; then
+      printf 'You handed the seat over: forward every report that still reaches you with t3_thread_send %s, finish\n' "$(side '.threadId // "?"')"
+      printf 'your wrap, and delete your old report task (delete_scheduled_task %s) as its last step.\n' "$(side '.previous.reportTaskId // "?"')"
+    fi
+  else
+    printf 'Session role: WORKER%s ("%s"). The coordinator is "%s".\n' "$OF" "${MY_NAME:-unnamed}" "${ORCH:-unnamed}"
+    printf 'Peer messages go ONLY to "%s" — never to other workers; anything another session needs\n' "${ORCH:-unnamed}"
+    printf 'goes through the coordinator. When you finish or block, report there yourself.\n'
+  fi
   printf 'You are the SUB-ORCHESTRATOR of your lane: plan review, build, diff review, screenshots and\n'
   printf 'report writing run in sub-agents with fresh context, each prompt naming its model and effort.\n'
   printf 'Every sub-agent writes long output to a FILE and returns you at most ten lines — up to twenty\n'
@@ -186,6 +242,7 @@ else
   printf 'that reads everything itself is full within the hour and dies with its lane.\n'
   printf 'Your lane ends with its resources released: unit stopped, worktree removed (/wt <name> done\n'
   printf '<topic>), the /wt list line proving it in your wrap. Need the slot longer? /wt <name> hold.\n'
+  [ -n "${T3CODE_HOME:-}" ] && printf 'A worktree under ~/.t3/worktrees/ belongs to T3: never /wt done or git worktree remove it.\n'
   [ -n "$BOARD" ] && printf 'The board %s is read-only for you — the coordinator is its only writer.\n' "$BOARD"
 fi
 # Both roles wrap, so these lines live outside the branches — one copy, no drift.

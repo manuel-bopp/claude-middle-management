@@ -7,7 +7,9 @@
 #            by hand: `orch-heartbeat.sh classify <transcript.jsonl>` when triaging a stall;
 #            itself, once per named scope (README "Scopes"), with OHB_SCOPE set.
 #            Nothing else calls this script. Calls poke-session.py, peer-state.py and, only with
-#            a "scopes" key in the config, scope.py (all beside it).
+#            a "scopes" key or "scopeMode": "per-root" in the config, scope.py (all beside it).
+#            Skips a coordinator bound to a T3 thread (sidecar orchestrator.t3.json next to its
+#            marker, written by orchestrator.sh t3-bind): t3-watch.py watches that one.
 #
 # One tick does:
 #   who coordinates  ->  is that session alive (liveness rule F1, incl. the procStart PID-reuse
@@ -61,7 +63,7 @@ ALARM_SINK=${OHB_ALARM_SINK:-}
 POKE_SINK=${OHB_POKE_SINK:-}
 
 TICK_NOTE=started
-SCOPED=""; jq -e '(.scopes | arrays | length) > 0' "$CFG_FILE" >/dev/null 2>&1 && SCOPED=1
+SCOPED=""; jq -e '([.scopes | arrays | .[]] | length > 0) or (.scopeMode == "per-root")' "$CFG_FILE" >/dev/null 2>&1 && SCOPED=1
 
 log() { printf '%s\n' "$*" >&2; }   # goes to the journal
 
@@ -367,6 +369,10 @@ in_scope() {
 # 1. Who coordinates? Marker first, then the name fallback session-role.sh implements.
 ID=""; NAME=""; SRC=""
 if [ -f "$MARKER" ]; then ID=$(head -1 "$MARKER" | tr -d '[:space:]'); SRC=marker; fi
+# A T3 coordinator sleeps after 30 idle minutes and reads as dead here; t3-watch.py covers it (plan 1.6).
+if [ -n "$ID" ] && [ "$(jq -r '.sessionId // empty' "$(dirname "$MARKER")/orchestrator.t3.json" 2>/dev/null || true)" = "$ID" ]; then
+  log "heartbeat: coordinator $ID is bound to a T3 thread, t3-watch covers it"; TICK_NOTE="t3-coordinator"; exit 0
+fi
 
 LIVENESS=0
 if [ -n "$ID" ]; then

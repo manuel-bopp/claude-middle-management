@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.11.0 - 2026-10-20
+
+**T3 Code mode.** Under T3 Code (`T3CODE_HOME` set) a thread's process ends after 30 minutes idle,
+peer messages do not reach it, and a sleeping coordinator read as dead. Now the coordinator binds
+its seat to its thread: `/orchestrator` (T3 branch) creates a webhook report task bound to the
+thread and runs the new `orchestrator.sh t3-bind` with the URL on stdin, which writes the sidecar
+`<marker dir>/orchestrator.t3.json` (0600; the URL is never printed, logged or put in argv). The
+new Stop hook `hooks/t3-report.sh` sends the last text of every turn of every other session in the
+scope through the new `scripts/t3-wake.sh` (delivered only on HTTP 202, else the session is told
+once and the failure is logged), skipping interim turns while its sub-agents run, repeats and a
+bare `OK`. A holder whose process ended but whose sidecar names it is "asleep in T3", not stale:
+the banner, `peer-state.py` (new `asleep (T3)` state and thread column) and `open-items.py` say so,
+and `claim` / `release <id>` refuse unless `--t3-asleep-ok` (only on the user's word). Handover:
+`t3-handover --to-thread --to-title`, `claim --thread` for the named successor, one "seat taken
+over" wake to the old holder. The single keep-alive text is `Keepalive`, answered with exactly
+`OK`. The heartbeat skips a coordinator with a sidecar. Wraps settle their sub-agent threads and
+then themselves, never archive; T3 worktrees are left to the coordinator's morning ritual (merged
+and settled only).
+
+**T3 watcher.** `scripts/t3-watch.py` plus `templates/systemd/t3-watch.{service,timer}` (every
+10 min, no model, setup step 8): usage limits (notify once, `onLimitCommand` once, a `Keepalive`
+retry into a limited coordinator or a one-call probe for limited workers every 30 min, then one
+"limit over" wake), clicks pending >10 min, runs stuck >3 h, other failures, lost reports, a
+handover open >30 min, a folder without coordinator; `--dry-run`, `--stats`. Token kept or minted
+by the new `scripts/t3-token.sh` (config `t3TokenFile`), ported from the retired `t3t` installer.
+Both talk to the T3 server in the new config key `t3Url` (setup writes it; default
+`http://127.0.0.1:$T3CODE_PORT`, port 8470 when unset).
+
+**Follow-through.** New `scripts/topics.py`: `entry` is the one writer of a topic (session-log
+entry with the new optional lines Topic / Stage / Waits on / Answered / Case / Case closed /
+Review / OK / Next, plus the state file `<config-dir>/state/topics/<scope>.json`); the table
+`<board>.topics.md`, a reminder digest per `remindAfterHours` inside `remindWindow` (inline up to
+three, else a page via `pageCommand`), the ledger shared with the morning ritual's to-do list, a
+daily digest of stale and un-OK'd topics; `answer`, `lint`, `stats`, `migrate`. The wrap writes its
+closing entry with `topics.py entry ... --review ... --closed` after its review loop.
+`open-items.py add` stamps new lines with ` · added: <time>`. New config keys `userName`, `okBy`,
+`remindAfterHours`, `remindWindow`, `pageCommand`.
+
+**Per-root scopes.** `scopeMode: "per-root"`: every project root (the main checkout of its git
+repo) is its own scope with its own seat, sidecar, topics file and watcher pass, named
+`<basename>-<6 hex>`; no catch-all, a session outside every root is standalone (scope `none`).
+Explicit `scopes` roots still win.
+
+**Sub-agents.** New skill `middle-management:work-packages` (report file first, results appended
+at once, resume with `SendMessage` before a respawn), the PreToolUse hook
+`hooks/require-work-packages.sh` (refuses an `Agent` prompt without a `Report file:` line) and
+the SubagentStop hook `hooks/subagent-report-check.sh` (holds a sub-agent once that did not touch
+its report). `workPackagesGate: false` turns both off.
+
+**Upgrade.** Without `T3CODE_HOME`, a sidecar or the new keys, every banner and file stays as in
+0.10.0, apart from the work-packages gate, which is on by default. `config-check.sh validate`
+checks the shapes of the new keys. Under T3 the coordinator re-claims once (report task +
+`t3-bind`). Running sessions need `/reload-plugins` or a restart; re-run setup steps 5-8 where
+installed, so the copies are refreshed.
+
 ## 0.10.0 - 2026-10-14
 
 **Scopes: an independent coordinator per project root.** One config dir used to mean one seat,

@@ -3,8 +3,10 @@
 
 Consumers: scripts/orchestrator.sh (stale-seat check), scripts/orch-heartbeat.sh (keep-warm,
   reads --json from its installed copy), the coordinator by hand, the middle-management skill,
-  the role hook's banner (hooks/session-role.sh prints the --wrapped/--waiting [--scope] hint).
-  Nothing else calls it.
+  the role hook's banner (hooks/session-role.sh prints the --wrapped/--waiting [--scope] hint),
+  scripts/open-items.py and scripts/topics.py (imported), tests/peer-state.sh, tests/t3-seat.sh.
+  Reads T3 Code's provider logs (thread column) and the T3 sidecars orchestrator.t3.json (never
+  their reportUrl).
 
 Why it exists: asking a session how it is doing costs THAT session its whole conversation as
 fresh input tokens once it has fallen out of cache - measured on one machine in one morning:
@@ -13,7 +15,7 @@ sessions to close their tab. Everything below comes from the registry, the trans
 the session log. No socket, no message, no model turn: the target session pays nothing.
 
 Usage: peer-state.py [--all|--wrapped|--waiting] [--name N] [--session-id ID] [--cwd PATH] [--scope NAME] [--json]
-  (no flags)        table of LIVE sessions, most recently active first
+  (no flags)        table of LIVE sessions (and those asleep in T3), most recently active first
   --all             include sessions whose process is gone
   --wrapped         only sessions that read as finished, as a list to act on (implies --all)
   --waiting         only live sessions that may be waiting on their user: "permission" (a tool
@@ -28,13 +30,17 @@ Usage: peer-state.py [--all|--wrapped|--waiting] [--name N] [--session-id ID] [-
   --scope NAME      only sessions of this coordinator scope, by the directory each was started in
                     (its registry entry); "default" = every session outside the listed roots
   --json            every field, for shell consumers
-Env: CLAUDE_CONFIG_DIR (default ~/.claude). The session log is resolved in three steps -
+T3 Code: `thread` = the session's T3 thread, from the ONE provider log keyed "session_id":"<sid>"
+  (none or several -> null). `asleep_t3` (LIVE column "asleep (T3)"): the process is gone, but a
+  T3 thread or a coordinator sidecar names the session and no closed marker wrapped it: a T3
+  thread wakes on the next message, so it is not dead. `wrapped` stays sessionId-based.
+Env: CLAUDE_CONFIG_DIR (default ~/.claude), T3CODE_HOME (default ~/.t3). The session log is resolved in three steps -
   $MM_SESSION_LOG, then "sessionLog" in <config dir>/middle-management.json (~ allowed), then
   ~/logs/session-log.md; scripts/config-check.sh session-log answers the same for shell callers.
   The rotated days next to it (<log dir>/archive/YYYY-MM-DD.md) are read too, for closed markers
   only. Its format is the frozen contract documented in the README, section "The session log".
 """
-import argparse, datetime, glob, json, os, re, sys, time
+import argparse, datetime, glob, json, os, re, subprocess, sys, time
 
 CFG = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 REG_DIR = os.path.join(CFG, "sessions")
@@ -656,6 +662,43 @@ def read_session(sid, entry, logs, names=(), markers=(), known=()):
     return row
 
 
+def t3_threads():
+    """sessionId -> thread id, from T3's provider logs events.<threadId, ':' as '-'>.log (F2).
+    The quoted key, never the bare id: a session id shows up in many foreign logs' tool output.
+    ponytail: one grep pass over all logs (0.3 s for 325 MB here); {} without T3 or on any error."""
+    logs = glob.glob(os.path.join(os.environ.get("T3CODE_HOME") or os.path.expanduser("~/.t3"),
+                                  "userdata", "logs", "provider", "events.*.log"))
+    if not logs:
+        return {}
+    try:
+        out = subprocess.run(["grep", "-oHE", '"session_id":"[0-9a-f-]{36}"'] + logs,
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    seen = {}
+    for ln in set(out.splitlines()):
+        f, _, key = ln.partition(":")
+        t = os.path.basename(f)[len("events."):-len(".log")]
+        # The file name has '-' for ':'; ponytail: only the known "mcp:<uuid>" shape is restored.
+        seen.setdefault(key[len('"session_id":"'):-1], set()).add(
+            re.sub(r"^mcp-(?=[0-9a-f]{8}-)", "mcp:", t))
+    return {k: v.pop() for k, v in seen.items() if len(v) == 1}
+
+
+def sidecar_sids():
+    """sessionIds named by a T3 sidecar (the coordinator of the default or any scope dir)."""
+    out = set()
+    for f in [os.path.join(CFG, "state", "orchestrator.t3.json")] + \
+            glob.glob(os.path.join(CFG, "state", "scopes", "*", "orchestrator.t3.json")):
+        try:
+            v = json.load(open(f, encoding="utf-8")).get("sessionId")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(v, str) and v:
+            out.add(v)
+    return out
+
+
 def human(sec):
     if sec is None:
         return "?"
@@ -668,25 +711,31 @@ def cut(s, n):
     return s if len(s) <= n else s[:n - 1] + "…"
 
 
-FMT = "%-16s %-8s %-8s %-4s %-7s %-7s %-6s %-7s %-10s %-18s %s"
+FMT = "%-16s %-8s %-8s %-4s %-7s %-7s %-6s %-7s %-10s %-18s %-14s %s"
 
 
 def table(rows):
     ctx = lambda r: "-" if r["ctx"] is None else "%dk" % (r["ctx"] // 1000)
     # CONV is the age of the CONVERSATION, not of the process - see head_signals().
     print(FMT % ("NAME", "ID", "PID", "LIVE", "IDLE", "CONV", "CTX", "WRAPPED", "WAITING", "CWD",
-                 "LAST"))
+                 "THREAD", "LAST"))
     for r in rows:
         print(FMT % (
-            cut(r["name"], 16), r["short"], r["pid"] or "-", "yes" if r["live"] else "no",
+            cut(r["name"], 16), r["short"], r["pid"] or "-",
+            "yes" if r["live"] else "asleep (T3)" if r.get("asleep_t3") else "no",
             r["idle"], human(r["conversation_age_seconds"]), ctx(r), r["wrapped"], r["waiting"] or "-",
-            cut((r["cwd"] or "-").replace(os.path.expanduser("~"), "~"), 18), cut(r["last"], 70)))
+            cut((r["cwd"] or "-").replace(os.path.expanduser("~"), "~"), 18),
+            cut(r.get("thread"), 14), cut(r["last"], 70)))
 
 
 def detail(r):
     print("%s  (%s)  pid %s  %s" % (r["name"] or "?", r["short"], r["pid"] or "-", r["cwd"] or "-"))
-    print("  live    : %s%s" % (r["live"], "" if r["registry"] else "   (NO REGISTRY ENTRY - "
+    print("  live    : %s%s" % (r["live"], "   (asleep in T3 thread %s: a message wakes it)"
+                                % (r.get("thread") or "?") if r.get("asleep_t3") else
+                                "" if r["registry"] else "   (NO REGISTRY ENTRY - "
                                 "the tab is closed; this is the transcript's word alone)"))
+    if r.get("thread"):
+        print("  thread  : %s" % r["thread"])
     print("  idle    : %s" % r["idle"])
     print("  age     : conversation %s, process %s%s" % (
         human(r["conversation_age_seconds"]), human(r["process_age_seconds"]),
@@ -744,6 +793,11 @@ def main():
             for s in ({sid} if sid else reg)]
     # An id with neither a registry entry nor a transcript is not a session, it is a typo.
     rows = [r for r in rows if r["registry"] or r["transcript"]]
+    threads, sides = t3_threads(), sidecar_sids()
+    for r in rows:
+        r["thread"] = threads.get(r["session_id"])
+        r["asleep_t3"] = bool(not r["live"] and (r["thread"] or r["session_id"] in sides)
+                              and r["closed_marker"] is None and r["wrapped"] != "yes")
 
     if a.name:
         rows = [r for r in rows if r["name"] == a.name]
@@ -775,7 +829,7 @@ def main():
     elif a.waiting:
         rows = [r for r in rows if r["waiting"]]
     elif not (a.all or a.name or sid):
-        rows = [r for r in rows if r["live"]]
+        rows = [r for r in rows if r["live"] or r["asleep_t3"]]
     rows.sort(key=lambda r: (r["idle_seconds"] is None, r["idle_seconds"] or 0))
 
     if a.json:

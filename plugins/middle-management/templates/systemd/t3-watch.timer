@@ -1,0 +1,13 @@
+# middle-management plugin: USER unit template. /middle-management-setup installs it into
+# ~/.config/systemd/user/, then:
+#   systemctl --user enable --now t3-watch.timer
+[Unit]
+Description=middle-management: T3 Code watcher - tick every 10 minutes
+
+[Timer]
+OnCalendar=*:05/10
+Persistent=true
+Unit=t3-watch.service
+
+[Install]
+WantedBy=timers.target

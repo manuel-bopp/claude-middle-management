@@ -3,7 +3,9 @@
 # Consumers: hooks/session-role.sh, hooks/protect-main-checkouts.sh,
 #   hooks/block-blanket-git-add.sh, hooks/long-running-as-unit.sh, hooks/require-review-loop.sh,
 #   commands/middle-management-setup.md (via Bash),
-#   scripts/wt, scripts/orchestrator.sh, scripts/morning-headless.sh, tests/run.sh.
+#   scripts/wt, scripts/orchestrator.sh, scripts/morning-headless.sh, scripts/t3-wake.sh,
+#   scripts/t3-token.sh, hooks/t3-report.sh, hooks/require-work-packages.sh,
+#   hooks/subagent-report-check.sh, tests/run.sh, tests/t3-seat.sh.
 #
 # Usage:
 #   config-check.sh dir        print the resolved Claude config dir
@@ -71,6 +73,14 @@ validate() {
     and ((.reaperMaxHours // 0) | type == "number")
     and ((.reaperOwnerlessMinutes // 0) | type == "number")
     and ((.reaperDigestHour // 7) | (type == "number" and . == (. | floor) and . >= 0 and . <= 23))
+    # 0.11.0 (README "T3 Code", "Follow-through", "Sub-agents"): the readers fall back to their default
+    # on a wrong shape too, but a typo should fail here, loudly.
+    and ([.t3TokenFile, .onLimitCommand, .pageCommand, .userName, .okBy] | all(. == null or type == "string"))
+    and ((.remindAfterHours // 2) | (type == "number" and . > 0))
+    and ((.remindWindow // "08:00-22:00") | (type == "string" and test("\\A\\d{1,2}:\\d{2}-\\d{1,2}:\\d{2}\\z")))
+    and ((.workPackagesGate // true) | type == "boolean")
+    # t3Url: the base URL of the T3 server (watcher, t3-token.sh); a plain http(s) URL, nothing else.
+    and ((.t3Url // "http://x") | (type == "string" and test("\\Ahttps?://[^\\s\"]+\\z")))
     and ((.protectedCheckouts // []) | (type == "array") and all(
           (type == "object")
           and (.name | (type == "string") and (test("^[^[:space:]]+$")))  # a column of `wt list`
@@ -82,9 +92,11 @@ validate() {
         ))
     # Scopes (README "Scopes"): the name becomes a directory under state/scopes/, a root of / would
     # swallow every session; scripts/scope.py refuses both on its own as well.
+    # scopeMode (README "Scopes", D7): "per-root" = every project root is its own scope, no catch-all.
+    and ((.scopeMode // "per-root") | . == "per-root")
     and ((.scopes // []) | (type == "array")
           and all((type == "object")
-            and (.name | type == "string" and test("\\A[A-Za-z0-9][A-Za-z0-9_-]*\\z") and . != "default")
+            and (.name | type == "string" and test("\\A[A-Za-z0-9][A-Za-z0-9_-]*\\z") and . != "default" and . != "none")
             and (.root | type == "string" and startswith("/") and (sub("/+$"; "") | length) > 0)
             and (.board | type == "string" and startswith("/")))
           and ((map(.name) | unique | length) == length)
