@@ -82,7 +82,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/t3-report.sh\"",
-            "timeout": 10,
+            "timeout": 20,
             "statusMessage": "middle-management: T3 report"
           }
         ]

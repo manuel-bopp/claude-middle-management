@@ -19,7 +19,10 @@ top-level threads of the scope's T3 project(s), the coordinator thread included:
                  every 30 min: coordinator limited -> t3-wake.sh --keepalive (that run is the retry);
                  only workers limited -> probe their model with one tiny headless `claude -p`, and
                  when it passes wake the coordinator with "limit over for ...". A coordinator that
-                 recovers after a Keepalive gets that wake at once. Episode end -> one "resolved".
+                 recovers after a Keepalive gets that wake at once. "limit over" goes once per
+                 (thread, run id): an announced thread is not probed again until its run id changes,
+                 so the probe stops when every limited thread was announced. Episode end -> one
+                 "resolved".
                  onLimitCommand (config, optional) runs once per episode with the thread ids.
   click pending  pendingRuntimeRequest seen for >10 min -> notify once per request
   other failure  status failed, another class -> wake the coordinator once per run id (the
@@ -36,7 +39,8 @@ A T3 API problem (HTTP 400 / missing keys, token rejected, server down twice in 
 notify per kind and day, never a crash. Secrets: the token (config t3TokenFile, default
 ~/.config/t3-threads/token, refused when group/other can read it) only goes into a request header;
 notifyCommand / onLimitCommand are executed, never echoed; the webhook URL is t3-wake.sh's alone.
-Env: T3T_URL (default 100.125.193.62:8470), T3W_NOW (epoch, test seam), CLAUDE_CONFIG_DIR.
+The T3 server: config t3Url, default http://127.0.0.1:$T3CODE_PORT (8470 when unset).
+Env: T3CODE_PORT, T3W_NOW (epoch, test seam), CLAUDE_CONFIG_DIR.
 Exit 0, or 1 when a notify could not be delivered (systemd's OnFailure alarm then fires).
 """
 import collections, json, os, re, socket, subprocess, sys, tempfile, time, urllib.error, urllib.request
@@ -161,6 +165,12 @@ def api_problem(gstate, kind, facts):
         notify("all", kind, facts)
 
 
+def t3_url():
+    """Config key t3Url (setup writes it), else this box's T3 server on loopback."""
+    u = CFG.get("t3Url")
+    return u if isinstance(u, str) and u else "http://127.0.0.1:%s" % (os.environ.get("T3CODE_PORT") or "8470")
+
+
 def fetch_shell(gstate):
     """The /api/orchestration/shell JSON, or None after reporting why (never raises)."""
     path = os.path.expanduser(CFG.get("t3TokenFile") or "~/.config/t3-threads/token")
@@ -175,9 +185,7 @@ def fetch_shell(gstate):
     except OSError:
         api_problem(gstate, "T3 token file missing", [path, "config key t3TokenFile"])
         return None
-    base = os.environ.get("T3T_URL") or "100.125.193.62:8470"
-    if not base.startswith(("http://", "https://")):
-        base = "http://" + base
+    base = t3_url()
     req = urllib.request.Request(base.rstrip("/") + "/api/orchestration/shell", headers={
         "authorization": "Bearer " + tok, "x-t3-orchestration-protocol": "2"})
     try:
@@ -329,11 +337,15 @@ def check_scope(name, sdir, side, shell, ss):
                                       if t.get("usageLimitResetAt") else "reset unknown")
                 for t in new] + ["switch the subscription, the watcher retries every 30 min"])
             ep["notified"] = sorted(set(ep["notified"]) | set(limited))
-        workers = [t for i, t in sorted(limited.items()) if not is_coord(t)]
+        # "limit over" goes once per limited (thread, run id): a thread the coordinator did not
+        # continue is neither probed nor named again until its run id changes (a new limit).
+        freed = {i: r for i, r in (ep.get("freed") or {}).items() if i in nruns and nruns[i] == r}
+        workers = [t for i, t in sorted(limited.items()) if not is_coord(t) and i not in freed]
 
         def limit_over(ts):
-            wake(name, "limit over for:\n%s\nsend 'Continue where you left off.' to each (t3_thread_send)."
-                 % "\n".join(label(t) for t in ts))
+            if wake(name, "limit over for:\n%s\nsend 'Continue where you left off.' to each (t3_thread_send)."
+                    % "\n".join(label(t) for t in ts)):
+                freed.update((t["id"], nruns[t["id"]]) for t in ts)
 
         if coord is not None and coord["id"] in limited:
             if NOW - ep["last_retry"] >= RETRY_S:
@@ -350,6 +362,7 @@ def check_scope(name, sdir, side, shell, ss):
             free = [t for m, ts in sorted(by_model.items()) if probe(m) is True for t in ts]
             if free:
                 limit_over(free)
+        ep["freed"] = freed
         st["limit"] = ep
     elif ep:
         notify(name, "resolved: usage limit over", ["%d thread(s) were limited since %s" % (

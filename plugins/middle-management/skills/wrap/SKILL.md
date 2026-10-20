@@ -74,8 +74,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/topics.py" entry --status completed --sta
   [--case-closed "<REF> · <evidence>"] --closed "<topic headline>" "<what was done>" "Files modified: ..."
 ```
 
-The key comes from your lane dir or branch; outside a lane, and always in the coordinator seat,
-pass `--topic <key>` (`--new` the first time the scope sees it). `--closed` writes the
+The key comes from your lane dir or branch (a lane's first entry creates its topic, no `--new`);
+outside a lane, and always in the coordinator seat, pass `--topic <key>` (`--new` the first time
+the scope sees it). `--closed` writes the
 `Session: closed · <sessionId>` line; a bullet may never start with a structured word. The rules
 below describe what it writes, and are the fallback when `topics.py` is missing:
 

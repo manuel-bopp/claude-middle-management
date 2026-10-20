@@ -106,13 +106,16 @@ echo "== real t3-wake.sh against a local stub =="
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
 SECRET="hooksecret$RANDOM$RANDOM"; URL="http://127.0.0.1:$PORT/api/hooks/task/$SECRET"
 cat > "$TMP/stub.py" <<'EOF'
-import http.server, os, sys
+import http.server, os, sys, time
 D = sys.argv[2]
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         b = self.rfile.read(int(self.headers.get("content-length", 0)))
         open(os.path.join(D, "hook.log"), "ab").write(b + b"\n")
-        code = int(open(os.path.join(D, "hook.code")).read().strip())
+        code = open(os.path.join(D, "hook.code")).read().strip()
+        if code == "hang":            # a server that takes the connection and never answers
+            time.sleep(30); code = "202"
+        code = int(code)
         self.send_response(code); self.send_header("content-length", "0"); self.end_headers()
     def log_message(self, *a): pass
 http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
@@ -127,7 +130,23 @@ echo 500 > "$TMP/hook.code"
 OUT2=$(printf '%s' "$(inp sess-w "real failure")" | HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_PLUGIN_ROOT="$P" T3CODE_HOME="$H/.t3" bash "$P/hooks/t3-report.sh" 2>&1)
 has "500 -> block" '"decision":"block"' "$OUT2"
 has "...failures.log line" "http 500" "$(cat "$CFG/state/t3-report/failures.log" 2>/dev/null)"
-ALL="$OUT$OUT2$(cat "$CFG/state/t3-report/"* 2>/dev/null)"
+echo hang > "$TMP/hook.code"
+HT=$(jq '[.hooks.Stop[].hooks[] | select(.command | test("t3-report")) | .timeout] | first' "$P/hooks/hooks.json")
+T1=$(date +%s)
+OUT3=$(printf '%s' "$(inp sess-w "hanging server")" | HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_PLUGIN_ROOT="$P" T3CODE_HOME="$H/.t3" bash "$P/hooks/t3-report.sh" 2>&1)
+EL=$(( $(date +%s) - T1 ))
+[ "$EL" -lt $((HT - 5)) ] && ok "hanging server: the hook ends ${EL}s < its timeout ${HT}s - 5" || bad "hanging server: hook inside its timeout" "< $((HT - 5))s" "${EL}s"
+has "...and still blocks" '"decision":"block"' "$OUT3"
+has "...after writing the failures.log line" "worker-1	sess-w	unknown	http 000" "$(tail -1 "$CFG/state/t3-report/failures.log")"
+T1=$(date +%s)
+OUT4=$(printf '%s' "$(inp sess-w "slow sender")" | HOME="$H" CLAUDE_CONFIG_DIR="" CLAUDE_PLUGIN_ROOT="$P" T3CODE_HOME="$H/.t3" \
+  T3_WAKE_TIMEOUT=30 T3_REPORT_BUDGET=2 bash "$P/hooks/t3-report.sh" 2>&1)
+EL=$(( $(date +%s) - T1 ))
+[ "$EL" -lt 6 ] && ok "a sender past the budget is cut (${EL}s)" || bad "sender cut at the budget" "< 6s" "${EL}s"
+has "...the hook blocks" '"decision":"block"' "$OUT4"
+has "...and logs it" "sender timed out after 2s" "$(tail -1 "$CFG/state/t3-report/failures.log")"
+[ "$HT" -gt 15 ] && ok "hooks.json timeout ${HT}s > the 15 s sender budget" || bad "hooks.json timeout > budget" "> 15" "$HT"
+ALL="$OUT$OUT2$OUT3$OUT4$(cat "$CFG/state/t3-report/"* 2>/dev/null)"
 lacks "no URL secret in any output or state file" "$SECRET" "$ALL"
 lacks "no [HH:MM] prefix demanded" "[HH:MM]" "$(cat "$P/hooks/t3-report.sh")"
 

@@ -44,6 +44,14 @@ OUT=$(agent "Find where X lives." Explore | run "$GATE")
 assert_empty "subagent_type Explore -> allow" "" "$OUT"
 OUT=$(agent "Find where X lives." general-purpose | run "$GATE")
 assert_has "general-purpose without line -> deny" '"permissionDecision": "deny"' "$OUT"
+# The plugin's own dispatch templates pass the gate once their placeholders are filled (review r1 F3).
+RULES=$(sed -n '/^> You are a fresh-context reviewer/,/^$/p' "$P/skills/review-loop/SKILL.md" \
+  | sed 's|<scratch dir>|/tmp/sid-1|; s|<deliverable>|plan|; s|<N>|1|')
+assert_has "review-loop rules carry a Report file line" "Report file: /tmp/sid-1/review-plan-r1.md" "$RULES"
+OUT=$(agent "$RULES" | run "$GATE")
+assert_empty "review-loop's verbatim reviewer rules, filled -> allow" "" "$OUT"
+assert_has "morning ritual's cleanup sub-agent names its Report file" 'its
+prompt carries `Report file: <absolute path>`' "$(cat "$P/skills/morning-ritual/SKILL.md")"
 OUT=$(printf '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | run "$GATE")
 assert_empty "other tool -> silent" "" "$OUT"
 printf '{"workPackagesGate": false}' > "$H/.claude/middle-management.json"

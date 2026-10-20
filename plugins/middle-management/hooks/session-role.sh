@@ -164,6 +164,8 @@ if { [ "$ORCH_SRC" = marker ] && [ "$MY_ID" = "$ORCH_ID" ]; } \
       printf 'successor thread, then orchestrator.sh t3-handover --to-thread <id> --to-title <t>; keep seat and report task\n'
       printf 'until it claims. Once a wake "seat taken over by ..." arrives you are a worker: forward every report that\n'
       printf 'still reaches you to the successor with t3_thread_send, finish your wrap, delete your report task last.\n'
+      printf 'Book every worker report that is not in the topics state yet, and every answer or OK of your user:\n'
+      printf 'python3 "%s/scripts/topics.py" entry --topic <key> ... or answer --topic <key> "<text>".\n' "$PLUGIN_ROOT"
       printf 'A message that is exactly "Keepalive": answer exactly "OK" and nothing else.\n'
     else
       printf 'T3 Code: this seat has no thread binding yet, so no worker report reaches you. Create the report task\n'
@@ -216,6 +218,8 @@ else
       printf 'Your report = the last text of your turn: the Stop hook delivers it to the coordinator. Never SendMessage\n'
       printf 'or poke a T3 coordinator, never message other workers. Tools first, report last: only the final text\n'
       printf 'block of a turn arrives. If the hook says "report NOT delivered", send it yourself with t3_thread_send.\n'
+      printf 'Book every READY / LIVE / blocked / question report first (key = lane dir or branch, the first entry creates it):\n'
+      printf 'python3 "%s/scripts/topics.py" entry --status <s> [--stage ready|live] [--waits-on "user · <q> · rec: <r>"] "<headline>"\n' "$PLUGIN_ROOT"
       printf 'A message that is exactly "Keepalive": answer exactly "OK" and nothing else.\n'
     else
       printf 'Peer messages do not reach a T3 thread. Report with: bash "%s/scripts/t3-wake.sh" "%s" <file with the report>\n' "$PLUGIN_ROOT" "${MY_NAME:-worker}"

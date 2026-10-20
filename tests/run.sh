@@ -1210,6 +1210,10 @@ for c in '{"name":"ff","root":"x","board":"/b"}' '{"name":"ff","root":"/","board
 done
 [ "$(vcfg '{"scopes":[{"name":"ff","root":"/x","board":"/b"},{"name":"ff-1_x","root":"/x/y","board":"/b"}]}')" = 0 ] \
   && ok "S2 nested roots are valid" || bad "S2 nested roots are valid"
+for c in '"127.0.0.1:8470"' '"http://a b"' '5' '"http://x\"y"'; do
+  [ "$(vcfg "{\"t3Url\":$c}")" = 1 ] && ok "S2 invalid t3Url: $c" || bad "S2 invalid t3Url: $c"
+done
+[ "$(vcfg '{"t3Url":"http://127.0.0.1:8470"}')" = 0 ] && ok "S2 t3Url http://127.0.0.1:8470 is valid" || bad "S2 t3Url valid"
 
 # S3 the resolver: segment boundary, nesting, git worktree subpath, refused entries
 H="$(new_home)"; mkdir -p "$H/ff/sub" "$H/ffother"

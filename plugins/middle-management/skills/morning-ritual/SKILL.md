@@ -85,8 +85,13 @@ re-register sessions under NEW names; map names via the session registry,
   yesterday needs an explanation.
 
 Verdict per transcript: wrapped ✓ (log entry exists) · still-active (live PID) ·
+**asleep in a T3 thread** (process gone, no closed marker, but T3 names the session:
+`peer-state.py` LIVE "asleep (T3)", `open-items.py list` "asleep in T3 thread <id>") → it
+is NOT dead and gets NO backfill and never `claude --resume` (T3 owns that session; a
+headless run would be a second writer to its transcript and wrap it behind its back): wake
+it with `t3_thread_send <id>` when its lane needs to move, else leave it for the day plan ·
 test/probe artifact (nothing owed) · **dead without closing its books → headless
-backfill**: `claude --resume <sessionId> -p "<your wrap command> — backfill
+backfill** (never for a T3 session, see above): `claude --resume <sessionId> -p "<your wrap command> — backfill
 (coordinator, date): …"`, sequential, in the background. The backfill prompt names:
 why (session died), what is already recorded on the board (so work is NOT
 repeated), the owed artifacts, its open-items drop file (`open-items.py list` marks
@@ -103,14 +108,15 @@ ends per thread: last run state, a pending request, open items in its drop file,
 worktree. Unpin pinned children first (a pinned thread never auto-settles). Never in bulk
 without the list shown first; a thread with a loose end stays and goes to the day plan.
 
-Done when every yesterday-transcript carries one of the four verdicts.
+Done when every yesterday-transcript carries one of the five verdicts.
 
 ## 4. Open-items sweep → board
 
 Start with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/open-items.py" list`: every item a session
 wrote to its drop file that is not on the board yet. File each by putting its key `<sid8>-W<n>`
 in a board line, then `open-items.py done <file>` for every file it marks "all filed, session
-gone" (rules: middle-management skill, "Open items").
+gone" (rules: middle-management skill, "Open items"). A file marked "asleep in T3 thread <id>"
+is woken with `t3_thread_send <id>`, never backfilled or resumed headless.
 
 Then fold overnight movement into the board (config `.board`, or with scopes your scope's board, which the banner names; the coordinator is its only
 writer): externally resolved items (merged PRs, answered threads, arrived reports),
@@ -134,7 +140,9 @@ A topic leaves the table only with stage done, a review and an OK (and its case 
 ## 5. Machine cleanup
 
 Free what yesterday left behind, before the day plan — so the plan reports what was
-freed. Gather in one read-only pass, then act through ONE sub-agent with explicit PIDs:
+freed. Gather in one read-only pass, then act through ONE sub-agent with explicit PIDs (its
+prompt carries `Report file: <absolute path>`, the middle-management:work-packages block; the
+gate refuses it otherwise):
 
 - **Lanes:** with the lane reaper installed (setup step 6), read its listing
   `<config dir>/state/wt/reaper-latest.md` instead of sweeping yourself — on its own 30-minute

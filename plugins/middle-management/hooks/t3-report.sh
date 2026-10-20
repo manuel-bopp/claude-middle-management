@@ -64,8 +64,13 @@ FROM=$(cat "$CFG_DIR"/sessions/*.json 2>/dev/null \
   | jq -r --arg id "$SID" 'select(.sessionId == $id) | .name | strings' 2>/dev/null | head -1)
 TMP=$(umask 077; mktemp) || exit 0
 printf '%s' "$TEXT" > "$TMP"
-MM_SESSION_ID="$SID" MM_SCOPE_CWD="$START" bash "$S/t3-wake.sh" "${FROM:-session ${SID:0:8}}" "$TMP" >/dev/null 2>&1; RC=$?
+# Guard: the sender must end inside the hook's timeout (hooks.json: 20 s), else the hook is killed
+# before the failure line and the block below, and the lost report is silent (review r1 F1).
+GUARD=(); command -v timeout >/dev/null 2>&1 && GUARD=(timeout "${T3_REPORT_BUDGET:-15}")
+MM_SESSION_ID="$SID" MM_SCOPE_CWD="$START" "${GUARD[@]}" bash "$S/t3-wake.sh" "${FROM:-session ${SID:0:8}}" "$TMP" >/dev/null 2>&1; RC=$?
 rm -f "$TMP"
+[ "$RC" = 124 ] && printf '%s\t%s\t%s\tunknown\tsender timed out after %ss\n' "$(date -Is)" "${FROM:-session ${SID:0:8}}" "$SID" \
+  "${T3_REPORT_BUDGET:-15}" >> "$RDIR/failures.log" 2>/dev/null
 case "$RC" in
   0) printf '%s\n' "$SUM" > "$RDIR/$SID"; exit 0 ;;
   3) exit 0 ;;    # the sidecar went away meanwhile (release): no coordinator to report to

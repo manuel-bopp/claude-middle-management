@@ -5,10 +5,11 @@
 #
 #   A  t3-wake.sh: 202 / 429 / timeout, no sidecar, unusable sidecar, Keepalive, thread lookup, --stats
 #   B  t3-watch.py: no sidecar, healthy, scope separation
-#   C  usage limit, workers only: notify once, onLimitCommand, 30-min probe cadence, wake, resolved
+#   C  usage limit, workers only: notify once, onLimitCommand, 30-min probe cadence, wake, resolved,
+#      "limit over" once per (thread, run id) across several periods
 #   D  usage limit, coordinator too: Keepalive retry, "limit over" after the Keepalive went through
 #   E  click pending >10 min · F stuck run >3 h · G other failure once per run id
-#   H  report lost · I T3 API problems · J no coordinator · K dry-run · L topics.py hook · M handover
+#   H  report lost · I T3 API problems, I2 T3 URL (t3Url, loopback default) · J no coordinator · K dry-run · L topics.py hook · M handover
 #   Z  no webhook URL or token in any output
 # One local HTTP stub serves both the T3 shell (GET, checks the protocol header and the bearer) and
 # the webhook (POST, answers 202, 429 or sleeps past the timeout). `claude` is a stub on PATH.
@@ -28,7 +29,7 @@ has()   { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "contains: $2" "$3" ;; esa
 lacks() { case "$3" in *"$2"*) bad "$1" "lacks: $2" "$3" ;; *) ok "$1" ;; esac; }
 
 S=$TMP/s; mkdir -p "$S"
-cp "$SRC"/{t3-watch.py,t3-wake.sh,scope.py,config-check.sh} "$S/"
+cp "$SRC"/{t3-watch.py,t3-wake.sh,t3-token.sh,scope.py,config-check.sh} "$S/"
 H=$TMP/home; CFG=$H/.claude; mkdir -p "$CFG/state" "$H/.t3/userdata/logs/provider" "$TMP/bin" "$TMP/repo" "$TMP/ff"
 TOKEN="tok-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 printf '%s\n' "$TOKEN" > "$TMP/token"; chmod 600 "$TMP/token"
@@ -78,6 +79,7 @@ cat > "$CFG/middle-management.json" <<EOF
 {"notifyCommand": "cat >> $TMP/notify.log; printf '\\\\n----\\\\n' >> $TMP/notify.log",
  "onLimitCommand": "echo \"\$@\" >> $TMP/onlimit.log",
  "t3TokenFile": "$TMP/token",
+ "t3Url": "http://127.0.0.1:$PORT",
  "scopes": [{"name": "ff", "root": "$TMP/ff", "board": "$TMP/ff-board.md"}]}
 EOF
 SIDE=$CFG/state/orchestrator.t3.json
@@ -108,7 +110,7 @@ LIMITED='"status":"failed","lastErrorClass":"usage_limit","usageLimitResetAt":"2
 T0=$(date +%s)
 tick() {  # $1 = seconds after T0; extra args to t3-watch.py
   local at=$1; shift
-  HOME="$H" CLAUDE_CONFIG_DIR="" T3CODE_HOME="" CLAUDE_CODE_SESSION_ID="" T3T_URL="127.0.0.1:$PORT" \
+  HOME="$H" CLAUDE_CONFIG_DIR="" T3CODE_HOME="" CLAUDE_CODE_SESSION_ID="" T3CODE_PORT=1 \
     T3W_NOW=$((T0 + at)) PATH="$TMP/bin:$PATH" python3 "$S/t3-watch.py" "$@" 2>>"$TMP/stderr.log"
 }
 wakecall() {  # $1 = from, $2 = file|--keepalive; env passes through
@@ -211,6 +213,21 @@ tick 0; shell "[$COORD_OK, {\"id\":\"mcp:w8\",\"title\":\"lane eight\",$LIMITED}
 shell "[$COORD_OK, {\"id\":\"mcp:w8\",\"title\":\"lane eight\",\"status\":\"running\",\"activityRunStatus\":\"running\",\"activeRunId\":\"r9\",$LIMITED}]"
 tick 1200; has "a live run ends the episode, lastErrorClass still set" "resolved: usage limit over" "$(notes)"
 
+# "limit over" once per (thread, run id), checked across several 30-min periods
+reset; echo ok > "$TMP/probe.mode"
+shell "[$COORD_OK, {\"id\":\"mcp:w1\",\"title\":\"lane one\",$LIMITED}]"
+tick 0; tick 1800; is "probe passes at +30 min -> one wake" "$(nprobe)/$(nhook)" "1/1"
+shell "[$COORD_OK, {\"id\":\"mcp:w1\",\"title\":\"lane one\",$LIMITED}, {\"id\":\"mcp:w2\",\"title\":\"lane two\",$LIMITED}]"
+tick 2400; tick 3600; is "a newly limited worker is probed and announced" "$(nprobe)/$(nhook)" "2/2"
+has "...naming the new worker" "lane two (mcp:w2)" "$(hooks | tail -1 | jq -r .report)"
+lacks "...not the one already announced" "lane one (mcp:w1)" "$(hooks | tail -1 | jq -r .report)"
+tick 5400; tick 7200; tick 9000
+is "not continued for 3 more periods: no probe, no wake" "$(nprobe)/$(nhook)" "2/2"
+shell "[$COORD_OK, {\"id\":\"mcp:w1\",\"title\":\"lane one\",$LIMITED,\"latestRunId\":\"run:3\"}, {\"id\":\"mcp:w2\",\"title\":\"lane two\",$LIMITED}]"
+tick 10800; is "a new limited run of an announced worker is announced again" "$(nprobe)/$(nhook)" "3/3"
+has "...naming that worker" "lane one (mcp:w1)" "$(hooks | tail -1 | jq -r .report)"
+lacks "...not the other" "lane two (mcp:w2)" "$(hooks | tail -1 | jq -r .report)"
+
 # ------------------------------------------------------------------------------------------ D --
 echo "D. usage limit, coordinator limited too (Keepalive)"
 reset
@@ -226,7 +243,8 @@ shell "[{\"id\":\"mcp:coord\",\"title\":\"Koordinator\",\"status\":\"completed\"
 tick 3000; is "Keepalive went through -> limit over, no probe" "$(nhook)/$(nprobe)" "2/0"
 has "...naming the worker" "lane one (mcp:w1)" "$(hooks | tail -1 | jq -r .report)"
 lacks "...not the coordinator" "Koordinator (mcp:coord)" "$(hooks | tail -1 | jq -r .report)"
-tick 3600; is "limit over is sent once" "$(nhook)" 2
+tick 3600; tick 4800; tick 6600; tick 8400
+is "limit over is sent once, no probe after it (4 more periods)" "$(nhook)/$(nprobe)" "2/0"
 
 # ------------------------------------------------------------------------------------------ E --
 echo "E. click pending"
@@ -288,10 +306,27 @@ tick 0; has "group-readable token refused" "readable by group/other, refused" "$
 is "...and never sent" "$([ -f "$TMP/get.log" ] && echo got || echo none)" none
 chmod 600 "$TMP/token"
 reset
-HOME="$H" CLAUDE_CONFIG_DIR="" T3T_URL="127.0.0.1:1" T3W_NOW=$T0 python3 "$S/t3-watch.py" 2>>"$TMP/stderr.log"
+cp "$CFG/middle-management.json" "$TMP/cfg.bak"
+jq '.t3Url = "http://127.0.0.1:1"' "$TMP/cfg.bak" > "$CFG/middle-management.json"
+HOME="$H" CLAUDE_CONFIG_DIR="" T3W_NOW=$T0 python3 "$S/t3-watch.py" 2>>"$TMP/stderr.log"
 is "server down once: silent (restart grace)" "$(nnote)" 0
-HOME="$H" CLAUDE_CONFIG_DIR="" T3T_URL="127.0.0.1:1" T3W_NOW=$((T0+600)) python3 "$S/t3-watch.py" 2>>"$TMP/stderr.log"
+HOME="$H" CLAUDE_CONFIG_DIR="" T3W_NOW=$((T0+600)) python3 "$S/t3-watch.py" 2>>"$TMP/stderr.log"
 has "server down twice: notify" "T3 server unreachable" "$(notes)"
+
+echo "I2. T3 URL: config t3Url, default loopback on T3CODE_PORT"
+reset; shell "[$COORD_OK]"
+jq 'del(.t3Url)' "$TMP/cfg.bak" > "$CFG/middle-management.json"
+HOME="$H" CLAUDE_CONFIG_DIR="" T3CODE_HOME="" T3CODE_PORT="$PORT" T3W_NOW=$T0 python3 "$S/t3-watch.py" 2>>"$TMP/stderr.log"
+is "no t3Url -> 127.0.0.1:\$T3CODE_PORT, healthy and silent" "$(wc -l < "$TMP/get.log" 2>/dev/null | tr -d ' ')/$(nnote)" "1/0"
+lacks "no buildos tailnet IP default in the scripts" "100.125.193.62" "$(cat "$SRC/t3-watch.py" "$SRC/t3-token.sh")"
+tok() { HOME="$H" CLAUDE_CONFIG_DIR="" T3CODE_PORT="${1:-1}" T3_BIN=false bash "$S/t3-token.sh" --check 2>&1; }
+OUT=$(tok "$PORT"); is "t3-token.sh --check, no t3Url -> loopback on T3CODE_PORT, accepted" "$OUT" "token: accepted"
+cp "$TMP/cfg.bak" "$CFG/middle-management.json"
+OUT=$(tok 1); is "t3-token.sh --check uses t3Url from the config" "$OUT" "token: accepted"
+printf 'wrong\n' > "$TMP/token.bad"; chmod 600 "$TMP/token.bad"
+jq --arg t "$TMP/token.bad" '.t3TokenFile = $t' "$TMP/cfg.bak" > "$CFG/middle-management.json"
+OUT=$(tok 1); RC=$?; is "...a rejected token -> exit 2, nothing minted" "$RC/$OUT" "2/token: missing or rejected"
+cp "$TMP/cfg.bak" "$CFG/middle-management.json"
 
 # ------------------------------------------------------------------------------------------ J --
 echo "J. no coordinator"

@@ -79,6 +79,8 @@ validate() {
     and ((.remindAfterHours // 2) | (type == "number" and . > 0))
     and ((.remindWindow // "08:00-22:00") | (type == "string" and test("\\A\\d{1,2}:\\d{2}-\\d{1,2}:\\d{2}\\z")))
     and ((.workPackagesGate // true) | type == "boolean")
+    # t3Url: the base URL of the T3 server (watcher, t3-token.sh); a plain http(s) URL, nothing else.
+    and ((.t3Url // "http://x") | (type == "string" and test("\\Ahttps?://[^\\s\"]+\\z")))
     and ((.protectedCheckouts // []) | (type == "array") and all(
           (type == "object")
           and (.name | (type == "string") and (test("^[^[:space:]]+$")))  # a column of `wt list`

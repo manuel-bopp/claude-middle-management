@@ -13,6 +13,8 @@ Usage:
   open-items.py add --done W<n>|<sid8>-W<n> "<evidence: commit, live, the user's answer>"
   open-items.py add --wrapped          the wrap's last line, also when nothing is open
   open-items.py list                   every item not on the board yet, plus sessions that died unwrapped
+                                       (a gone T3 session with no closed marker reads "asleep in T3
+                                       thread <id>": wake it, never resume it headless)
   open-items.py count                  one banner line, or nothing when there is nothing to file
   open-items.py done <file>            delete a drop file: refused unless every open key is on the
                                        board AND the session is gone
@@ -25,6 +27,9 @@ session, <sid8>-session-notes.md. Board: the `board` key of <config dir>/middle-
 through symlinks. "Filed" = the item's whole key <sid8>-W<n> appears anywhere in the board file.
 Own session: $CLAUDE_CODE_SESSION_ID, else the registry entry of the nearest ancestor process (the
 wrap skill's step 0 walk). Liveness is peer-state.py's is_live, with its PID-reuse guard.
+T3 Code (`list`): a gone, unwrapped session that a T3 provider log or a coordinator sidecar names and
+that has no `Session: closed` marker is asleep, not dead (peer-state.py's t3_threads, sidecar_sids,
+closed_markers; env T3CODE_HOME, MM_SESSION_LOG as there).
 To-dos: a board line `- <key> · owner: <owner> · <text>` (the drop line as `list` prints it) wins
 over the drop file's line; an item is closed by its drop file's `- W<n> done` or by `<key> done`
 (closed, answered, decided, resolved, erledigt) anywhere on the board. Delivered keys: <config dir>/state/morning-ritual/delivered, `key<TAB>time`.
@@ -153,6 +158,25 @@ def is_gone(s8):
                    for sid, e in reg.items() if sid.startswith(s8))
 
 
+@functools.lru_cache(None)
+def t3_index():
+    """(sessionId -> T3 thread id, sidecar sessionIds, sid8s with a closed marker): one read per run."""
+    ps = peer_state()
+    return ps.t3_threads(), ps.sidecar_sids(), {m["id"][:8] for m in ps.closed_markers()}
+
+
+def t3_asleep(s8):
+    """The T3 thread id (or "?" for a sidecar-named session without one) of a gone session that T3
+    keeps asleep, else None: no closed marker, and a provider log or a sidecar names it (plan 1.5)."""
+    threads, sides, closed = t3_index()
+    if s8 in closed:
+        return None
+    t = sorted(v for k, v in threads.items() if k.startswith(s8))
+    if t:
+        return t[0]
+    return "?" if any(k.startswith(s8) for k in sides) else None
+
+
 def own_session():
     """(sessionId, registry entry or {})."""
     reg, _ = peer_state().registry()
@@ -260,7 +284,12 @@ def list_():
         except (OSError, ValueError) as e:
             print("%s · unreadable (%s), fix or remove it by hand" % (f, type(e).__name__))
             continue
-        if gone and not wrapped:
+        asleep = t3_asleep(sid8_of(f)) if gone and not wrapped else None
+        if asleep:
+            # never `claude --resume`: T3 owns that session, a headless run would be a second writer
+            state = "asleep in T3 thread %s → wake via t3_thread_send %s" % (asleep, asleep) if asleep != "?" \
+                else "asleep in T3 (named by a coordinator sidecar, thread unknown) → wake via t3_thread_send"
+        elif gone and not wrapped:
             state = "died unwrapped → backfill (resume it and run the wrap)"
         elif gone and not todo:
             state = "all filed, session gone → open-items.py done %s" % f

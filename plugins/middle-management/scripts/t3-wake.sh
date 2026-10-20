@@ -92,8 +92,10 @@ LOCAL=""
 case $URL in
   https://relay.t3.codes/v1/hooks/*/*/*) R=${URL#https://relay.t3.codes/v1/hooks/}; LOCAL="http://127.0.0.1:${T3CODE_PORT:-8470}/api/hooks/${R#*/}" ;;
 esac
+# Time budget: at most two POSTs of T3_WAKE_TIMEOUT (default 4 s) each, so the sender ends well inside
+# the Stop hook's 20 s (hooks.json) and its failure line always gets written (t3-report.sh adds a guard).
 post() {  # $1 = url; prints the HTTP code. The URL travels through a process substitution: printf is a builtin, so it is in no process's argv.
-  curl -sS -m "${T3_WAKE_TIMEOUT:-5}" -o /dev/null -w '%{http_code}' -K <(printf 'url = "%s"\n' "$1") \
+  curl -sS --connect-timeout 2 -m "${T3_WAKE_TIMEOUT:-4}" -o /dev/null -w '%{http_code}' -K <(printf 'url = "%s"\n' "$1") \
     -H 'content-type: application/json' --data-binary @- <<<"$BODY" 2>/dev/null
 }
 CODE=""

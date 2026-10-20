@@ -7,7 +7,8 @@
 #   keeps the stored token while the server accepts it; mints a new one (ttl 365d, label t3-threads)
 #   only when the file is missing or the server rejects it, then revokes older sessions with that
 #   label (other labels are never touched). --check only tests, never mints.
-# Env:   T3_BIN (default: t3 on PATH), T3T_URL (default 100.125.193.62:8470), CLAUDE_CONFIG_DIR.
+# Server: config t3Url (setup writes it), default http://127.0.0.1:${T3CODE_PORT:-8470}.
+# Env:   T3_BIN (default: t3 on PATH), T3CODE_PORT, CLAUDE_CONFIG_DIR.
 # Exit:  0 accepted · 2 missing/rejected (--check) · 1 unreachable, or the new token not accepted.
 # The token never appears in argv, output or xtrace: curl reads its header from a process
 # substitution (printf is a builtin).
@@ -18,7 +19,8 @@ TOKEN_FILE=$(jq -r '.t3TokenFile // empty' "$CFG_FILE" 2>/dev/null || true)
 TOKEN_FILE=${TOKEN_FILE:-$HOME/.config/t3-threads/token}
 TOKEN_FILE=${TOKEN_FILE/#\~/$HOME}
 T3=${T3_BIN:-t3}
-URL=${T3T_URL:-100.125.193.62:8470}; case $URL in http://*|https://*) ;; *) URL=http://$URL ;; esac
+URL=$(jq -r '.t3Url // empty' "$CFG_FILE" 2>/dev/null || true)
+URL=${URL:-http://127.0.0.1:${T3CODE_PORT:-8470}}
 
 # 0 accepted, 2 missing/rejected, 1 anything else after ~60 s of retries (a T3 restart takes one)
 check() {

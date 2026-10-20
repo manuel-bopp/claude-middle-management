@@ -40,11 +40,11 @@ st() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["topics"].get
 
 say "== entry: log + state =="
 OUT="$(tp "$H/.cache/claude/wt/alpha" "$SID" "$T0" entry --status in-progress --stage building "start alpha" "did a")"; RC=$?
-assert_rc "an unknown key without --new -> refused" 1 "$RC"
-assert_has "...and says so" "first entry needs --new" "$OUT"
+assert_rc "a derived key the scope does not know -> its first entry creates it (no --new)" 0 "$RC"
+assert_has "...under the derived key" "topic alpha " "$OUT"
 OUT="$(tp "$H/.cache/claude/wt/alpha" "$SID" "$T0" entry --new --status in-progress --stage building --name w1 \
   --waits-on "Manu · Pick A or B? · rec: A" "start alpha" "did a")"; RC=$?
-assert_rc "first entry with --new -> ok" 0 "$RC"
+assert_rc "--new on a known key -> ok" 0 "$RC"
 L="$(cat "$LOG")"
 assert_has "log: day heading" "## $(date -d @"$T0" +%Y-%m-%d)" "$L"
 assert_has "log: header in the frozen shape" "### 10:00 – [w1] – start alpha" "$L"

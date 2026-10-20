@@ -25,6 +25,8 @@ retry into a limited coordinator or a one-call probe for limited workers every 3
 "limit over" wake), clicks pending >10 min, runs stuck >3 h, other failures, lost reports, a
 handover open >30 min, a folder without coordinator; `--dry-run`, `--stats`. Token kept or minted
 by the new `scripts/t3-token.sh` (config `t3TokenFile`), ported from the retired `t3t` installer.
+Both talk to the T3 server in the new config key `t3Url` (setup writes it; default
+`http://127.0.0.1:$T3CODE_PORT`, port 8470 when unset).
 
 **Follow-through.** New `scripts/topics.py`: `entry` is the one writer of a topic (session-log
 entry with the new optional lines Topic / Stage / Waits on / Answered / Case / Case closed /

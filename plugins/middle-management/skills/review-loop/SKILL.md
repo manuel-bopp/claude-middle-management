@@ -54,11 +54,15 @@ below, the output shape, and these rules verbatim:
 > last. Refute by default: before you report a finding, verify it yourself against the code or
 > the doc. A finding you cannot ground in `file:line` or a quoted line is dropped, not reported
 > as "probably". Something you cannot settle from the repo is an OPEN QUESTION that names what
-> would settle it. Write your full report to `<scratch dir>/review-<deliverable>-r<N>.md` and
-> return at most 15 lines: the verdict line and one line per finding.
+> would settle it.
+> Report file: <scratch dir>/review-<deliverable>-r<N>.md
+> Write that file first (a title and your packages), append each result at once, and return at
+> most 15 lines: the verdict line and one line per finding.
 
 `<scratch dir>` is your session's scratch directory (the one your house rules name; without one,
-`/tmp/<sessionId>/`). The report file is the record; your context gets the 15 lines.
+`/tmp/<sessionId>/`), filled in as an absolute path: the `Report file:` line is what the
+work-packages gate (`hooks/require-work-packages.sh`) looks for, and it refuses an Agent prompt
+without one. The report file is the record; your context gets the 15 lines.
 
 **Lenses for a plan, concept or handoff.** Each ends in a finding or in `covered: <section>`; a
 lens left silent is an unfinished review.

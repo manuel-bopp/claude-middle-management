@@ -230,9 +230,10 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   command `/wt <name> run <topic>` starts when the caller passes none.
 - `scopes` (optional): a second, independent coordinator regime per project root, with its own
   seat and board. `scopeMode: "per-root"` (optional) makes every project root its own scope. See [Scopes](#scopes).
-- `t3TokenFile` (optional, default `~/.config/t3-threads/token`, mode 600) and `onLimitCommand`
-  (optional, run once per usage-limit episode with the limited thread ids as arguments): the T3
-  watcher. See [T3 Code](#t3-code).
+- `t3Url` (optional, default `http://127.0.0.1:$T3CODE_PORT`, port 8470 when unset; setup writes
+  it), `t3TokenFile` (optional, default `~/.config/t3-threads/token`, mode 600) and
+  `onLimitCommand` (optional, run once per usage-limit episode with the limited thread ids as
+  arguments): the T3 watcher and `scripts/t3-token.sh`. See [T3 Code](#t3-code).
 - `userName`, `okBy`, `remindAfterHours`, `remindWindow`, `pageCommand` (optional, defaults
   `user` / the user / `2` / `08:00-22:00` / none): follow-through. See [Follow-through](#follow-through).
 - `workPackagesGate` (optional, default `true`): the sub-agent report gate. See [Sub-agents](#sub-agents).
@@ -422,7 +423,8 @@ every thread, hooks included).
   a worker, forwards late reports, and deletes its old report task as its last wrap step.
 - **Watcher.** `scripts/t3-watch.py` (user timer every 10 min, setup step 8; stdlib, read-only
   `GET /api/orchestration/shell` with the header `x-t3-orchestration-protocol: 2` and the bearer
-  token from `t3TokenFile`, kept or minted by `scripts/t3-token.sh`). Per scope it watches the
+  token from `t3TokenFile`, kept or minted by `scripts/t3-token.sh`, both against the server in
+  `t3Url`). Per scope it watches the
   unsettled top-level threads of the scope's T3 projects: usage limit (notify once per episode,
   `onLimitCommand` once, every 30 min a `Keepalive` into a limited coordinator or a one-call model
   probe for limited workers, then one "limit over" wake), a click pending >10 min, a run stuck >3 h,
@@ -447,7 +449,8 @@ every thread, hooks included).
   `<config-dir>/state/topics/<scope>.json`. The wrap writes its closing entry this way after its
   review loop; workers report READY / LIVE / blocked / a question this way. Key: `--topic`, else
   the lane dir `lane-<name>` or `~/.cache/claude/wt/<name>`, else the branch `lane/<name>`; the
-  coordinator always passes `--topic`, a new key needs `--new`. `answer` books an answer (also a
+  coordinator always passes `--topic`; a new `--topic` key needs `--new`, a key derived from the
+  lane dir or branch creates its topic on the lane's first entry. `answer` books an answer (also a
   pathfinder answers file), `lint` lists log entries without `Topic:`, `stats` counts topics
   re-opened after their wrap.
 - **The table** `<board dir>/<board name>.topics.md` (topic, thread, status/stage, waits on, since,

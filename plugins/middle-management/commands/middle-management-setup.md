@@ -37,6 +37,7 @@ Schema (nothing else is valid):
   ],
   "scopeMode": "per-root",
   "t3TokenFile": "~/.config/t3-threads/token",
+  "t3Url": "http://127.0.0.1:8470",
   "onLimitCommand": "",
   "userName": "user",
   "okBy": "user",
@@ -224,9 +225,12 @@ repositories; the user names them.
     pathfinder-schema `questions.json` path as `$1` and prints the page link as its last
     line (without it, more than three due questions go out as one inline digest).
 
-16. **T3 Code** (only where sessions run in T3 Code threads). `t3TokenFile` (default
-    `~/.config/t3-threads/token`, mode 600) and `onLimitCommand` (optional, run once per
-    usage-limit episode with the limited thread ids as arguments; output is dropped).
+16. **T3 Code** (only where sessions run in T3 Code threads). `t3Url`, the T3 server the
+    watcher and `t3-token.sh` talk to: write `http://127.0.0.1:<port>` with the port of this
+    box's T3 server (`$T3CODE_PORT` inside a T3 thread; unset = `8470`), or the URL the user
+    names when the server listens elsewhere (unset key = that loopback default). `t3TokenFile`
+    (default `~/.config/t3-threads/token`, mode 600) and `onLimitCommand` (optional, run once
+    per usage-limit episode with the limited thread ids as arguments; output is dropped).
     Then offer step 8.
 
 17. **Work-packages gate.** `workPackagesGate` (default `true`): a sub-agent prompt
@@ -472,8 +476,8 @@ threads or the follow-through reminders are wanted; otherwise skip this step and
 
 Preconditions: the four of step 5, plus `curl`, and `claude` on this PATH (the limit probe).
 
-Token: keep or mint the bearer token the watcher reads (`t3TokenFile`). It never prints the
-token; re-run it after every `t3 update`:
+Token: keep or mint the bearer token the watcher reads (`t3TokenFile`), checked against the
+server in `t3Url` (step 16). It never prints the token; re-run it after every `t3 update`:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/t3-token.sh"

@@ -158,7 +158,9 @@ moved or something needs them. Work that takes several steps (infrastructure dig
 a rebuild, a concept) goes to a session you ask the user to open, not into this tab.
 
 **Sub-agents write long results to a file and return you at most ten lines.** Say so in
-every sub-agent prompt, and put the file path where you track lanes. Your context is the
+every sub-agent prompt with a `Report file: <absolute path>` line (the
+middle-management:work-packages block; the gate refuses a prompt without it), and put the file
+path where you track lanes. Your context is the
 scarce resource of the whole regime: once it fills with raw material, the routing stops.
 
 **Name the model, and whether the strongest was needed.** Every sub-agent you announce
@@ -378,6 +380,12 @@ not peer messages. README, "T3 Code", has the mechanics; the rules:
 - **Coordinator -> worker:** tasking, questions and handover by `t3_thread_send <threadId>`
   (it wakes a sleeping or settled thread). No `t3_thread_wait` afterwards: the answer arrives by
   itself. No poke, no keep-warm, no peer message into a T3 thread.
+- **Follow-through.** A worker writes every READY / LIVE / blocked / question report as a log
+  entry with `topics.py entry --status <s> [--stage ready|live] [--waits-on "user · <question> · rec: <r>"] "<headline>"`
+  (key from the lane dir or branch; the lane's first entry creates its topic), then reports. The
+  coordinator books what reaches it otherwise, and every answer or OK of your user, with
+  `topics.py entry --topic <key> ...` / `topics.py answer --topic <key> "<text>"`. Only booked
+  questions get reminders (README, "Follow-through").
 - **Keepalive.** A message that is exactly `Keepalive`: answer exactly `OK` and nothing else, as
   coordinator or worker. It is the only keep-alive text; the watcher does the checking, never the model.
 - **The watcher** `scripts/t3-watch.py` (user timer every 10 min, no model, no tokens) reads T3's

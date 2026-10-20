@@ -31,8 +31,9 @@ stage stays until another one is given; `building` clears review and OK, the wor
 waits_on/question/rec/since stay until --answered or a new --waits-on; case stays until
 --case-closed with the same REF. Scope: scope.py of the cwd. Key: --topic, else the worktree dir
 lane-<name> or ~/.cache/claude/wt/<name>, else the branch lane/<name>. The coordinator seat holder
-and every sub-agent pass --topic (sub-agents share their parent's sessionId); a key the scope
-does not know needs --new.
+and every sub-agent pass --topic (sub-agents share their parent's sessionId); a --topic the scope
+does not know needs --new (typo guard), a derived key creates its topic on the lane's first entry
+(it cannot be mistyped, and a worker cannot know whether it is the first).
 Config (<config dir>/middle-management.json, all optional): notifyCommand (message as $1 and on
 stdin), pageCommand (questions.json path as $1, its last stdout line = the link), userName (who
 counts as the user besides "user"), okBy (who gives the final OK, default the user),
@@ -426,7 +427,7 @@ def cmd_entry(a):
                                     "review", "ok", "next", "closed", "headline", "bullets")}
     f.update(sid=sid, name=a.name or reg.get("name") or "",
              thread="" if holder else thread_of(sid))
-    record(sc, key, f, new=a.new)
+    record(sc, key, f, new=a.new or not a.topic)
     print("topic %s (scope %s): entry in %s, state %s" % (key, sc, log_path(), state_path(sc)))
 
 
