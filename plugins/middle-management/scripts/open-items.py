@@ -211,7 +211,9 @@ def add(argv):
             _, keys = board()
             n = 1 + max([top] + [int(k.split("-W")[1]) for k in keys or ()
                                  if k.startswith(sid[:8] + "-")])
-            line = "- W%d · owner: %s · %s" % (n, argv[1], text)
+            # The stamp goes LAST: every parser splits owner and text off the front, so it only
+            # lengthens the text; topics.py tick reads it (` · added: YYYY-MM-DD HH:MM` at the end).
+            line = "- W%d · owner: %s · %s · added: %s" % (n, argv[1], text, time.strftime("%Y-%m-%d %H:%M"))
             print("%s-W%d" % (sid[:8], n))
         fh.write(line + "\n")
     print(path)

@@ -63,6 +63,22 @@ Path, first hit wins: `$MM_SESSION_LOG` · `sessionLog` in `<config-dir>/middle-
 `~/logs/session-log.md`. Create the file and its parent directory when they do not exist. The
 format is frozen — `scripts/peer-state.py` parses exactly this:
 
+**Written by `topics.py`, not by hand (0.11.0).** The closing entry is written at the end of step
+7b, so its review verdict and the closed marker are in it. `topics.py` appends it under the log's
+lock (day heading included), adds the lines `Topic:`, `Stage:`, `Review:` and the rest, and keeps
+the topic in the follow-through table (README, "Follow-through"):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/topics.py" entry --status completed --stage <ready|live|done> \
+  --review "<rounds, verdict>" [--waits-on "user · <question> · rec: <recommendation>"] \
+  [--case-closed "<REF> · <evidence>"] --closed "<topic headline>" "<what was done>" "Files modified: ..."
+```
+
+The key comes from your lane dir or branch; outside a lane, and always in the coordinator seat,
+pass `--topic <key>` (`--new` the first time the scope sees it). `--closed` writes the
+`Session: closed · <sessionId>` line; a bullet may never start with a structured word. The rules
+below describe what it writes, and are the fallback when `topics.py` is missing:
+
 ```
 ## 2026-01-15
 
@@ -88,7 +104,8 @@ format is frozen — `scripts/peer-state.py` parses exactly this:
 - **Lane teardown** — working a `/wt` lane? End it here: `/wt <name> done <topic>`, or
   `/wt <name> hold <topic> <hours>` naming the reason the slot has to stay, and the `/wt list`
   line that proves worktree and unit are gone goes in this entry as a bullet. No lane → skip it,
-  one line of the recap says so.
+  one line of the recap says so. A worktree under `~/.t3/worktrees/` belongs to T3 Code: never
+  `/wt done` or `git worktree remove` it; the coordinator removes it once merged and settled.
 - **`- Session: closed · <sessionId>`** — only in the entry that ends the session. Full id or a
   ≥8-character prefix (one matching two sessionIds on the machine names neither and is refused),
   optional ` — a few words` after it; stale 30 minutes after the entry's own timestamp if the
@@ -149,6 +166,7 @@ did not. The recap names the round count and the last reviewer's verdict, e.g. `
 rounds, last verdict CLEAN (Opus 5.5, xhigh)`, or after the cap of 4 the findings still open.
 Fixes are committed like step 7; findings still open after the cap join the step 5 list, the
 drop file (followed by a fresh `--wrapped`) and the handoff. A session that delivered nothing reviewable says so in one line.
+Now write step 4's closing entry with `topics.py entry ... --review "<rounds, verdict>" --closed`.
 
 ## 8. Recap, then the three closing lines
 
@@ -187,3 +205,14 @@ folded into a paragraph. A near-variant of your own invention — "closing out h
 here" — matches nothing: the session reads as still working and gets woken to be told it is
 finished, which costs it its whole conversation as fresh input. Report to the coordinator by peer message where one exists,
 otherwise to your user in chat; the **recap** goes in the tab, never through `notifyCommand`.
+
+**In a T3 Code thread** (`T3CODE_HOME` set) whose coordinator is bound to a thread: your report is
+the last text of this turn, and the plugin's Stop hook delivers it. No peer message to a T3
+coordinator. Tools first, recap last: only the final text block arrives. The last tool calls of
+the wrap settle, never archive: `t3_thread_organize settle` for each of your own sub-agent threads
+(`t3_thread_list` with sub-agents, filtered on `parentThreadId` = your thread), then the plain
+`settle` without a thread id for yourself (it takes effect when the turn completes). Settled is
+not gone: the coordinator re-opens you with `t3_thread_send`, you go on with your context, and
+your next wrap writes a new closed marker. A former coordinator forwards late reports to its
+successor with `t3_thread_send` and deletes its old report task (`delete_scheduled_task`) as
+the step before the settles.

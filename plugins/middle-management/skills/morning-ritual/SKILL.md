@@ -96,6 +96,13 @@ forbidden (the coordinator is its only writer), no pushes, no outward sends. Bel
 75% certainty whose a dirty file is: verify (mtime, transcript grep) or leave it
 uncommitted and flag it — never guess ownership.
 
+**T3 Code threads: settle, never archive.** A thread whose session-log entry carries
+`Session: closed · <sessionId>` but which is still unsettled (`t3_thread_list`; `peer-state.py`
+names the thread) gets settled, together with its sub-agent children, after a check for loose
+ends per thread: last run state, a pending request, open items in its drop file, a dirty
+worktree. Unpin pinned children first (a pinned thread never auto-settles). Never in bulk
+without the list shown first; a thread with a loose end stays and goes to the day plan.
+
 Done when every yesterday-transcript carries one of the four verdicts.
 
 ## 4. Open-items sweep → board
@@ -117,6 +124,13 @@ active lanes against your cap, re-scan the queue for packages the overnight land
 and put base-moved notes on the board (overnight, every lane session is idle past the hour, so
 none of them gets a message).
 
+**Topics.** Read `<board dir>/<board name>.topics.md` (rendered by `topics.py` on every watcher
+tick) and run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/topics.py" lint`: a listed log entry
+without `Topic:` gets its topic booked with `topics.py entry --topic <key>`. Book your user's
+answers and OKs from overnight with `topics.py answer --topic <key> "<text>"` and
+`topics.py entry --topic <key> --status completed --stage done --ok "<who time>" "<headline>"`.
+A topic leaves the table only with stage done, a review and an OK (and its case closed).
+
 ## 5. Machine cleanup
 
 Free what yesterday left behind, before the day plan — so the plan reports what was
@@ -131,6 +145,9 @@ freed. Gather in one read-only pass, then act through ONE sub-agent with explici
   by pattern. A dirty merged tree goes to your user — what is the dirty file? — never discarded
   blind. Without the reaper the same sweep by hand: `/wt list`, then `/wt <name> done <topic>`
   for every lane that reads `clean` and `merged yes`.
+- **T3 worktrees** (`~/.t3/worktrees/`, never touched by `/wt` or the reaper): remove one only
+  when its branch is merged into main AND its thread is settled (`t3_worktree_list` +
+  `t3_thread_list settled=true`), with `git worktree remove`, never `--force` on a dirty tree.
 - **Branch deletion:** branches of merged or closed pull requests go without asking, with
   `git update-ref -d refs/heads/<branch>` after recording the tip SHA and checking that no
   worktree still has the branch checked out (`git branch -D` is deny-listed in careful setups,

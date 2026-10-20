@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# middle-management plugin — the coordinator seat: claim / release / status.
+# middle-management plugin — the coordinator seat: claim / release / status, and under T3 Code
+#   t3-bind / t3-handover (the sidecar orchestrator.t3.json next to the marker, plan 1.1/1.2, D0).
 # Consumers: commands/orchestrator.md (the /orchestrator slash command), the
-#   stale-marker hint printed by hooks/session-role.sh, tests/run.sh.
+#   stale-marker hint printed by hooks/session-role.sh, tests/run.sh, tests/t3-seat.sh.
+#   The sidecar it writes is read by hooks/t3-report.sh, hooks/session-role.sh, scripts/t3-wake.sh,
+#   scripts/t3-watch.py, scripts/peer-state.py and scripts/orch-heartbeat.sh.
 #   The marker it writes is read by hooks/session-role.sh; the wrap entry it backfills on an
 #   expired seat is read by scripts/peer-state.py.
 #   Calls scripts/peer-state.py (stale-seat check on claim, holder line on status) and, only
-#   when the config has a "scopes" key, scripts/scope.py (which seat this session's scope uses).
+#   when the config has a "scopes" key or "scopeMode": "per-root", scripts/scope.py (which seat this
+#   session's scope uses); t3-bind calls scripts/t3-wake.sh (the one takeover wake to the old holder).
 #
 # Why a marker file and not the session name: an editor tab title never reaches the
 # session registry, and `claude -n <name>` only exists at start — but the coordinator
@@ -40,12 +44,56 @@ MY_NAME=$(jq -r '.name // "unnamed"' "$REG/$me.json")
 # scope, decided by the directory it was started in (its registry cwd). No key: nothing here runs.
 # Trade-off: with scopes, status and release need python3 too; the escape hatch is removing the key.
 SCOPE=""
-if jq -e '(.scopes | arrays | length) > 0' "$(bash "$DIR/config-check.sh" file)" >/dev/null 2>&1; then
+if jq -e '([.scopes | arrays | .[]] | length > 0) or (.scopeMode == "per-root")' "$(bash "$DIR/config-check.sh" file)" >/dev/null 2>&1; then
   S=$(python3 "$DIR/scope.py" of "$(jq -r '.cwd | if type == "string" then . else "" end' "$REG/$me.json")" 2>/dev/null) || {
     echo "Scopes are configured, but this session's scope could not be resolved ($DIR/scope.py, python3). Nothing changed."; exit 1; }
   IFS=$'\t' read -r SCOPE SDIR _ <<<"$S"
   MARKER="$SDIR/orchestrator"
+  # scopeMode per-root: a session started outside every project root has no seat (no catch-all).
+  if [ "$SCOPE" = none ]; then
+    case "${1:-status}" in
+      claim|t3-bind|t3-handover) echo "REFUSED: this session was started outside every project root (scopeMode per-root): there is no coordinator seat here. Start the coordinator in the project's folder."; exit 1 ;;
+      *) echo "Standalone: this session was started outside every project root (scopeMode per-root), so it has no scope and no coordinator."; exit 0 ;;
+    esac
+  fi
 fi
+# T3 Code (plan 1.1): the coordinator's thread binding beside the marker. reportUrl is a capability
+# into a full-access thread: it is never printed, logged or put in argv.
+SIDE="$(dirname "$MARKER")/orchestrator.t3.json"
+side() { jq -r "$1" "$SIDE" 2>/dev/null; }   # $1 = a jq filter that never selects reportUrl
+side_id() { [ -f "$SIDE" ] && side '.sessionId // empty'; }
+# Rewrite the sidecar from a jq filter on the old one ($1, args after it), 0600 from the first byte,
+# atomically (tmp in the same dir + mv), so a reader never sees half a file or a looser mode.
+side_write() {
+  local f="$1" tmp; shift
+  tmp=$(umask 077; mktemp "$SIDE.XXXXXX") || return 1
+  if [ -f "$SIDE" ]; then jq "$@" "$f" "$SIDE" > "$tmp"; else jq -n "$@" "$f" > "$tmp"; fi     && chmod 600 "$tmp" && mv -f "$tmp" "$SIDE" || { rm -f "$tmp"; return 1; }
+}
+# This session's own T3 thread (F2): the one provider log keyed with its session id, ':' as '-'.
+my_thread() {
+  local m; m=$(grep -lF "\"session_id\":\"$MY_ID\"" "${T3CODE_HOME:-$HOME/.t3}"/userdata/logs/provider/events.*.log 2>/dev/null)
+  [ -n "$m" ] && [ "$(printf '%s\n' "$m" | wc -l)" -eq 1 ] || return 1
+  m=${m##*/events.}; printf '%s' "${m%.log}"
+}
+norm() { printf '%s' "${1//:/-}"; }
+# Flags (anywhere after the subcommand): --t3-asleep-ok (only on the user's word), --thread/--title/
+# --task/--model (t3-bind, claim --thread), --to-thread/--to-title (t3-handover).
+ASLEEP_OK=""; F_THREAD=""; F_TITLE=""; F_TASK=""; F_MODEL=""; F_TO_THREAD=""; F_TO_TITLE=""; POS=()
+CMD="${1:-status}"; [ $# -gt 0 ] && shift
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --t3-asleep-ok) ASLEEP_OK=1 ;;
+    --thread)    F_THREAD="${2:-}"; shift ;;
+    --title)     F_TITLE="${2:-}"; shift ;;
+    --task)      F_TASK="${2:-}"; shift ;;
+    --model)     F_MODEL="${2:-}"; shift ;;
+    --to-thread) F_TO_THREAD="${2:-}"; shift ;;
+    --to-title)  F_TO_TITLE="${2:-}"; shift ;;
+    *) POS+=("$1") ;;
+  esac
+  shift
+done
+set -- "$CMD" "${POS[@]}"
 
 # Alive = a registry entry with this sessionId, kind "interactive" and a pid that answers
 # kill -0 — the same rule hooks/session-role.sh applies (the sessionId is the identity, .name
@@ -229,7 +277,32 @@ case "${1:-status}" in
       echo "its worktree $HCWD). The seat stays where it is; try again once git answers."
       exit 1
     fi
-    if [ -n "$HNAME" ] && [ "$HID" != "$MY_ID" ]; then
+    # T3 handover (D0, wake-flow.md): the outgoing coordinator named THIS thread with t3-handover, so
+    # the successor takes the seat whether the holder is still working, wrapping or asleep. The thread
+    # is --thread (from t3_thread_list currentThreadId) or this session's provider log.
+    HANDOVER=""
+    if [ -n "$HID" ] && [ "$HID" != "$MY_ID" ] && [ "$(side_id)" = "$HID" ]; then
+      TO=$(side '.handover.toThreadId // empty'); MYT="${F_THREAD:-$(my_thread)}"
+      if [ -n "$TO" ] && [ -n "$MYT" ] && [ "$(norm "$TO")" = "$(norm "$MYT")" ]; then
+        HANDOVER=1; echo "HANDOVER: $(side '.title // "the coordinator"') handed this seat to this thread ($MYT). Taking it over."
+        echo "  next: create your report task and run t3-bind; it wakes the previous holder once."
+      fi
+    fi
+    # Asleep is not gone (plan 1.2.6, F13): T3 ends an idle thread's process after 30 min, the seat
+    # holder then has no live registry entry, but its thread still wakes on every message.
+    if [ -z "$HANDOVER" ] && [ -n "$HID" ] && [ -z "$HNAME" ] && [ "$HID" != "$MY_ID" ] && [ "$(side_id)" = "$HID" ]; then
+      if [ -z "$ASLEEP_OK" ]; then
+        echo "REFUSED: the coordinator $HID is asleep in T3 thread \"$(side '.title // "?"')\" ($(side '.threadId // "?"')), not gone."
+        echo "Wake it: t3_thread_send $(side '.threadId // "?"') (a message wakes a T3 thread). A handover goes through"
+        echo "its t3-handover. Only on your user's explicit word: claim --t3-asleep-ok."
+        exit 1
+      fi
+      OLD_TASK=$(side '.reportTaskId // "?"'); OLD_THREAD=$(side '.threadId // "?"')
+      rm -f "$SIDE"
+      echo "OVERRIDE (--t3-asleep-ok): the sidecar of the asleep coordinator is deleted. Delete its old report"
+      echo "  task too: delete_scheduled_task $OLD_TASK (bound to thread $OLD_THREAD)."
+    fi
+    if [ -z "$HANDOVER" ] && [ -n "$HNAME" ] && [ "$HID" != "$MY_ID" ]; then
       # Its tab is open — but it may have wrapped last night and simply never been closed.
       # Ask the disk instead of the session: only a holder that demonstrably wrapped AND has
       # been quiet past the cache window loses its seat, and the evidence is printed so the
@@ -351,6 +424,13 @@ case "${1:-status}" in
     # types that by accident, and a coordinator in the middle of a reconnect looks dead for a
     # moment. This is also how the regime is switched OFF after the coordinator's process ended.
     if [ -z "$HID" ]; then echo "There is no coordinator — nothing to release."; exit 0; fi
+    RTASK=""; [ "$(side_id)" = "$HID" ] && RTASK=$(side '.reportTaskId // empty')
+    if [ "$HID" != "$MY_ID" ] && [ -z "$HNAME" ] && [ "${2:-}" = "$HID" ] && [ "$(side_id)" = "$HID" ] && [ -z "$ASLEEP_OK" ]; then
+      echo "REFUSED: $HID is asleep in T3 thread \"$(side '.title // "?"')\" ($(side '.threadId // "?"')), not gone."
+      echo "Wake it: t3_thread_send $(side '.threadId // "?"'). Only on your user's explicit word:"
+      echo "  bash $SELF release $HID --t3-asleep-ok"
+      exit 1
+    fi
     if [ "$HID" != "$MY_ID" ]; then
       if [ -n "$HNAME" ]; then
         echo "REFUSED: the coordinator is \"$HNAME\", not this session (\"$MY_NAME\")."
@@ -367,6 +447,8 @@ case "${1:-status}" in
       fi
     fi
     rm -f "$MARKER"
+    [ "$(side_id)" = "$HID" ] && rm -f "$SIDE"
+    [ -n "$RTASK" ] && echo "T3: the sidecar is deleted. Delete the report task now: delete_scheduled_task $RTASK"
     if [ "$HID" = "$MY_ID" ]; then
       echo "OK: seat released. There is no coordinator now — the role regime is OFF."
     else
@@ -376,6 +458,11 @@ case "${1:-status}" in
     ;;
   status)
     echo "This session: \"$MY_NAME\" ($MY_ID)"
+    if [ -f "$SIDE" ]; then   # never the URL
+      echo "T3 sidecar:   $(side '"thread \(.threadId // "?") \"\(.title // "?")\", session \(.sessionId // "?"), model \(.model // "?"), report task \(.reportTaskId // "?")"')"
+      [ -n "$(side '.handover // empty')" ] && echo "              handover open to $(side '"\(.handover.toTitle // "?") (thread \(.handover.toThreadId // "?")) since \(.handover.since // 0 | todate)"')"
+      [ -n "$(side '.previous // empty')" ] && echo "              previous holder $(side '"\(.previous.title // "?") (thread \(.previous.threadId // "?"), session \(.previous.sessionId // "?"))"')"
+    fi
     if [ -z "$HID" ];      then echo "Coordinator:  none — the role regime is OFF."
     elif [ -z "$HNAME" ];  then echo "Coordinator:  the marker points at a session that is not visibly alive ($HID) — 'claim' takes it over, 'release $HID' clears it."
       moved_note
@@ -391,5 +478,43 @@ case "${1:-status}" in
       fi
     fi
     ;;
-  *) echo "Usage: orchestrator.sh [claim|release [<sessionId of the not visibly alive holder>]|status]"; exit 1 ;;
+  t3-bind)
+    # Plan 1.2 step 3: the holder binds its T3 thread and report task. The webhook URL comes on stdin.
+    [ "$HID" = "$MY_ID" ] || { echo "REFUSED: this session does not hold the seat (claim first)."; exit 1; }
+    [ -n "$F_THREAD" ] && [ -n "$F_TITLE" ] && [ -n "$F_TASK" ] && [ -n "$F_MODEL" ] \
+      || { echo "Usage: orchestrator.sh t3-bind --thread <id> --title <t> --task <taskId> --model <m>   (report URL on stdin)"; exit 64; }
+    URL=$(head -c 4096 | tr -d '[:space:]')
+    # Trust boundary: the same shape t3-wake.sh accepts (it lands in a curl config line).
+    printf '%s' "$URL" | grep -Eq '^https?://[^"\\[:space:]]+$' \
+      || { echo "REFUSED: stdin carries no usable http(s) report URL. Nothing changed."; exit 1; }
+    OLD_SID=$(side_id); PREV='null'
+    if [ -n "$OLD_SID" ] && [ "$OLD_SID" != "$MY_ID" ]; then
+      PREV=$(jq -c '{sessionId, threadId, title, reportTaskId}' "$SIDE" 2>/dev/null) || PREV='null'
+      # The takeover wake goes to the PREVIOUS report address, so it is sent before the overwrite.
+      TXT=$(umask 077; mktemp) && printf 'seat taken over by %s (thread %s)\n' "$F_TITLE" "$F_THREAD" > "$TXT"
+      MM_SCOPE="${SCOPE:-default}" MM_SESSION_ID="$MY_ID" bash "$DIR/t3-wake.sh" "$F_TITLE" "$TXT" >/dev/null 2>&1; WRC=$?
+      rm -f "$TXT"
+      if [ "$WRC" -eq 0 ]; then echo "Woke the previous holder $(side '.title // "?"') ($(side '.threadId // "?"')): seat taken over."
+      else echo "WARNING: the previous holder was NOT woken (t3-wake rc $WRC). Send it yourself: t3_thread_send $(side '.threadId // "?"') \"seat taken over by $F_TITLE (thread $F_THREAD)\""; fi
+    elif [ "$OLD_SID" = "$MY_ID" ]; then
+      PREV=$(jq -c '.previous // null' "$SIDE" 2>/dev/null) || PREV='null'   # a re-bind keeps it
+    fi
+    # The URL reaches jq through a process substitution (printf is a builtin: in no argv).
+    side_write '{sessionId: $s, threadId: $t, title: $ti, model: $m, reportTaskId: $k, reportUrl: ($u | rtrimstr("\n")), previous: $p}
+                | if .previous == null then del(.previous) else . end' \
+      --arg s "$MY_ID" --arg t "$F_THREAD" --arg ti "$F_TITLE" --arg m "$F_MODEL" --arg k "$F_TASK" \
+      --rawfile u <(printf '%s\n' "$URL") --argjson p "$PREV" \
+      || { echo "FAILED: could not write $SIDE. Nothing is bound; delete the report task or retry."; exit 1; }
+    echo "OK: T3 thread $F_THREAD (\"$F_TITLE\") bound to the seat, report task $F_TASK, model $F_MODEL."
+    echo "After a model or effort change: update_scheduled_task $F_TASK (or claim + t3-bind again)."
+    ;;
+  t3-handover)
+    # The outgoing holder names its successor right after launching its thread (wake-flow.md step 1).
+    [ "$HID" = "$MY_ID" ] && [ "$(side_id)" = "$MY_ID" ] || { echo "REFUSED: only the bound seat holder hands over (claim + t3-bind first)."; exit 1; }
+    [ -n "$F_TO_THREAD" ] && [ -n "$F_TO_TITLE" ] || { echo "Usage: orchestrator.sh t3-handover --to-thread <id> --to-title <t>"; exit 64; }
+    side_write '.handover = {toThreadId: $t, toTitle: $ti, since: now | floor}' --arg t "$F_TO_THREAD" --arg ti "$F_TO_TITLE" \
+      || { echo "FAILED: could not write $SIDE."; exit 1; }
+    echo "OK: handover to \"$F_TO_TITLE\" ($F_TO_THREAD) recorded. You keep the seat and the report task until it claims."
+    ;;
+  *) echo "Usage: orchestrator.sh [claim [--thread <id>] [--t3-asleep-ok]|release [<sessionId of the not visibly alive holder>] [--t3-asleep-ok]|status|t3-bind --thread <id> --title <t> --task <taskId> --model <m>|t3-handover --to-thread <id> --to-title <t>]"; exit 1 ;;
 esac

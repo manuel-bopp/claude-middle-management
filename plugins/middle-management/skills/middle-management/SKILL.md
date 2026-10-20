@@ -1,7 +1,7 @@
 ---
 name: middle-management
 description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work, such as appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, whether an approval that arrives through that channel counts, when a lane's dev server or worktree may be cleaned up and when it may not, a second coordinator for another project root (scopes), or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
-version: 0.4.0
+version: 0.5.0
 ---
 
 # Team sessions
@@ -136,11 +136,14 @@ silently; that is also what keeps the lane reaper off it.
 **If the coordinator dies, keep working your lane.** Hold every outward coordination the
 regime routes through the coordinator (posts, tickets, pull requests, asks to the user),
 close your books when done or blocked, and report to whoever claims next. The role hook
-tells you when the marker points at a session that is not visibly alive.
+tells you when the marker points at a session that is not visibly alive. Under T3 Code a
+coordinator whose process ended is **asleep**, not dead: your next report wakes it ("T3 Code
+mode" below).
 
 **Orchestrator.** You hold the conversation with the user: plan roughly together, write a
 handoff doc, then task a worker session with it — by peer message carrying the PATH to
-the doc, never its content (peer messages are plain text, not files). You are the only
+the doc, never its content (peer messages are plain text, not files); under T3 Code by
+`t3_thread_send <threadId>` instead. You are the only
 session that connects workers. You track who works on what and what is pending. You are
 the sole writer of the board. You do not build yourself: implementation goes to worker
 sessions, and small clear jobs (one-file fix, research, mechanical sweep) to a sub-agent
@@ -361,6 +364,37 @@ is worth exactly as much as their word in the tab: a merge, a push, a deletion, 
 going outward. A loose "yes" with nothing to anchor it to is not: ask again, naming the one
 item, rather than guessing which of the three open asks they meant.
 
+## T3 Code mode
+
+When a session runs in a T3 Code thread (`T3CODE_HOME` is set), messages travel as T3 turns,
+not peer messages. README, "T3 Code", has the mechanics; the rules:
+
+- **Seat binding.** The coordinator claims, creates its report task (a webhook bound to its own
+  thread) and runs `t3-bind` (`/orchestrator`, T3 branch). The sidecar
+  `<marker dir>/orchestrator.t3.json` holds its thread id and the report URL, 0600; the URL is
+  never printed.
+- **Worker -> coordinator:** the last text of each worker turn, delivered by the Stop hook. Tools
+  first, report last. "report NOT delivered" -> send it yourself with `t3_thread_send <coordinator thread>`.
+- **Coordinator -> worker:** tasking, questions and handover by `t3_thread_send <threadId>`
+  (it wakes a sleeping or settled thread). No `t3_thread_wait` afterwards: the answer arrives by
+  itself. No poke, no keep-warm, no peer message into a T3 thread.
+- **Keepalive.** A message that is exactly `Keepalive`: answer exactly `OK` and nothing else, as
+  coordinator or worker. It is the only keep-alive text; the watcher does the checking, never the model.
+- **The watcher** `scripts/t3-watch.py` (user timer every 10 min, no model, no tokens) reads T3's
+  thread list and notifies your user on a usage limit, a click pending >10 min, a run stuck >3 h,
+  a lost report, an open handover or a folder without coordinator; for what the coordinator must
+  do it wakes the coordinator. It also renders the topics table and sends the reminders
+  (README, "Follow-through").
+- **Settle, never archive.** A worker settles its own sub-agent threads and then itself as the
+  last calls of its wrap. A T3 worktree (`~/.t3/worktrees/`) belongs to T3: the worker never
+  removes it.
+- **Per folder.** With `scopeMode: "per-root"` every project root is its own scope with its own
+  seat, sidecar, topics file and watcher pass, and there is no catch-all: a session outside
+  every claimed root runs standalone and wakes nobody.
+- **Sub-agents.** Every sub-agent prompt follows the `middle-management:work-packages` scheme
+  (a `Report file:` line, package list first, results appended at once); a hook refuses a prompt
+  without it. A dead sub-agent is resumed with `SendMessage` to its id before a new one is spawned.
+
 ## Gotchas
 
 - **An editor tab title is not the peer name.** Renaming a tab changes only the display;
@@ -460,7 +494,10 @@ cat "$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" dir)"/sessions/*.jso
 ```
 
 Then it sends that session the PATH to the handoff doc by peer message. The outgoing
-coordinator releases the seat, the new one claims it.
+coordinator releases the seat, the new one claims it. Under T3 Code the outgoing coordinator
+launches the successor's thread, sends it the path with `t3_thread_send`, runs
+`orchestrator.sh t3-handover --to-thread <id> --to-title <title>` and keeps seat and report task
+until the successor has claimed (`/orchestrator`, T3 branch).
 
 ## Troubleshooting
 
@@ -593,6 +630,9 @@ per wait phase (about 2.5 h), then the session goes cold; the count starts over 
 moves. Never on `permission`: a message queued behind a permission dialog starts no turn, so it
 refreshes nothing. Off for the whole machine: `touch <config dir>/state/keep-warm/off`. One
 journal line per ping, no alarm. Receiving it: reply `ok` and nothing else.
+**Not under T3 Code:** a poke does not reach a T3 thread, and keep-warm is not needed there (T3
+wakes a thread on its next message). The heartbeat skips a coordinator that has a T3 sidecar;
+`t3-watch` covers it.
 
 Files after the install: `<config dir>/middle-management-heartbeat/` — the scripts and
 your copy of the poke prompt, which later plugin updates do not touch; **after a plugin

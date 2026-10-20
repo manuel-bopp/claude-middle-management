@@ -1,5 +1,5 @@
 ---
-description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user; optionally install the stuck-coordinator heartbeat and the lane reaper
+description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user; optionally install the stuck-coordinator heartbeat, the lane reaper, the headless morning ritual and the T3 Code watcher
 allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 ---
 
@@ -34,7 +34,16 @@ Schema (nothing else is valid):
   ],
   "scopes": [
     { "name": "ff", "root": "/abs/path/project", "board": "/abs/path/ff-board.md" }
-  ]
+  ],
+  "scopeMode": "per-root",
+  "t3TokenFile": "~/.config/t3-threads/token",
+  "onLimitCommand": "",
+  "userName": "user",
+  "okBy": "user",
+  "remindAfterHours": 2,
+  "remindWindow": "08:00-22:00",
+  "pageCommand": "",
+  "workPackagesGate": true
 }
 ```
 
@@ -200,6 +209,29 @@ repositories; the user names them.
     inert once its seat is released; an alarmed heartbeat episode in it never
     gets its closing alarm; the user may delete the directory then (re-adding the
     old name would otherwise revive it).
+
+14. **Scope mode (optional).** `scopeMode: "per-root"` makes every project root its own
+    scope (own seat, sidecar, topics file and watcher pass) and drops the catch-all
+    `default`: a session outside every claimed root runs standalone. Explicit `scopes`
+    roots still win. Switching it on moves the default seat of a root that is not listed
+    to `<config dir>/state/scopes/<basename>-<6 hex>/`, so list the held seats first (as
+    in item 13) and offer to keep a root's seat where it is by adding it to `scopes`.
+
+15. **Follow-through** (README, "Follow-through"). Ask for `userName` (the name the user
+    appears under in "waits on", e.g. their first name; without it only "user" counts),
+    `okBy` (who gives the final OK, default the user), `remindAfterHours` (2) and
+    `remindWindow` ("08:00-22:00"), and `pageCommand`: a command that gets a
+    pathfinder-schema `questions.json` path as `$1` and prints the page link as its last
+    line (without it, more than three due questions go out as one inline digest).
+
+16. **T3 Code** (only where sessions run in T3 Code threads). `t3TokenFile` (default
+    `~/.config/t3-threads/token`, mode 600) and `onLimitCommand` (optional, run once per
+    usage-limit episode with the limited thread ids as arguments; output is dropped).
+    Then offer step 8.
+
+17. **Work-packages gate.** `workPackagesGate` (default `true`): a sub-agent prompt
+    without a `Report file:` line is refused (README, "Sub-agents"). `false` switches the
+    gate and the sub-agent report check off.
 
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped
@@ -429,3 +461,42 @@ Then tell the user, in plain text: budget, timeout, model and permission mode ar
 the header of the runner); a test run is `systemctl --user start orch-morning-ritual.service` and
 reaches their phone; **after every plugin update re-run this step**. Disarm with
 `systemctl --user disable --now orch-morning-ritual.timer`; never run that here unasked.
+
+## Step 8: T3 Code watcher (optional, Linux only, only with T3 Code)
+
+`scripts/t3-watch.py` is a systemd **user** timer (every 10 minutes, no model): it reads T3's
+thread list and notifies on usage limits, clicks pending >10 min, stuck runs, lost reports, an
+open handover and a folder without coordinator, retries a limited coordinator with `Keepalive`,
+and runs the topics tick (table, reminders, daily digest). Offer it when sessions run in T3 Code
+threads or the follow-through reminders are wanted; otherwise skip this step and say so.
+
+Preconditions: the four of step 5, plus `curl`, and `claude` on this PATH (the limit probe).
+
+Token: keep or mint the bearer token the watcher reads (`t3TokenFile`). It never prints the
+token; re-run it after every `t3 update`:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/t3-token.sh"
+```
+
+Install: copies the scripts OUT of the plugin, for the same reason as step 5:
+
+```bash
+CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
+CFG_DIR="$(bash "$CHECK" dir)"; TW="$CFG_DIR/middle-management-t3watch"; UNITS="$HOME/.config/systemd/user"
+mkdir -p "$TW" "$UNITS"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{t3-watch.py,t3-wake.sh,topics.py,open-items.py,peer-state.py,config-check.sh,scope.py,unit-failure-alarm.sh} "$TW/"
+for u in t3-watch.service t3-watch.timer; do
+  sed "s|__T3WATCH_DIR__|$TW|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
+    "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
+done
+sed "s|__HEARTBEAT_DIR__|$TW|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
+  "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
+systemctl --user daemon-reload && systemctl --user enable --now t3-watch.timer
+systemctl --user list-timers t3-watch.timer --no-pager
+python3 "$TW/t3-watch.py" --dry-run
+```
+
+The dry run prints what a tick would send and sends nothing. Tell the user, in plain text: post
+counts per thread and day are `t3-watch.py --stats`; **after every plugin update re-run this
+step**. Disarm with `systemctl --user disable --now t3-watch.timer`; never run that here unasked.

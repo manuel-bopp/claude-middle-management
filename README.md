@@ -98,6 +98,10 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 | Open-items drop | script + banner line | Every session writes each "for later" item the moment it appears, with `scripts/open-items.py add`, to its own file under `<config-dir>/open-items/`; the coordinator's banner counts what is not on the board yet, `list` shows it, and `done` deletes a file only once every key is on the board and the session is gone. A to-do no longer dies with a session that never wrapped, or with a coordinator hand-over. |
 | `morning-ritual` skill | skill | The coordinator’s day-opener: messages delta, repo state, wrap audit, board sweep, machine cleanup, your user’s to-do list, day plan. The to-do list also runs alone ("todo list", "meine offenen To-Dos"): every open `owner: user` item from the board and the drops, grouped decide / click / run / read, only what was not delivered yet (`open-items.py todo`). Coordinator sessions only; carries CUSTOMIZE markers for your team’s stack. |
 | Headless morning ritual | systemd user timer (optional, Linux) | Weekdays 07:30: nothing moved since the last delivered ritual → one "no progress since <date>" line, no model run. Otherwise a 25-second login probe (429/401/no answer → a second credential from a file the unit names), the `morning-ritual` skill under `--max-budget-usd` and a hard timeout, and the day plan through your `notifyCommand`. A failure arrives as headline + cause + fix command, not journal lines. Installed by setup step 7; see [Headless morning ritual](#headless-morning-ritual). |
+| T3 report hook | Stop hook (T3 Code only) | In a T3 Code thread whose scope's coordinator is bound to a thread: sends the last text of each worker turn to the coordinator's report task, which wakes it, also when it is asleep. Skips interim turns while its own sub-agents run, repeats and a bare `OK`; a failed send is told to the session once. See [T3 Code](#t3-code). |
+| T3 watcher | systemd user timer (optional, Linux) | Every 10 minutes, no model: usage limits (with a retry), clicks pending, stuck runs, lost reports, an open handover, a folder without coordinator, and the topics tick. Installed by setup step 8. |
+| Follow-through | script + timer tick | `scripts/topics.py` is the one writer of a topic's state: it appends the session-log entry and keeps a table `<board>.topics.md`, a reminder digest and a daily digest, so no topic drops out of sight before it is done, reviewed and OK'd. See [Follow-through](#follow-through). |
+| `work-packages` skill + two hooks | skill, PreToolUse + SubagentStop hooks | Every sub-agent writes its package list into a report file first and appends each result at once, so a sub-agent that dies at 99 % leaves its work behind. A prompt without a `Report file:` line is refused; a sub-agent that ends without touching its report is held once. See [Sub-agents](#sub-agents). |
 | Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. The same tick keeps waiting sessions warm: a live, unwrapped session idle 45 to 55 minutes on an open question (or a hold file) gets one "reply ok" ping, at most 3 per wait phase, so the answer does not cost it its whole context again. Installed by setup step 5. |
 
 ## How the roles work
@@ -183,6 +187,9 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   "reaperMaxHours": 10,
   "reaperOwnerlessMinutes": 30,
   "reaperDigestHour": 7,
+  "userName": "Alex",
+  "pageCommand": "/home/you/bin/questions-page.sh",
+  "workPackagesGate": true,
   "protectedCheckouts": [
     { "name": "app",
       "root": "/home/you/code/app",
@@ -222,7 +229,13 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   branches start from — setup always writes it explicitly, and `serve` is the dev-server
   command `/wt <name> run <topic>` starts when the caller passes none.
 - `scopes` (optional): a second, independent coordinator regime per project root, with its own
-  seat and board. See [Scopes](#scopes).
+  seat and board. `scopeMode: "per-root"` (optional) makes every project root its own scope. See [Scopes](#scopes).
+- `t3TokenFile` (optional, default `~/.config/t3-threads/token`, mode 600) and `onLimitCommand`
+  (optional, run once per usage-limit episode with the limited thread ids as arguments): the T3
+  watcher. See [T3 Code](#t3-code).
+- `userName`, `okBy`, `remindAfterHours`, `remindWindow`, `pageCommand` (optional, defaults
+  `user` / the user / `2` / `08:00-22:00` / none): follow-through. See [Follow-through](#follow-through).
+- `workPackagesGate` (optional, default `true`): the sub-agent report gate. See [Sub-agents](#sub-agents).
 - No config file = roles **plus the staging guard**: blanket staging is blocked out of the box,
   because sessions share a checkout long before anyone configures one. The worktree part is what
   stays completely silent. Working solo? `surgicalStaging: false` turns the guard off.
@@ -290,6 +303,15 @@ list the second project's root under `scopes`:
 - **Expired seats:** `claim`'s stale and expired takeover (and its wrap backfill) only ever look
   at the holder of the caller's own scope's marker. A holder alive in another scope is not
   expired, it simply no longer holds the seat, so it is never backfilled.
+- **`scopeMode: "per-root"`** (0.11.0): every project root is its own scope, with no catch-all
+  `default`. A path under a listed `scopes` root keeps that scope; any other path belongs to the
+  main checkout of its git repo (for a T3 worktree under `~/.t3/worktrees/` that is the T3
+  project's `workspaceRoot`). Its name is `<basename>-<6 hex of the root>`, its state dir
+  `<config-dir>/state/scopes/<name>/`, created by its first claim, and it has no board (give a
+  root that needs one an explicit `scopes` entry). A path in no git repo is scope `none`: a
+  standalone session, no seat, no banner, no reports. `none` is reserved like `default`.
+  Switching it on moves the seat of a root that is not listed out of `state/orchestrator`, so
+  list that root under `scopes` to keep its seat where it is, or re-claim.
 - **Requirements:** `python3` resolves scopes once a `scopes` key exists (the role hook,
   `/orchestrator` including `status` and `release`, the heartbeat); git 2.31 or newer for the
   worktree mapping (older git maps no worktree, never a wrong one). Without the key nothing of
@@ -354,6 +376,11 @@ entry header, middle dot `·` in the closed line:
   the **sessionId** (`/orchestrator status` prints it), because display names are recycled and
   change across a resume. Free text may follow the id. This line is what makes a session
   *declared* finished rather than inferred.
+- Optional lines (0.11.0, written by `scripts/topics.py entry`, see [Follow-through](#follow-through)):
+  `- Topic: <key>`, `- Stage: building|ready|reviewed|live|done`, `- Waits on: <who> · <question> · rec: <r>`,
+  `- Answered: <text>`, `- Case: <ref>`, `- Case closed: <ref> · <evidence>`, `- Review: <rounds, verdict>`,
+  `- OK: <who time>`, `- Next: <step>`. The `Status:` values stay as they are; `peer-state.py`
+  ignores the new lines.
 
 Entries are appended, so the last entry naming a session is the one that counts; an entry whose
 day heading is not the day of that session's last turn is disregarded rather than believed.
@@ -363,6 +390,92 @@ indistinguishable from an absent file, which is why it is written out here.
 Until a log exists the role hook says so on every message instead of asking for the closed line,
 and `plugins/middle-management/templates/session-log.md` is a skeleton to start one from — copy
 it to the resolved path. One file per machine, never one per repository.
+
+## T3 Code
+
+T3 Code runs each Claude session as a thread and ends a thread's process after
+30 minutes idle. A peer message cannot reach such a thread, and a sleeping coordinator does not
+count as alive, so 0.11.0 adds a T3 mode. It is active when `T3CODE_HOME` is set (T3 sets it for
+every thread, hooks included).
+
+- **Sidecar.** On `/orchestrator claim` the coordinator creates a report task (a T3 webhook
+  scheduled task bound to its own thread, prompt `{{body.prompt}}`) and runs `orchestrator.sh t3-bind`
+  with the task's URL on stdin. That writes `<marker dir>/orchestrator.t3.json`, mode 0600:
+  `{sessionId, threadId, title, model, reportTaskId, reportUrl}`, plus `previous` and `handover`
+  during a handover. The URL is a capability into a full-access thread: never printed, logged or
+  put in argv; only `scripts/t3-wake.sh` reads it.
+- **Wake paths.** (1) Every session that is not the current coordinator: its Stop hook
+  (`hooks/t3-report.sh`) sends the last text of each turn through `t3-wake.sh`, which counts it as
+  delivered only on HTTP 202. A failure blocks the session once with "report NOT delivered ... send
+  it yourself with t3_thread_send <thread>" and lands in `<config-dir>/state/t3-report/failures.log`.
+  (2) The watcher, only on an anomaly. (3) The coordinator tasks a worker with `t3_thread_send`,
+  which wakes it, also after settle. A pure retry or liveness ping is the single word `Keepalive`,
+  never wrapped in other text; the answer is exactly `OK`.
+- **Asleep is not gone.** A holder whose process ended but whose sidecar names it is "asleep in T3":
+  the banner says so instead of "stale", `peer-state.py` shows `asleep (T3)` and a thread column,
+  and `claim` / `release <id>` refuse with "wake it: t3_thread_send <id>". `--t3-asleep-ok`
+  overrides, only on the user's word.
+- **Handover.** The outgoing coordinator launches the successor's thread and runs
+  `orchestrator.sh t3-handover --to-thread <id> --to-title <title>`, keeping seat and report task.
+  The successor's `claim --thread <id>` takes the seat even from the living holder; its `t3-bind`
+  wakes the old holder once ("seat taken over by ..."). From then on the old holder reports like
+  a worker, forwards late reports, and deletes its old report task as its last wrap step.
+- **Watcher.** `scripts/t3-watch.py` (user timer every 10 min, setup step 8; stdlib, read-only
+  `GET /api/orchestration/shell` with the header `x-t3-orchestration-protocol: 2` and the bearer
+  token from `t3TokenFile`, kept or minted by `scripts/t3-token.sh`). Per scope it watches the
+  unsettled top-level threads of the scope's T3 projects: usage limit (notify once per episode,
+  `onLimitCommand` once, every 30 min a `Keepalive` into a limited coordinator or a one-call model
+  probe for limited workers, then one "limit over" wake), a click pending >10 min, a run stuck >3 h,
+  other failures (one wake per run; the coordinator's own is notified), lost reports, a handover
+  open >30 min, a folder without coordinator. API trouble is one notify per kind and day.
+  `--dry-run` sends nothing, `--stats` counts posts per thread and day. State:
+  `<config-dir>/state/t3-watch/`, `<config-dir>/state/t3-report/{failures.log,posts.tsv}`.
+- **Settle, not archive.** A worker's wrap ends with `t3_thread_organize settle` for its own
+  sub-agent threads, then for itself. The coordinator re-opens a settled worker with
+  `t3_thread_send`. The morning ritual settles threads whose log entry is closed, after a
+  loose-ends check, and removes a T3 worktree only when merged and settled. Nothing archives or
+  deletes threads. The heartbeat skips a coordinator with a sidecar; poke and keep-warm do not
+  apply in T3.
+
+## Follow-through
+
+`scripts/topics.py` keeps every topic in sight until it is really finished.
+
+- **One writer.** `topics.py entry` is the only way a topic changes: under the log's lock it
+  appends the session-log entry (frozen format plus the optional lines of
+  [The session log](#the-session-log); `--closed` writes the closed marker), then updates
+  `<config-dir>/state/topics/<scope>.json`. The wrap writes its closing entry this way after its
+  review loop; workers report READY / LIVE / blocked / a question this way. Key: `--topic`, else
+  the lane dir `lane-<name>` or `~/.cache/claude/wt/<name>`, else the branch `lane/<name>`; the
+  coordinator always passes `--topic`, a new key needs `--new`. `answer` books an answer (also a
+  pathfinder answers file), `lint` lists log entries without `Topic:`, `stats` counts topics
+  re-opened after their wrap.
+- **The table** `<board dir>/<board name>.topics.md` (topic, thread, status/stage, waits on, since,
+  next), rendered on every watcher tick with or without T3. It is its own file, linked from the
+  board's head, because a key anywhere in the board counts as filed for the open-items inbox.
+- **Reminders.** Inside `remindWindow`, one digest per `remindAfterHours` with every topic waiting
+  on the user (`user` or `userName`) longer than that: up to three inline through `notifyCommand`,
+  more as one page built by `pageCommand` (a pathfinder-schema `questions.json` as `$1`, the link as
+  its last stdout line). Delivered items go into the morning ritual's ledger
+  (`state/morning-ritual/delivered`), so the to-do list and the reminders never repeat each other.
+  New open items carry a ` · added: YYYY-MM-DD HH:MM` stamp and count from then.
+- **Removal.** A topic leaves the table only with stage `done`, a review and an OK (`okBy`), and
+  its case closed when it had one. Stale topics (24 h without an entry, not waiting on the user)
+  and done-without-OK go into one daily digest.
+
+## Sub-agents
+
+- **The scheme** (`middle-management:work-packages` skill): every sub-agent prompt carries a
+  `Report file: <absolute path>` line. The sub-agent writes its package list there first, appends
+  each package's result the moment it is done, and returns at most ten lines plus the path. A
+  resumed sub-agent reads its report first and goes on at the first open package.
+- **The two hooks.** `hooks/require-work-packages.sh` (PreToolUse on `Agent`) refuses a prompt
+  without that line and pastes the template; `Report file: none` and `Explore` agents pass.
+  `hooks/subagent-report-check.sh` (SubagentStop) holds a sub-agent once when its report file is
+  missing or unchanged since its run started. `workPackagesGate: false` turns both off.
+- **Resume before respawn.** A dead or stopped sub-agent keeps its transcript: `SendMessage` to its
+  id continues it with its whole context, which is cheaper than a fresh agent re-reading
+  everything. Wait out a usage limit before either.
 
 ## Headless morning ritual
 
@@ -492,6 +605,9 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   fills the `pr` column of `/wt list`.
 - For the heartbeat additionally: Linux with a systemd user manager
   (`loginctl enable-linger`). macOS launchd is not supported.
+- For the T3 mode additionally: T3 Code 0.1.0 or newer (the protocol-2 read and the provider-log
+  names the thread lookup uses are T3 internals; both fail soft after a T3 update: thread
+  `unknown`, one "T3 API changed" notify), `curl`, and for the watcher a systemd user manager.
 - For a private marketplace repo: working git credentials for the host on every
   installing machine (`/plugin marketplace add` clones over git).
 

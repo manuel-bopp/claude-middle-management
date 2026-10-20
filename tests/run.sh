@@ -3,6 +3,9 @@
 # Consumers: run by hand or CI from the repo root: bash tests/run.sh
 # Builds throwaway HOMEs under mktemp; never reads or writes the real ~/.claude.
 set -u
+# The 0.10.0 matrices below must not see the T3 Code thread this may run in (the T3 lines of the
+# role banner and the Stop hook have their own matrices: tests/t3-report.sh, tests/t3-seat.sh).
+unset T3CODE_HOME T3CODE_PORT
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 P="$ROOT/plugins/middle-management"
@@ -1393,6 +1396,25 @@ say "  ${MH_LINE:-morning-headless matrix did not report}"
 [ "$MH_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
 say ""
+say "== t3-watch (tests/t3-watch.sh) =="
+TW_OUT="$(bash "$ROOT/tests/t3-watch.sh" 2>&1)"; TW_RC=$?
+printf '%s\n' "$TW_OUT" | grep -E '^\s+FAIL' || true
+TW_LINE="$(printf '%s\n' "$TW_OUT" | grep -E '^RESULT:' | tail -1)"
+say "  ${TW_LINE:-t3-watch matrix did not report}"
+[ "$TW_RC" -eq 0 ] || FAIL=$((FAIL+1))
+
+for M in t3-report t3-seat topics work-packages; do
+  say ""
+  say "== $M (tests/$M.sh) =="
+  M_OUT="$(bash "$ROOT/tests/$M.sh" 2>&1)"; M_RC=$?
+  printf '%s\n' "$M_OUT" | grep -E '^\s+FAIL' || true
+  M_LINE="$(printf '%s\n' "$M_OUT" | grep -E '^RESULT:' | tail -1)"
+  say "  ${M_LINE:-$M matrix did not report}"
+  [ "$M_RC" -eq 0 ] || FAIL=$((FAIL+1))
+  T3_LINES="${T3_LINES:-}; $M: ${M_LINE:-FAILED TO RUN}"
+done
+
+say ""
 say "== heartbeat (tests/heartbeat.sh) =="
 HB_OUT="$(bash "$ROOT/tests/heartbeat.sh" 2>&1)"; HB_RC=$?
 printf '%s\n' "$HB_OUT" | grep -E '^\s+(FAIL|skip)' || true
@@ -1401,5 +1423,5 @@ say "  ${HB_LINE:-heartbeat matrix did not report}"
 [ "$HB_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
 say ""
-say "RESULT: $PASS passed, $FAIL failed (plus peer-state: ${PS_LINE:-FAILED TO RUN}; open-items: ${OI_LINE:-FAILED TO RUN}; morning-headless: ${MH_LINE:-FAILED TO RUN}; heartbeat: ${HB_LINE:-FAILED TO RUN})"
+say "RESULT: $PASS passed, $FAIL failed (plus peer-state: ${PS_LINE:-FAILED TO RUN}; open-items: ${OI_LINE:-FAILED TO RUN}; morning-headless: ${MH_LINE:-FAILED TO RUN}; t3-watch: ${TW_LINE:-FAILED TO RUN}${T3_LINES:-}; heartbeat: ${HB_LINE:-FAILED TO RUN})"
 [ "$FAIL" -eq 0 ]

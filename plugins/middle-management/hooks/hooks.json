@@ -51,6 +51,41 @@
             "statusMessage": "middle-management: review gate"
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/require-work-packages.sh\"",
+            "timeout": 10,
+            "statusMessage": "middle-management: work packages"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-report-check.sh\"",
+            "timeout": 15,
+            "statusMessage": "middle-management: sub-agent report"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/t3-report.sh\"",
+            "timeout": 10,
+            "statusMessage": "middle-management: T3 report"
+          }
+        ]
       }
     ]
   }
