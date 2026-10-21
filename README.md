@@ -108,6 +108,7 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 | Guard canary | systemd user timer (optional, Linux) | Hourly: the config is valid, the plugin enabled, its guard hooks registered and not wired twice, and the direct deny probes deny; once a day a headless model probe proves the CLI still loads the hooks. Alarms through the failure alarm. Setup step 9; see [Guard canary](#guard-canary). |
 | Reply timestamp, intent check | UserPromptSubmit hooks (optional) | `replyTimestamp`: the literal `[HH:MM]` prefix for every reply. `intentCheck`: an intent reminder in front of prompts that read like a work order. Both off by default; see [Optional prompt hooks](#optional-prompt-hooks). |
 | `self-wakeup` skill | skill | Waiting on the user without stalling: escalating self-wakeups, one nudge through `notifyCommand`, and proceeding alone only on a safe, reversible default it is at least 75 % sure of. |
+| PR review runner | systemd user timer (optional, Linux) | Every 15 minutes: each new head of an open pull request by an allowlisted author gets a version gate, `tests/run.sh` and a headless read-only review, then one review on the PR; clean + green + gate ok merges it (`--match-head-commit`), findings go back to the author, after `maxRounds` it asks you. Forks and other authors are never reviewed or merged. Setup step 10; see [Contributing and releases](#contributing-and-releases). |
 | Copy refresh | SessionStart hook | The timers of setup steps 5-10 run copies of the scripts; at the first session start on a new plugin version, every installed copy dir gets its full file set from `scripts/copy-sets.json` again (atomic, the user's poke prompt kept), then a version stamp. No unit is touched; a failure says so in the session and once through `notifyCommand`. |
 | Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. The same tick keeps waiting sessions warm: a live, unwrapped session idle 45 to 55 minutes on an open question (or a hold file) gets one "reply ok" ping, at most 3 per wait phase, so the answer does not cost it its whole context again. Installed by setup step 5. |
 
@@ -223,7 +224,7 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   `notifyCommand`. `scripts/unit-failure-alarm.sh` runs it only when `notifyCommand` is missing or
   fails, with the text prefixed `[fallback route: the main alarm channel failed]`. Every unit that
   fails loudly ends in that alarm (the watcher and the heartbeat exit 1 when their own notify
-  fails), so one fallback covers them all. Set it before installing any unit (setup steps 5-8).
+  fails), so one fallback covers them all. Set it before installing any unit (setup steps 5-10).
 - `sessionLog` (optional, default `~/logs/session-log.md`): the machine's session log — see
   [The session log](#the-session-log). Must be absolute (`~` is expanded); a relative path makes
   the config invalid, because it would name a different file per caller. `$MM_SESSION_LOG`

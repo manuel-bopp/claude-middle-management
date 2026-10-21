@@ -40,7 +40,7 @@ for f in $(jq -r '.sets[][]' "$P/scripts/copy-sets.json" | sort -u); do [ -f "$P
 is "every file of every set exists in scripts/" "$MISSING" ""
 is "the poke prompt is never overwritten" "$(jq -r '.neverOverwrite | join(",")' "$P/scripts/copy-sets.json")" "orch-heartbeat-poke.md"
 SETUP=$P/commands/middle-management-setup.md
-for s in heartbeat reaper morning t3watch canary; do
+for s in heartbeat reaper morning t3watch canary prreview; do
   is "setup installs middle-management-$s through copy-set.sh" "$(grep -cF "copy-set.sh\" middle-management-$s" "$SETUP")" \
      "$([ "$s" = morning ] && echo 2 || echo 1)"   # steps 7 and 7b share the morning dir
 done
@@ -48,7 +48,7 @@ is "no inline cp list left in the setup" "$(grep -cF 'cp "${CLAUDE_PLUGIN_ROOT}"
 # every ExecStart script of a template is in the set of the dir it runs from
 for pair in __HEARTBEAT_DIR__:middle-management-heartbeat __REAPER_DIR__:middle-management-reaper \
             __MORNING_DIR__:middle-management-morning __T3WATCH_DIR__:middle-management-t3watch \
-            __CANARY_DIR__:middle-management-canary; do
+            __CANARY_DIR__:middle-management-canary __PRREVIEW_DIR__:middle-management-prreview; do
   ph=${pair%%:*}; set=${pair#*:}
   for f in $(grep -ho "$ph/[A-Za-z0-9._-]*" "$P"/templates/systemd/* | sed "s|$ph/||" | sort -u); do
     [ "$ph" = __HEARTBEAT_DIR__ ] && [ "$f" = unit-failure-alarm.sh ] && continue   # every set carries it
@@ -94,7 +94,7 @@ exec 7<&-
   && ok "...the FULL set: files the dir never had arrive too" || bad "...the full set" "wt + unit-failure-alarm.sh" "$(ls "$C/middle-management-reaper")"
 [ -e "$C/middle-management-heartbeat/orch-heartbeat.sh" ] && ok "...heartbeat refreshed" || bad "...heartbeat refreshed" copied none
 is "...the poke prompt untouched" "$(cat "$C/middle-management-heartbeat/orch-heartbeat-poke.md")" "my poke"
-for d in morning t3watch canary; do
+for d in morning t3watch canary prreview; do
   [ -e "$C/middle-management-$d" ] && bad "...no copy dir created for an uninstalled step ($d)" absent created || ok "...no copy dir created for an uninstalled step ($d)"
 done
 is "...no .tmp left" "$(find "$C" -name '*.tmp' | wc -l)" 0

@@ -1411,7 +1411,7 @@ TW_LINE="$(printf '%s\n' "$TW_OUT" | grep -E '^RESULT:' | tail -1)"
 say "  ${TW_LINE:-t3-watch matrix did not report}"
 [ "$TW_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
-for M in t3-report t3-seat topics work-packages morning-t3 guard-canary prompt-hooks refresh-copies; do
+for M in t3-report t3-seat topics work-packages morning-t3 guard-canary prompt-hooks refresh-copies pr-review-watch; do
   say ""
   say "== $M (tests/$M.sh) =="
   M_OUT="$(bash "$ROOT/tests/$M.sh" 2>&1)"; M_RC=$?

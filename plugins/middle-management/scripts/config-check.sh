@@ -6,8 +6,8 @@
 #   scripts/wt, scripts/orchestrator.sh, scripts/morning-headless.sh, scripts/t3-wake.sh,
 #   scripts/t3-token.sh, hooks/t3-report.sh, hooks/require-work-packages.sh,
 #   hooks/subagent-report-check.sh, hooks/reply-timestamp.sh, hooks/intent-check.sh,
-#   scripts/morning-t3.sh, tests/run.sh, tests/t3-seat.sh,
-#   tests/morning-t3.sh.
+#   scripts/morning-t3.sh, scripts/copy-set.sh, scripts/pr-review-watch.sh, hooks/refresh-copies.sh,
+#   tests/run.sh, tests/t3-seat.sh, tests/morning-t3.sh, tests/pr-review-watch.sh.
 #
 # Usage:
 #   config-check.sh dir        print the resolved Claude config dir
@@ -94,6 +94,14 @@ validate() {
           and (.allowed | type == "boolean")
           and ((.okBy // "") | type == "string")
           and (if .allowed then ((.okBy // "") | test("\\S")) else true end))
+    # 0.12.0 (README "Contributing and releases"): the PR review runner. repos are "owner/name" (a
+    # state directory name), authors the allowlist, maxRounds a whole number of rounds.
+    and ((.prReview // {}) | (type == "object")
+          and ((.repos // []) | type == "array" and all(type == "string" and test("\\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\z")))
+          and ((.authors // []) | type == "array" and all(type == "string" and test("\\A[A-Za-z0-9][A-Za-z0-9-]*\\z")))
+          and ([.model, .securityModel, .reviewerName] | all(. == null or (type == "string" and test("\\S"))))
+          and ((.approve // false) | type == "boolean")
+          and ((.maxRounds // 4) | (type == "number" and . >= 1 and . == floor)))
     # t3Url: the base URL of the T3 server (watcher, t3-token.sh); a plain http(s) URL, nothing else.
     and ((.t3Url // "http://x") | (type == "string" and test("\\Ahttps?://[^\\s\"]+\\z")))
     and ((.protectedCheckouts // []) | (type == "array") and all(
