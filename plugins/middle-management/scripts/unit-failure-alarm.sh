@@ -3,8 +3,8 @@
 # Consumers: templates/systemd/unit-failure-alarm@.service (installed by /middle-management-setup
 #   next to this script's copy); any further user unit may point OnFailure= at
 #   unit-failure-alarm@%n.service. tests/heartbeat.sh, section D; tests/morning-headless.sh (cause
-#   file), tests/morning-t3.sh (fallback route). Reads the cause file scripts/morning-headless.sh and
-#   scripts/morning-t3.sh leave. Nothing else calls it.
+#   file), tests/morning-t3.sh (fallback route). Reads the cause file scripts/morning-headless.sh,
+#   scripts/morning-t3.sh and scripts/guard-canary.sh leave. Nothing else calls it.
 #
 # A unit failed, so say so through the configured notifyCommand (config key; the text arrives as
 # $1 and on stdin), and through notifyFallbackCommand when that one is missing or fails — an unattended failure must reach a human, never only a journal.

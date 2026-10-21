@@ -5,7 +5,8 @@
 #   commands/middle-management-setup.md (via Bash),
 #   scripts/wt, scripts/orchestrator.sh, scripts/morning-headless.sh, scripts/t3-wake.sh,
 #   scripts/t3-token.sh, hooks/t3-report.sh, hooks/require-work-packages.sh,
-#   hooks/subagent-report-check.sh, scripts/morning-t3.sh, tests/run.sh, tests/t3-seat.sh,
+#   hooks/subagent-report-check.sh, hooks/reply-timestamp.sh, hooks/intent-check.sh,
+#   scripts/morning-t3.sh, tests/run.sh, tests/t3-seat.sh,
 #   tests/morning-t3.sh.
 #
 # Usage:
@@ -83,6 +84,10 @@ validate() {
     # 0.11.1 (README "Morning coordinator in T3 Code", "Alarm fallback"): the morning chain and the
     # second alarm route. morningTakeover carries the standing word of the user: allowed + who said it.
     and ([.notifyFallbackCommand, .morningTaskUrlFile] | all(. == null or type == "string"))
+    # optional prompt hooks (README "Optional prompt hooks"), both default false
+    and ((.replyTimestamp // false) | type == "boolean")
+    and ((.intentCheck // false) | type == "boolean")
+    and ((.intentCheckVerbs // "x") | (type == "string" and length > 0))
     and ((.morningRoot // "/") | (type == "string" and startswith("/")))
     and ((.morningWaitUntil // "09:30") | (type == "string" and test("\\A([01]?\\d|2[0-3]):[0-5]\\d\\z")))
     and ((.morningTakeover // {"allowed": false}) | (type == "object")

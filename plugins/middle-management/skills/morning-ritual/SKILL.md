@@ -14,9 +14,20 @@ coordinator work: read, reconcile, route. Product/repo work stays delegated to
 worker sessions.
 
 Some steps touch things this plugin does not ship (your chat tool, your wrap
-convention). Those carry a **CUSTOMIZE** marker: fill them with your team's actual
-stack the first time you run this, and keep your concretization in your own notes
-or a fork of this file.
+convention). Those carry a **CUSTOMIZE** marker. Your machine's answers live in ONE optional
+file, so this skill ships unchanged and a plugin update never overwrites them:
+
+**The local fill file** `<config dir>/morning-ritual.local.md` (`<config dir>` =
+`$CLAUDE_CONFIG_DIR`, else `~/.claude`). Read it before step 1 when it exists; without it, use the
+defaults below. Format (README, "Morning ritual: the local fill file"): Markdown, one `## Step <n>`
+section per step it fills (`## Step 1` … `## Step 7`, any title after the number), plus
+`## Extra steps` (each `### After step <n>: <title>` runs right after step n) and `## Never`
+(machine-local limits on top of this skill's). A step section fills that step's CUSTOMIZE parts:
+sources to read, repos and branch pairs, the board block's sections, the phone-note format, a
+gather helper to run first. It adds; it never removes a rule of this skill (the seat, the
+one-writer board, the 75% rule, "never `t3_thread_send` the predecessor"). A conflict between the
+two: this skill wins, and the day plan names the conflicting line. The file carries no secret
+values, only the names and paths of the files that hold them.
 
 With scopes (a `scopes` key in the config; middle-management skill, "Scopes"), every step is
 your scope's: sessions from `peer-state.py --all --scope <yours>`, your scope's board (the one

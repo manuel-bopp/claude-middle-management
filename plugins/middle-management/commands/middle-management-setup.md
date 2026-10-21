@@ -49,7 +49,10 @@ Schema (nothing else is valid):
   "morningTakeover": { "allowed": false, "okBy": "" },
   "morningTaskUrlFile": "~/.config/t3-threads/morning-task-url",
   "morningWaitUntil": "09:30",
-  "morningRoot": "/abs/path/project"
+  "morningRoot": "/abs/path/project",
+  "replyTimestamp": false,
+  "intentCheck": false,
+  "intentCheckVerbs": ""
 }
 ```
 
@@ -257,6 +260,19 @@ repositories; the user names them.
 17. **Work-packages gate.** `workPackagesGate` (default `true`): a sub-agent prompt
     without a `Report file:` line is refused (README, "Sub-agents"). `false` switches the
     gate and the sub-agent report check off.
+
+18. **Optional prompt hooks** (README, "Optional prompt hooks"), both off by default.
+    `replyTimestamp: true` hands every session the literal `[HH:MM]` prefix for its reply (useful
+    with many parallel sessions; a house rule of the user then says "start every reply with it").
+    `intentCheck: true` puts an intent reminder in front of prompts that read like a work order;
+    `intentCheckVerbs` (a case-insensitive extended regex) replaces the built-in English and German
+    verb list. Before switching either on, ask whether the same hook is already wired in the user's
+    `settings.json`: then it would fire twice, so that entry goes first.
+
+19. **Morning ritual fill file** (README, "Morning ritual: the local fill file"). Offer to create
+    `<config dir>/morning-ritual.local.md` with the user's answers for the ritual's CUSTOMIZE steps
+    (where the team talks, which repos and branch pairs, board block sections, how the day plan
+    reaches the phone). Names and paths of secret files only, never their values.
 
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped
@@ -594,3 +610,37 @@ python3 "$TW/t3-watch.py" --dry-run
 The dry run prints what a tick would send and sends nothing. Tell the user, in plain text: post
 counts per thread and day are `t3-watch.py --stats`; **after every plugin update re-run this
 step**. Disarm with `systemctl --user disable --now t3-watch.timer`; never run that here unasked.
+
+## Step 9 — guard canary (optional, Linux only)
+
+`scripts/guard-canary.sh` is a systemd **user** timer (hourly, no model): it alarms when the
+plugin's guards are no longer live (config missing or invalid, plugin disabled, hooks not
+registered, the same hooks wired twice in `settings.json`, a direct deny probe that does not deny),
+and once a day, from 09:00, it runs an end-to-end probe: a headless `claude -p` (haiku, then once
+on sonnet when haiku made no call) must try a blocked edit and a blocked blanket staging and get
+the plugin's own deny text back. Offer it on machines where the guards matter (several sessions,
+protected checkouts); otherwise skip this step and say so.
+
+Preconditions: the four of step 5, plus `git`, `timeout` and `claude` on this PATH. The end-to-end
+probe costs two small model calls a day and runs with `--permission-mode bypassPermissions` and
+one tool, in the first protected checkout and in a throwaway repo under the canary's state dir.
+
+```bash
+CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
+CFG_DIR="$(bash "$CHECK" dir)"; GC="$CFG_DIR/middle-management-canary"; UNITS="$HOME/.config/systemd/user"
+mkdir -p "$GC" "$UNITS"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{guard-canary.sh,unit-failure-alarm.sh} "$GC/"
+for u in mm-guard-canary.service mm-guard-canary.timer; do
+  sed "s|__CANARY_DIR__|$GC|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
+    "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
+done
+sed "s|__HEARTBEAT_DIR__|$GC|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
+  "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
+systemctl --user daemon-reload && systemctl --user enable --now mm-guard-canary.timer
+MM_CANARY_NO_E2E=1 bash "$GC/guard-canary.sh"
+```
+
+The last line runs the static checks once, without the model probe. Tell the user: a failure
+reaches them through the alarm (with its fallback route); `<config dir>/state/guard-canary/` keeps
+the end-to-end streams for a week; **after every plugin update re-run this step**. Disarm with
+`systemctl --user disable --now mm-guard-canary.timer`; never run that here unasked.

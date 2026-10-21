@@ -31,6 +31,27 @@ started after the morning post.
 `notifyFallbackCommand`, `morningTakeover`, `morningTaskUrlFile`, `morningWaitUntil`, `morningRoot`.
 New test matrix `tests/morning-t3.sh`; `tests/t3-seat.sh` section G, `tests/t3-watch.sh` section N.
 
+**Guard canary.** New `scripts/guard-canary.sh` + `templates/systemd/mm-guard-canary.{service,timer}`
+(hourly, setup step 9): config, plugin enabled, hooks registered and not wired twice, direct deny
+probes; a daily end-to-end `claude -p` probe whose prompt states that the denial is the expected
+result, retried once on the next model when the first made no call.
+
+**Morning ritual fill file.** The `morning-ritual` skill reads `<config dir>/morning-ritual.local.md`
+(`## Step <n>`, `## Extra steps`, `## Never`) for the machine's CUSTOMIZE answers, so the skill
+ships unchanged; README "Morning ritual: the local fill file".
+
+**Review loop: the ten plan lenses verbatim.** `review-loop` carries the completeness gate's ten
+lenses word for word, the second walkthrough reviewer for multi-repo or contract changes, the
+"question the human would have asked" line, the CONFIRMED / PARTIAL / REFUTED / OPEN QUESTION
+verification table, "two rounds with nothing new" as a second end, and the delta report. The
+4-round cap stays. The gate also accepts the older `state/plan-review/<sessionId>.json` marker.
+
+**Optional prompt hooks.** `hooks/reply-timestamp.sh` (`replyTimestamp`) and `hooks/intent-check.sh`
+(`intentCheck`, `intentCheckVerbs`), both off by default.
+
+**self-wakeup skill.** Waiting on the user in escalating stages; nudges go through `notifyCommand`.
+New test matrices `tests/guard-canary.sh`, `tests/prompt-hooks.sh`.
+
 ## 0.11.0 - 2026-10-20
 
 **T3 Code mode.** Under T3 Code (`T3CODE_HOME` set) a thread's process ends after 30 minutes idle,

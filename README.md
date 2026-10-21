@@ -102,6 +102,10 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 | T3 watcher | systemd user timer (optional, Linux) | Every 10 minutes, no model: usage limits (with a retry), clicks pending, stuck runs, lost reports, an open handover, a folder without coordinator, and the topics tick. Installed by setup step 8. |
 | Follow-through | script + timer tick | `scripts/topics.py` is the one writer of a topic's state: it appends the session-log entry and keeps a table `<board>.topics.md`, a reminder digest and a daily digest, so no topic drops out of sight before it is done, reviewed and OK'd. See [Follow-through](#follow-through). |
 | `work-packages` skill + two hooks | skill, PreToolUse + SubagentStop hooks | Every sub-agent writes its package list into a report file first and appends each result at once, so a sub-agent that dies at 99 % leaves its work behind. A prompt without a `Report file:` line is refused; a sub-agent that ends without touching its report is held once. See [Sub-agents](#sub-agents). |
+| Morning coordinator (T3) | systemd user timers (optional, Linux, T3 Code) | Weekdays 07:30: waits out a usage limit, then starts a fresh, visible coordinator thread through a T3 webhook task; the thread takes the seat with `claim --morning` (allowed by the user's standing word in `morningTakeover`), settles the night's coordinator without waking it, runs the ritual and waits for you. A watchdog at 08:15 alarms when nobody claimed. Setup step 7b; see [Morning coordinator in T3 Code](#morning-coordinator-in-t3-code). |
+| Guard canary | systemd user timer (optional, Linux) | Hourly: the config is valid, the plugin enabled, its guard hooks registered and not wired twice, and the direct deny probes deny; once a day a headless model probe proves the CLI still loads the hooks. Alarms through the failure alarm. Setup step 9; see [Guard canary](#guard-canary). |
+| Reply timestamp, intent check | UserPromptSubmit hooks (optional) | `replyTimestamp`: the literal `[HH:MM]` prefix for every reply. `intentCheck`: an intent reminder in front of prompts that read like a work order. Both off by default; see [Optional prompt hooks](#optional-prompt-hooks). |
+| `self-wakeup` skill | skill | Waiting on the user without stalling: escalating self-wakeups, one nudge through `notifyCommand`, and proceeding alone only on a safe, reversible default it is at least 75 % sure of. |
 | Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. The same tick keeps waiting sessions warm: a live, unwrapped session idle 45 to 55 minutes on an open question (or a hold file) gets one "reply ok" ping, at most 3 per wait phase, so the answer does not cost it its whole context again. Installed by setup step 5. |
 
 ## How the roles work
@@ -241,6 +245,8 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   arguments): the T3 watcher and `scripts/t3-token.sh`. See [T3 Code](#t3-code).
 - `morningTakeover`, `morningTaskUrlFile`, `morningWaitUntil`, `morningRoot` (optional, 0.11.1):
   the morning chain under T3 Code. See [Morning coordinator in T3 Code](#morning-coordinator-in-t3-code).
+- `replyTimestamp`, `intentCheck`, `intentCheckVerbs` (optional, 0.11.1, defaults `false` /
+  `false` / the built-in list): the two prompt hooks. See [Optional prompt hooks](#optional-prompt-hooks).
 - `userName`, `okBy`, `remindAfterHours`, `remindWindow`, `pageCommand` (optional, defaults
   `user` / the user / `2` / `08:00-22:00` / none): follow-through. See [Follow-through](#follow-through).
 - `workPackagesGate` (optional, default `true`): the sub-agent report gate. See [Sub-agents](#sub-agents).
@@ -598,6 +604,76 @@ around `claude -p` with hard-coded paths and its own sender) moves onto this one
 
 Re-running setup step 7 writes exactly these unit lines; the old unit and its timer are disabled
 by hand (`systemctl --user disable --now <old>.timer`) once the new one has delivered a morning.
+
+## Optional prompt hooks
+
+Two UserPromptSubmit hooks, registered by the plugin and silent until switched on in the config.
+
+- **`replyTimestamp: true`** (`hooks/reply-timestamp.sh`): every user message gets one line of
+  context, `Your reply starts literally with: [HH:MM] (copy it, never compute or estimate it; local
+  time of this message: …; a wrap recap starts with [DD.MM.YYYY HH:MM])`. With many parallel
+  sessions the prefix shows when a reply was written and how long something has been lying. Pair it
+  with a line in your house rules ("start every reply with the prefix the hook gives").
+- **`intentCheck: true`** (`hooks/intent-check.sh`): a prompt of 25+ characters that contains a
+  work-order verb gets a three-line reminder: state the goal behind the wording, name the
+  operations it implies that the words left out (read next to write, delete next to create, list,
+  live updates, migration, the other environment), ask one question when wording and goal diverge.
+  `intentCheckVerbs` (a case-insensitive extended regex) replaces the built-in English and German
+  verb list. Injected system turns are skipped.
+
+A machine that already runs its own copies of these hooks from `settings.json` removes those
+entries when it switches the keys on, or both fire.
+
+## Guard canary
+
+`scripts/guard-canary.sh` (`mm-guard-canary.timer`, hourly; setup step 9) exits 1 with one cause
+line, which the failure alarm sends, when a precondition of "the guards are live" breaks: the
+config is missing or invalid (the checkout guard then fails open), the plugin is not enabled or
+its `installPath` is gone, its `hooks.json` does not register the role, staging and checkout hooks,
+the same hooks are also wired in `settings.json`, or a direct deny probe (no model) does not deny.
+Once a day, from `MM_CANARY_E2E_HOUR` (9), a headless `claude -p` must attempt a blocked Write in
+the first protected checkout and a blocked blanket staging in a throwaway repo, and get the
+plugin's own deny text back. The prompt says that the denial IS the expected result (a small model
+otherwise refuses to try a blocked command), and a run without the tool call is retried once on
+the next model of `MM_CANARY_MODELS` ("haiku sonnet"). A probe file that got written is moved to
+`<config-dir>/state/guard-canary/leftovers/` and alarms. Streams stay a week in that state dir.
+
+## Morning ritual: the local fill file
+
+The `morning-ritual` skill has CUSTOMIZE steps: where your team talks, which repos and branch
+pairs to check, how the board block looks, how the day plan reaches the phone. Their answers live
+in one optional file, `<config-dir>/morning-ritual.local.md`, so the skill itself ships unchanged
+and an update never overwrites them. The skill reads it before step 1 (the coordinator, the
+headless run and the T3 morning thread alike). Format:
+
+```markdown
+# Morning ritual: local fill (<machine>)
+
+## Step 1: Messages delta
+- Slack: token from the file named in <path> (variable SLACK_BOT_TOKEN, never printed);
+  channels C0123 (#team), C0456 (#ops); thread replies for every watched thread in <path>.
+
+## Step 2: Repo state
+- fetch /abs/repo-a, /abs/repo-b; promotion check: origin/alpha is an ancestor of origin/dev.
+
+## Step 4: Board
+- block sections in this order: Waits on the user (numbered, link in the line), Day plan, ...
+
+## Step 7: Day plan
+- language, channel (a voice-note skill, a links message), length.
+
+## Extra steps
+### After step 5: Phone channel
+- the inbound poller unit must be active; restart it once, say so in the day plan.
+
+## Never
+- never post into #team from the ritual.
+```
+
+`## Step <n>` sections fill step n (any title after the number), `### After step <n>:` entries
+run right after step n, `## Never` adds limits. The file only adds: a line that contradicts a rule
+of the skill loses, and the day plan names it. No secret values in it, only the names and paths of
+the files that hold them. No file = the skill's defaults.
 
 ## Starting a project from the templates
 

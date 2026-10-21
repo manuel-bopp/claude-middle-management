@@ -1013,6 +1013,10 @@ mkdir -p "$H/.claude/state/review-loop"; echo '{}' > "$H/.claude/state/review-lo
 assert_empty "fresh marker from the skill -> passes" "" "$(rlg Write "$HANDOFF")"
 touch -d '-2 hours' "$H/.claude/state/review-loop/sess-rl.json"
 assert_has "marker older than an hour -> denied again" '"deny"' "$(rlg Write "$HANDOFF")"
+mkdir -p "$H/.claude/state/plan-review"; echo '{}' > "$H/.claude/state/plan-review/sess-rl.json"
+assert_empty "the older gate's fresh plan-review marker -> passes too" "" "$(rlg Write "$HANDOFF")"
+touch -d '-2 hours' "$H/.claude/state/plan-review/sess-rl.json"
+assert_has "...older than an hour -> denied" '"deny"' "$(rlg Write "$HANDOFF")"
 printf '{oops' > "$H/.claude/middle-management.json"
 assert_empty "unusable config -> gate silent" "" "$(rlg Write "$HANDOFF")"
 
@@ -1407,7 +1411,7 @@ TW_LINE="$(printf '%s\n' "$TW_OUT" | grep -E '^RESULT:' | tail -1)"
 say "  ${TW_LINE:-t3-watch matrix did not report}"
 [ "$TW_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
-for M in t3-report t3-seat topics work-packages morning-t3; do
+for M in t3-report t3-seat topics work-packages morning-t3 guard-canary prompt-hooks; do
   say ""
   say "== $M (tests/$M.sh) =="
   M_OUT="$(bash "$ROOT/tests/$M.sh" 2>&1)"; M_RC=$?

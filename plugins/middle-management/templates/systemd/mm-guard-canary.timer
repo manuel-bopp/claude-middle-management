@@ -1,0 +1,13 @@
+# middle-management plugin: USER unit template. /middle-management-setup step 9 installs it into
+# ~/.config/systemd/user/, then:
+#   systemctl --user enable --now mm-guard-canary.timer
+[Unit]
+Description=middle-management: guard canary - hourly static checks, the first run from 09:00 adds the end-to-end probe
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=mm-guard-canary.service
+
+[Install]
+WantedBy=timers.target

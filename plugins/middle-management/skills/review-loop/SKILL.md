@@ -43,6 +43,9 @@ Both switches stay inside the 4-round cap; escalating never buys extra rounds. N
 and effort in the reviewer's prompt, and set them on the sub-agent call (`model: opus` or
 `model: fable`).
 
+For a plan, concept or handoff: dispatch a **second** reviewer in parallel carrying only lens 6
+(walkthrough) when the plan touches more than one repo, moves a data path, or changes a contract.
+
 ## Step 3: dispatch a fresh reviewer
 
 Always a NEW sub-agent, never a continued one: a reviewer that saw round 1 defends its own
@@ -64,26 +67,31 @@ below, the output shape, and these rules verbatim:
 work-packages gate (`hooks/require-work-packages.sh`) looks for, and it refuses an Agent prompt
 without one. The report file is the record; your context gets the 15 lines.
 
-**Lenses for a plan, concept or handoff.** Each ends in a finding or in `covered: <section>`; a
-lens left silent is an unfinished review.
-1. **Mirror.** For every operation the plan changes, its counterparts: write and read, create and
-   delete, list, update, live update, export and import. Which one is absent, and does the plan
-   say that absence is deliberate?
-2. **Both ends of the data flow.** Producer and consumer of every record touched. When a record
-   moves, who still reads it from the old place?
-3. **Decision log.** A recorded decision that already covers a piece the plan ignores, quoted
-   with its ID.
-4. **Other callers.** Importers and callers of every module the plan changes.
-5. **Existing state.** Rows, files, env vars, flags, caches the old path created: what happens
-   to each?
-6. **Walkthrough.** One real end-to-end user action, step by step, through the system as the
-   plan leaves it. The first step that breaks is the missing scope.
-7. **Assumed to exist.** Endpoints, fields, permissions, packages: verified or assumed?
-8. **Failure path.** When the new path fails at runtime, does anyone hear of it? A failure that
-   lands only in a log, or falls back silently, is a finding.
-9. **Blast radius.** Work implied in another repo, another person's review, a migration.
-10. **Named out-of-scope.** Everything excluded is stated with a reason; implicit exclusion is
-    the defect this loop exists for.
+**Lenses for a plan, concept or handoff** (the ten lenses of the completeness gate, verbatim).
+The reviewer answers **every** lens, each ending in a finding or in `covered — <plan section>`.
+A lens left silent is an unfinished review.
+
+1. **Mirror.** For every operation the plan changes, name its counterparts: write ↔ read,
+   create ↔ delete, list, update, subscribe/live-update, export ↔ import. Which counterpart is
+   absent from the plan, and does the plan say that absence is deliberate?
+2. **Both ends of the data flow.** Producer and consumer of every record the plan touches. When a
+   record moves to a new home, who still reads it from the old one?
+3. **Decision log.** Grep the project's decision log and planning docs for the nouns in the plan.
+   A decision that already covers a piece the plan ignores is a finding, quoted with its ID.
+4. **Other callers.** Grep for importers and callers of every module the plan changes. Who else
+   travels this path, and does the plan account for them?
+5. **Existing state.** Rows, files, env vars, feature flags, caches created by the old path — what
+   happens to each after the change?
+6. **Walkthrough.** Take one real end-to-end user action and walk it step by step through the
+   system **as the plan leaves it**. The first step that breaks is the missing scope.
+7. **Assumed to exist.** Endpoints, fields, permissions, packages the plan relies on: which were
+   verified against the code or the API, and which are assumed?
+8. **Failure path.** What happens when the new path fails at runtime? A failure that lands only in
+   a log, or falls back silently to the old path, is a finding.
+9. **Blast radius beyond this repo.** Work the plan implies in another repo, another team member's
+   review, a contract change, a migration — named in the plan, or discovered later?
+10. **Named out-of-scope.** Everything deliberately excluded is stated in the plan with a reason.
+    Implicit exclusion is the defect this whole gate exists for.
 
 **Lenses for a result.** Every acceptance criterion with its evidence (a test that ran, a link,
 a screenshot path); tests claimed but not run; callers of changed code the diff did not touch;
@@ -93,23 +101,40 @@ the failure path; a claim in the report the diff does not support; scope cut sil
 
 ```
 [BLOCKER|GAP|QUESTION] <lens or criterion> - <one-line claim>
-evidence: <file:line, or the quoted line>
+evidence: <file:line, or quoted doc line, or "unverified — question">
+the question the human would have asked: "<…>"
 ```
 
-Last line: `CLEAN` (every criterion met, every lens covered, zero findings) or `FINDINGS: <n>`.
+Findings only: a summary of the deliverable is wasted tokens. Last line: `CLEAN` (every
+criterion met, every lens covered, zero findings; the completeness gate called this `PASS`) or
+`FINDINGS: <n>`.
 
-## Step 4: check, then fix
+## Step 4: verify every finding yourself, then fix
 
-Open the evidence line of each finding before you act on it: a line that does not say what the
-finding claims means the finding is refuted, and it never reaches anyone. What survives is
-**confirmed**, or **partial** (the narrower, corrected claim survives). Fix every confirmed
-finding in the plan or in the code, whichever the deliverable is. An open question goes to
-whoever can answer it; it does not block the next round.
+A reviewer's finding is a **claim**, not a fact. Before anything is written down or handed on,
+every finding is checked against the code — by you or by verifier sub-agents in parallel (each
+with its own `Report file:` line), each told to **refute by default**: a claim that cannot be
+grounded in `file:line` is REFUTED, not "probably right".
+
+Each finding leaves this step with one verdict:
+
+| Verdict | What happens |
+|---|---|
+| CONFIRMED | goes on the fix list with its evidence |
+| PARTIAL | the corrected, narrower claim goes on the list; the overstated part dies |
+| REFUTED | dropped, with the evidence that killed it — it never reaches the human |
+| OPEN QUESTION | ungroundable from the repo; names exactly what would settle it |
+
+Findings that survive get fixed — in the plan, or in the code if that is the task. An open
+question goes to whoever can answer it; it does not block the next round. Handing an unverified
+reviewer dump to the human is the failure this step exists to prevent.
 
 ## Step 5: loop
 
-Back to step 3 with a NEW reviewer on the **revised** deliverable. The loop ends when a round
-returns **zero confirmed findings**.
+Back to step 3 with a NEW reviewer on the **revised** deliverable, fresh context again. The loop
+ends when a round returns **zero confirmed findings**, or when two consecutive rounds surface
+nothing new (only findings already confirmed-and-open or refuted before). Every round is cheaper
+than the correction round it prevents.
 
 **Hard cap: 4 rounds per deliverable, no exception.** After round 4 you stop, report the
 findings still open to the coordinator or your user, and do NOT call the deliverable clean,
@@ -132,7 +157,12 @@ The gate holds ExitPlanMode on a real plan and a Write to any file named
 handoff in your scratch dir, run the loop on the draft, then write it. Without the hook you are
 the gate: nothing that step "When" names leaves your session before the loop ran.
 
-What your user or the coordinator reads is the result of the loop, never a raw reviewer dump:
-rounds run, the last reviewer's model and verdict, what was confirmed and fixed, what was
-refuted (the proof that the check ran), and what stays open. In one line, for a report or a wrap
+The gate also accepts the marker of the older completeness gate,
+`<config dir>/state/plan-review/<sessionId>.json`, under the same one-hour rule, so a machine
+moving from a site-local `plan-review` skill to this loop loses no open gate on the switch.
+
+What your user or the coordinator reads is the result of the loop — the **delta**, never a raw
+reviewer dump: confirmed findings with evidence, what was fixed, what stays open and why, how many
+rounds it took, the last reviewer's model and verdict. Refuted claims are named as refuted: they
+are the proof that the verification step ran. In one line, for a report or a wrap
 recap: `Review loop: 2 rounds, last verdict CLEAN (Opus 5.5, xhigh).`

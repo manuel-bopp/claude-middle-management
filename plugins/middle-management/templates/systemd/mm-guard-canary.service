@@ -1,0 +1,17 @@
+# middle-management plugin: USER unit template, started by mm-guard-canary.timer, never enabled
+# itself. One canary run (scripts/guard-canary.sh): are the plugin's guards still live? A failure
+# leaves its cause on file and the OnFailure= alarm sends it (with the notifyFallbackCommand route).
+# /middle-management-setup step 9 installs it with the placeholders filled in. The systemd user
+# manager inherits no shell environment: the config dir and a PATH that finds jq, git, timeout and
+# claude (the daily end-to-end probe) are written in here.
+[Unit]
+Description=middle-management: guard canary - alarm when the plugin's guards stop being live
+OnFailure=unit-failure-alarm@%n.service
+
+[Service]
+Type=oneshot
+Environment=CLAUDE_CONFIG_DIR=__CONFIG_DIR__
+Environment=PATH=__PATH__
+Environment=MM_CANARY_UNIT=%n
+ExecStart=__CANARY_DIR__/guard-canary.sh
+TimeoutStartSec=15min
