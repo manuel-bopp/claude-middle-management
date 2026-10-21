@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # middle-management plugin: Stop hook, a session's report into its T3 coordinator (plan 1.3, D0).
-# Consumers: hooks/hooks.json (Stop registration), tests/t3-report.sh. Calls scripts/t3-wake.sh (the
+# Consumers: hooks/hooks.json (Stop registration), tests/t3-report.sh, tests/morning-t3.sh (D).
+#   Reads <seat dir>/morning-t3/status (scripts/morning-t3.sh). Calls scripts/t3-wake.sh (the
 #   one sender), scripts/config-check.sh and, with scopes or scopeMode per-root, scripts/scope.py.
 #
 # Every session that is not the CURRENT coordinator (a worker, or a former coordinator after a
 # takeover) sends the last text of each turn to the coordinator of its scope. Nothing happens unless:
 # T3CODE_HOME is set (a T3 Code thread) · the scope has a sidecar <marker dir>/orchestrator.t3.json ·
-# this session is not sidecar.sessionId · the text is not empty and not exactly "OK" (the answer to a
+# this session is not sidecar.sessionId · it is not today's morning thread before its claim · the text is not empty and not exactly "OK" (the answer to a
 # Keepalive) · no sub-agent of this session is still running (the turn after the last one sends) ·
 # the text differs from the last one sent (sha256 in <cfg>/state/t3-report/<sessionId>).
 # No stop_hook_active skip (review r1 F4): a turn continued after another Stop hook's block carries
@@ -41,6 +42,22 @@ SIDE="$SDIR/orchestrator.t3.json"
 [ -f "$SIDE" ] || exit 0
 COORD=$(jq -r '.sessionId // empty' "$SIDE" 2>/dev/null)
 [ -n "$COORD" ] && [ "$COORD" != "$SID" ] || exit 0
+# Morning takeover pending (README "Morning coordinator in T3 Code"): today's morning trigger started
+# a thread (morning-t3.sh status "posted") and the sidecar still predates it, so it names the night
+# coordinator. A session started after that post is the morning thread: its turn text is not sent,
+# because the night coordinator must not re-pay its context for the seat it is about to lose. The
+# thread is visible to the user, and the watchdog alarms when it never claims.
+# ponytail: told by start time, not by thread id; 120 s slack for the POST answer arriving late.
+MST="$SDIR/morning-t3/status"
+if [ -f "$MST" ]; then
+  IFS=$'\t' read -r MD MS MAT _ < "$MST"
+  case "$MAT" in ''|*[!0-9]*) MAT="" ;; esac
+  if [ -n "$MAT" ] && [ "$MD" = "$(date +%F)" ] && [ "$MS" = posted ] && [ "$(stat -c %Y "$SIDE" 2>/dev/null || echo 0)" -lt "$MAT" ]; then
+    SAT=$(cat "$CFG_DIR"/sessions/*.json 2>/dev/null \
+      | jq -r --arg id "$SID" 'select(.sessionId == $id) | .startedAt | numbers' 2>/dev/null | head -1)
+    [ -n "$SAT" ] && [ $(( ${SAT%.*} / 1000 )) -ge $(( MAT - 120 )) ] && exit 0
+  fi
+fi
 
 # Interim turn: one of this session's sub-agents is still running (F14).
 jq -e '[.background_tasks // [] | .[]? | select(type == "object" and .type == "subagent"

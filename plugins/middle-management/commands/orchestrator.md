@@ -1,6 +1,6 @@
 ---
 description: Claim, release, or show the coordinator seat for parallel Claude Code sessions (middle-management)
-argument-hint: "[claim [--thread <id>]|release [<sessionId>]|status|t3-bind ...|t3-handover ...]"
+argument-hint: "[claim [--thread <id>] [--morning]|release [<sessionId>]|status|t3-bind ...|t3-handover ...]"
 allowed-tools: ["Bash", "mcp__t3-code__t3_thread_list", "mcp__t3-code__schedule_task", "mcp__t3-code__update_scheduled_task", "mcp__t3-code__delete_scheduled_task", "mcp__t3-code__t3_thread_send", "mcp__t3-code__t3_thread_launch"]
 ---
 
@@ -54,6 +54,8 @@ the marker that decides which one.
      log line says `NOT completed`, tell the user the old coordinator's last work may be
      unfinished. The holder was not messaged — do not message it now either. A `WARNING` instead
      of `BACKFILLED` means the seat is yours but the entry must be written by hand.
+   - on `MORNING TAKEOVER`: see "T3 Code", item 7. Relay the evidence and the `SETTLE` line, then do
+     what it says before anything else.
    - on `RACE LOST` or `FAILED`: the seat was NOT taken — another session claimed it a moment
      earlier, or the marker could not be written. Do not act as coordinator; run `status` and
      tell the user what it says.
@@ -85,6 +87,16 @@ coordinator's thread (README, "T3 Code"). A script cannot call MCP tools, so you
 7. **Asleep holder:** a `REFUSED ... asleep in T3 thread` means the holder's process ended but its
    thread still holds the seat. Wake it with `t3_thread_send <threadId>`. `--t3-asleep-ok` on `claim`
    or `release <id>` only on your user's explicit word; then delete the old report task it prints.
+   **The one exception is the morning thread** (README, "Morning coordinator in T3 Code"): a thread
+   the morning trigger started claims with `claim --thread <currentThreadId> --morning`. That route
+   needs no word at runtime because the user's standing word sits in the config key
+   `morningTakeover` (`{"allowed": true, "okBy": "<who, date>"}`); without it `--morning` is refused.
+   It takes the seat of an asleep holder that has not moved for `MM_STALE_SEAT_MIN` (60 min),
+   backfills the holder's wrap when its session-log entry is not completed, keeps the holder's
+   thread and report task on record (`status` shows them as "Predecessor" until `t3-bind`, then as
+   "previous holder"), and prints the settle step: `delete_scheduled_task <its report task>`, then
+   settle its thread (morning-ritual step 3). Never `t3_thread_send` the predecessor. A live holder
+   is not taken by `--morning`: the stale and expired rules above apply as for any claim.
 
 `status` shows thread, title, report task, an open handover and the previous holder, never the URL.
 

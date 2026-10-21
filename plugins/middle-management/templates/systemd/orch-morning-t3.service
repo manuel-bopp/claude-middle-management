@@ -1,0 +1,19 @@
+# middle-management plugin: USER unit template, started by orch-morning-t3.timer, never enabled
+# itself. One morning trigger (scripts/morning-t3.sh): wait out a usage limit, then POST to the T3
+# webhook task that opens a fresh, visible coordinator thread. /middle-management-setup step 7b
+# installs it into ~/.config/systemd/user/ with the placeholders filled in. The systemd user manager
+# inherits no shell environment, so the config dir and a PATH that finds claude, curl, jq, python3
+# and timeout are written in here.
+# TimeoutStartSec: the limit wait lasts until morningWaitUntil (default 09:30), two hours after the
+# default 07:30 start, plus the probes; a later morningWaitUntil needs a longer value here.
+[Unit]
+Description=middle-management: morning trigger - fresh coordinator thread in T3 Code
+OnFailure=unit-failure-alarm@%n.service
+
+[Service]
+Type=oneshot
+Environment=CLAUDE_CONFIG_DIR=__CONFIG_DIR__
+Environment=PATH=__PATH__
+Environment=MM_MORNING_UNIT=%n
+ExecStart=__MORNING_DIR__/morning-t3.sh
+TimeoutStartSec=2h15min

@@ -1,5 +1,5 @@
 ---
-description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user; optionally install the stuck-coordinator heartbeat, the lane reaper, the headless morning ritual and the T3 Code watcher
+description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user and its fallback; optionally install the stuck-coordinator heartbeat, the lane reaper, the headless morning ritual or the T3 morning coordinator, and the T3 Code watcher
 allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 ---
 
@@ -18,6 +18,7 @@ Schema (nothing else is valid):
   "board": "/abs/path/to/board.md",
   "surgicalStaging": true,
   "notifyCommand": ". ~/.claude/secrets/telegram.env && curl -sS -m 15 -X POST \"https://api.telegram.org/bot$BOT_TOKEN/sendMessage\" --data-urlencode \"chat_id=$CHAT_ID\" --data-urlencode \"text=$1\"",
+  "notifyFallbackCommand": "",
   "sessionLog": "/abs/path/to/logs/session-log.md",
   "longRunningAsUnit": false,
   "reviewLoopGate": false,
@@ -44,7 +45,11 @@ Schema (nothing else is valid):
   "remindAfterHours": 2,
   "remindWindow": "08:00-22:00",
   "pageCommand": "",
-  "workPackagesGate": true
+  "workPackagesGate": true,
+  "morningTakeover": { "allowed": false, "okBy": "" },
+  "morningTaskUrlFile": "~/.config/t3-threads/morning-task-url",
+  "morningWaitUntil": "09:30",
+  "morningRoot": "/abs/path/project"
 }
 ```
 
@@ -162,6 +167,12 @@ repositories; the user names them.
    when the user wants neither the heartbeat alarm nor the coordinator's
    off-keyboard asks; step 5 then refuses to arm.
 
+9b. **Fallback alarm route.** Ask for a second command that reaches the user when the first one
+    fails (another bot, a mail, a second chat), same contract. It becomes `notifyFallbackCommand`;
+    `unit-failure-alarm.sh` runs it only when `notifyCommand` is missing or fails. Ask this BEFORE
+    steps 5-8: each of them rewrites the alarm unit, and an alarm that fires before the key exists
+    has no second route. Omit the key when there is none.
+
 10. **Session log.** Show the path step 1 resolved and ask only whether the user
     wants a different one — Enter keeps it. Every session's wrap appends its
     entry there, and the coordinator's tab list plus the stale-seat takeover
@@ -232,6 +243,16 @@ repositories; the user names them.
     (default `~/.config/t3-threads/token`, mode 600) and `onLimitCommand` (optional, run once
     per usage-limit episode with the limited thread ids as arguments; output is dropped).
     Then offer step 8.
+
+16b. **Morning coordinator in T3 Code** (README, "Morning coordinator in T3 Code"; only with T3
+    Code). Ask whether a fresh coordinator thread should take over each weekday morning. Yes means:
+    `morningTakeover: {"allowed": true, "okBy": "<the user's name, today's date>"}`, written ONLY
+    when the user says so in this conversation, in their words: this key IS their standing word that
+    the morning thread may take the seat of an asleep coordinator without asking. Then
+    `morningWaitUntil` (latest time the trigger waits out a usage limit, default `09:30`),
+    `morningTaskUrlFile` (only for another path than the default) and, with `scopes` or
+    `scopeMode`, `morningRoot` = the folder of the T3 project the morning task runs in (required
+    with `per-root`). Then offer step 7b instead of step 7.
 
 17. **Work-packages gate.** `workPackagesGate` (default `true`): a sub-agent prompt
     without a `Report file:` line is refused (README, "Sub-agents"). `false` switches the
@@ -465,6 +486,75 @@ Then tell the user, in plain text: budget, timeout, model and permission mode ar
 the header of the runner); a test run is `systemctl --user start orch-morning-ritual.service` and
 reaches their phone; **after every plugin update re-run this step**. Disarm with
 `systemctl --user disable --now orch-morning-ritual.timer`; never run that here unasked.
+
+## Step 7b — morning coordinator in T3 Code (optional, Linux only, only with T3 Code)
+
+Instead of step 7, never both: the headless ritual and the morning thread would act at the same
+time (disable the other's timer in the same step). Needs `morningTakeover` from step 2, item 16b,
+and the T3 watcher (step 8), which keeps the night coordinator asleep while the claim is pending.
+
+Preconditions: the four of step 5, plus `curl`, `claude` and `timeout` on this PATH.
+
+**1. The webhook task** — only a T3 thread can create it, so do it in THIS session when it runs in
+T3 (`T3CODE_HOME` set), else ask the user to paste the call into a T3 thread of the project the
+morning thread should run in. `schedule_task` with:
+
+- `schedule`: `{"type": "webhook", "maxDeliveryAgeMinutes": 120}` (a request the relay held longer,
+  e.g. overnight while T3 was offline, starts nothing);
+- `bindToCurrentThread`: `false` (each request = a fresh top-level thread; `true` would post every
+  morning into the thread that created the task);
+- `title`: `Morning coordinator`;
+- `prompt`, exactly this, with no `{{…}}` placeholder so the URL can start nothing else:
+
+  ```text
+  Morning coordinator run, started by the middle-management morning trigger. Load the
+  middle-management:morning-ritual skill and follow its section "The morning thread": claim the
+  seat with the morning route (t3_thread_list for your currentThreadId, then /orchestrator claim
+  --thread <currentThreadId> --morning), create your report task and run t3-bind, settle the
+  predecessor the claim names (delete its report task; never t3_thread_send it), run the ritual's
+  steps 1-7, then stop and wait for the user in this thread. If the claim is refused, say what it
+  printed and wait for the user.
+  ```
+
+The answer carries `webhookUrl`. Store it without printing it or putting it in argv (the same rule as
+the report URL): the user pastes it, or you write it from the tool result straight into the file:
+
+```bash
+F="$HOME/.config/t3-threads/morning-task-url"   # or the morningTaskUrlFile the user chose
+mkdir -p "$(dirname "$F")" && ( umask 077; cat > "$F" ) && chmod 600 "$F"   # URL on stdin
+```
+
+Model and runtime of the morning thread are inherited from the thread that created the task; to
+change them later: `update_scheduled_task`.
+
+**2. Units** — copies the trigger and its helpers OUT of the plugin, for the same reason as step 5.
+Ask for the trigger time (default `Mon..Fri 07:30`) and the watchdog time (default
+`Mon..Fri 08:15`, after the ritual would be done; systemd `OnCalendar=` syntax):
+
+```bash
+CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
+CFG_DIR="$(bash "$CHECK" dir)"; MR="$CFG_DIR/middle-management-morning"; UNITS="$HOME/.config/systemd/user"
+AT="Mon..Fri 07:30"; CHK="Mon..Fri 08:15"   # what the user chose
+mkdir -p "$MR" "$UNITS"
+cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-t3.sh,config-check.sh,scope.py,unit-failure-alarm.sh} "$MR/"
+for u in orch-morning-t3.service orch-morning-t3.timer orch-morning-watchdog.service orch-morning-watchdog.timer; do
+  sed "s|__MORNING_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g; s|__MORNING_TIME__|$AT|g; s|__CHECK_TIME__|$CHK|g" \
+    "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
+done
+sed "s|__HEARTBEAT_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
+  "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
+systemctl --user daemon-reload
+systemctl --user disable --now orch-morning-ritual.timer 2>/dev/null   # the headless ritual, if it was armed
+systemctl --user enable --now orch-morning-t3.timer orch-morning-watchdog.timer
+systemctl --user list-timers 'orch-morning-*' --no-pager
+```
+
+A `morningWaitUntil` later than two hours after the trigger time needs a longer
+`TimeoutStartSec=` in `orch-morning-t3.service`. Then tell the user, in plain text: a test is
+`systemctl --user start orch-morning-t3.service` and opens a real morning thread in T3 (offer it,
+run it only on their yes); holidays are not skipped (disarm with
+`systemctl --user disable --now orch-morning-t3.timer orch-morning-watchdog.timer`, never run that
+here unasked); **after every plugin update re-run this step**.
 
 ## Step 8: T3 Code watcher (optional, Linux only, only with T3 Code)
 

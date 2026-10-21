@@ -1,0 +1,16 @@
+# middle-management plugin: USER unit template. /middle-management-setup step 7b installs it into
+# ~/.config/systemd/user/ with __CHECK_TIME__ filled in (default Mon..Fri 08:15), then:
+#   systemctl --user enable --now orch-morning-watchdog.timer
+# Set it after the trigger time plus the time the morning thread needs for its ritual. While the
+# trigger still waits for a usage limit the check stays quiet: the trigger reports its own cancel or
+# failure. ponytail: one check per morning, so a thread started late after a wait is not re-checked.
+[Unit]
+Description=middle-management: morning watchdog
+
+[Timer]
+OnCalendar=__CHECK_TIME__
+Persistent=false
+Unit=orch-morning-watchdog.service
+
+[Install]
+WantedBy=timers.target

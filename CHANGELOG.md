@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.11.1 - 2026-10-21
+
+**Morning coordinator in T3 Code.** A weekday timer starts a fresh, visible coordinator thread
+that takes over from the night's coordinator without waking it. New `scripts/morning-t3.sh` with
+`templates/systemd/orch-morning-t3.{service,timer}` (07:30): waits out a usage limit (probe every
+10 min until `morningWaitUntil`, default 09:30, one notify each for wait, free, cancel; a seat that
+changed hands meanwhile cancels), then POSTs to a T3 webhook task (`schedule_task {type: webhook}`,
+`bindToCurrentThread: false`, created once by a T3 thread, setup step 7b) whose URL sits in
+`morningTaskUrlFile` (mode 600, never printed; local twin first). A non-202 answer fails the unit
+with its cause on file. `morning-t3.sh --check` with `orch-morning-watchdog.{service,timer}` (08:15)
+alarms when no coordinator claimed the seat and stamped the ritual today.
+
+**Morning takeover.** `orchestrator.sh claim --morning`, honoured only with the user's standing
+word in the new config key `morningTakeover: {"allowed": true, "okBy": "<who, date>"}`: takes the
+seat of a holder asleep in T3 and quiet for `MM_STALE_SEAT_MIN`, backfills its wrap when it has no
+closed marker and its log entry is not completed, keeps its thread and report task in
+`orchestrator.t3.previous.json` (shown by `status`, filed as `previous` by `t3-bind`, no wake) and
+prints the settle step. `commands/orchestrator.md` and the `morning-ritual` skill name the
+exception to the `--t3-asleep-ok` rule and the morning thread's order: claim, bind, settle, ritual,
+wait for the user.
+
+**No wake into the night coordinator.** While the morning thread has not bound the seat,
+`t3-watch.py` notifies the user instead of waking the sidecar's thread ("limit over", "other
+failure") and skips the `Keepalive` retry; `hooks/t3-report.sh` does not send the turns of a session
+started after the morning post.
+
+**Alarm fallback.** New config key `notifyFallbackCommand`: `unit-failure-alarm.sh` runs it when
+`notifyCommand` is missing or fails. New config keys validated by `config-check.sh`:
+`notifyFallbackCommand`, `morningTakeover`, `morningTaskUrlFile`, `morningWaitUntil`, `morningRoot`.
+New test matrix `tests/morning-t3.sh`; `tests/t3-seat.sh` section G, `tests/t3-watch.sh` section N.
+
 ## 0.11.0 - 2026-10-20
 
 **T3 Code mode.** Under T3 Code (`T3CODE_HOME` set) a thread's process ends after 30 minutes idle,

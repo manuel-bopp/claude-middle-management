@@ -1,6 +1,6 @@
 ---
 name: morning-ritual
-description: The coordinator's morning ritual — messages delta, repo state, wrap audit of yesterday's sessions, open-items sweep into the board, machine cleanup (stale dev servers, merged worktrees, dead watchers), your user's open to-do list, day plan for your user. Use when the user says "morning ritual" / "Morgenroutine" / "start my day", opens the day with a status ask, or a fresh coordinator session starts its first morning. Step 6 alone (the user's to-do list, delta since the last delivery) when the user asks "todo list", "my open to-dos", "meine offenen To-Dos" or "Was sind meine offenen To-Dos", and as part of a seat takeover when no headless ritual delivered it this morning. Coordinator sessions only — run this ONLY when the middle-management role hook says ORCHESTRATOR; in a worker session, point the user at the coordinator instead (exception: the unattended run started by the plugin's scripts/morning-headless.sh, whose prompt says so; it reads and reports only).
+description: The coordinator's morning ritual — messages delta, repo state, wrap audit of yesterday's sessions, open-items sweep into the board, machine cleanup (stale dev servers, merged worktrees, dead watchers), your user's open to-do list, day plan for your user. Use when the user says "morning ritual" / "Morgenroutine" / "start my day", opens the day with a status ask, or a fresh coordinator session starts its first morning. Step 6 alone (the user's to-do list, delta since the last delivery) when the user asks "todo list", "my open to-dos", "meine offenen To-Dos" or "Was sind meine offenen To-Dos", and as part of a seat takeover when no headless ritual delivered it this morning. Coordinator sessions only — run this ONLY when the middle-management role hook says ORCHESTRATOR; in a worker session, point the user at the coordinator instead (exceptions: the unattended run started by the plugin's scripts/morning-headless.sh, whose prompt says so, which reads and reports only; and the T3 morning thread started by scripts/morning-t3.sh, which claims the seat first with claim --morning).
 ---
 
 # Coordinator morning ritual
@@ -27,6 +27,22 @@ already reads your scope's board and drop files. Your window file is your scope'
 `<config dir>/state/scopes/<name>/morning-ritual/window` for a named scope (the default scope keeps
 `<config dir>/state/morning-ritual/window`); stamp that one in step 7. The headless runner serves
 the default scope only, so a named scope's coordinator runs this ritual itself.
+
+**The morning thread (T3 Code; README "Morning coordinator in T3 Code").** When the plugin's
+morning trigger (`scripts/morning-t3.sh`) started this thread, the night's coordinator is usually
+asleep in its own T3 thread. Before step 1, in this order:
+
+1. Claim with the morning route: `t3_thread_list` gives `currentThreadId`, then
+   `orchestrator.sh claim --thread <currentThreadId> --morning` (`/orchestrator`, "T3 Code" item 7).
+   It works only with the user's standing word in the config key `morningTakeover`; a `REFUSED` or
+   `BUSY` ends the ritual here: say what the script printed, in this thread, and wait for your user.
+2. Report task + `t3-bind`, as `/orchestrator` "T3 Code" items 2-3 say.
+3. Settle the predecessor the claim named: `delete_scheduled_task <its report task>` (the id is in
+   the `SETTLE` line and in `orchestrator.sh status`), read what it left off disk
+   (`peer-state.py --session-id <its id>`, `open-items.py list`), then settle its thread in step 3
+   below after the loose-ends check. The claim already backfilled its wrap when its log entry was
+   not completed (`BACKFILLED:`). **Never `t3_thread_send` it**: that re-pays its whole context.
+4. Run steps 1-7. After the day plan, stop: your user continues in this thread.
 
 ## 1. Messages delta — CUSTOMIZE
 
@@ -87,8 +103,10 @@ re-register sessions under NEW names; map names via the session registry,
 Verdict per transcript: wrapped ✓ (log entry exists) · still-active (live PID) ·
 **asleep in a T3 thread** (process gone, no closed marker, but T3 names the session:
 `peer-state.py` LIVE "asleep (T3)", `open-items.py list` "asleep in T3 thread <id>") → it
-is NOT dead and gets NO backfill and never `claude --resume` (T3 owns that session; a
-headless run would be a second writer to its transcript and wrap it behind its back): wake
+is NOT dead and gets NO headless backfill and never `claude --resume` (T3 owns that session; a
+headless run would be a second writer to its transcript and wrap it behind its back). The
+append-only entry `claim --morning` writes into the session log is not that: it never touches the
+transcript, and it is how the morning thread settles the night's coordinator. Otherwise: wake
 it with `t3_thread_send <id>` when its lane needs to move, else leave it for the day plan ·
 test/probe artifact (nothing owed) · **dead without closing its books → headless
 backfill** (never for a T3 session, see above): `claude --resume <sessionId> -p "<your wrap command> — backfill
@@ -216,3 +234,5 @@ to-do list. Lead with the delta; reference docs by path instead of retelling the
 
 Once it is out, stamp the window for the next ritual:
 `mkdir -p "<state dir>/morning-ritual" && date +%s > "<state dir>/morning-ritual/window"` (step 1 names `<state dir>`).
+The morning watchdog (`morning-t3.sh --check`) reads this stamp together with the seat marker: a
+morning thread that never gets here raises its alarm.

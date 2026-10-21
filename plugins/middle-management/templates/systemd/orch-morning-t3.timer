@@ -1,0 +1,15 @@
+# middle-management plugin: USER unit template. /middle-management-setup step 7b installs it into
+# ~/.config/systemd/user/ with __MORNING_TIME__ filled in (default Mon..Fri 07:30), then:
+#   systemctl --user enable --now orch-morning-t3.timer
+# Persistent=false on purpose: a run caught up after a reboot at 14:00 would start a second
+# coordinator thread in the middle of a working day. A missed morning is the watchdog's to report.
+[Unit]
+Description=middle-management: morning trigger - fresh coordinator thread in T3 Code
+
+[Timer]
+OnCalendar=__MORNING_TIME__
+Persistent=false
+Unit=orch-morning-t3.service
+
+[Install]
+WantedBy=timers.target

@@ -212,6 +212,11 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   text; any decoration (a bold first line, a parse mode, the fallback to plain when the rich
   form is rejected) lives inside this one command, so an alarm never dies of formatting. Keep
   tokens in a mode-600 env file the command sources — setup prints this file back to you.
+- `notifyFallbackCommand` (optional, 0.11.1): the second alarm route, same contract as
+  `notifyCommand`. `scripts/unit-failure-alarm.sh` runs it only when `notifyCommand` is missing or
+  fails, with the text prefixed `[fallback route: the main alarm channel failed]`. Every unit that
+  fails loudly ends in that alarm (the watcher and the heartbeat exit 1 when their own notify
+  fails), so one fallback covers them all. Set it before installing any unit (setup steps 5-8).
 - `sessionLog` (optional, default `~/logs/session-log.md`): the machine's session log — see
   [The session log](#the-session-log). Must be absolute (`~` is expanded); a relative path makes
   the config invalid, because it would name a different file per caller. `$MM_SESSION_LOG`
@@ -234,6 +239,8 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   it), `t3TokenFile` (optional, default `~/.config/t3-threads/token`, mode 600) and
   `onLimitCommand` (optional, run once per usage-limit episode with the limited thread ids as
   arguments): the T3 watcher and `scripts/t3-token.sh`. See [T3 Code](#t3-code).
+- `morningTakeover`, `morningTaskUrlFile`, `morningWaitUntil`, `morningRoot` (optional, 0.11.1):
+  the morning chain under T3 Code. See [Morning coordinator in T3 Code](#morning-coordinator-in-t3-code).
 - `userName`, `okBy`, `remindAfterHours`, `remindWindow`, `pageCommand` (optional, defaults
   `user` / the user / `2` / `08:00-22:00` / none): follow-through. See [Follow-through](#follow-through).
 - `workPackagesGate` (optional, default `true`): the sub-agent report gate. See [Sub-agents](#sub-agents).
@@ -438,6 +445,66 @@ every thread, hooks included).
   loose-ends check, and removes a T3 worktree only when merged and settled. Nothing archives or
   deletes threads. The heartbeat skips a coordinator with a sidecar; poke and keep-warm do not
   apply in T3.
+
+## Morning coordinator in T3 Code
+
+0.11.1. You work at night with a coordinator thread and go to bed; its process ends after 30
+minutes idle, and it stays "asleep in T3". In the morning a systemd timer starts a FRESH, visible
+coordinator thread, which takes the seat, settles the night's coordinator without waking it, runs
+the morning ritual and then waits for you in that thread. The night's coordinator is never
+messaged: waking it would make it re-pay its whole context for a seat it is about to lose.
+
+1. **Trigger** (`scripts/morning-t3.sh`, `orch-morning-t3.timer`, weekdays 07:30 by default, no
+   catch-up after a reboot; setup step 7b). It probes the login with one tiny `claude -p` (no
+   tools, no MCP). Usage-limited → one notify, a probe every 10 minutes (`MM_MORNING_RETRY_SEC`)
+   until `morningWaitUntil` (default `09:30`; `MM_MORNING_WAIT_UNTIL` wins for a late manual run),
+   then one "cancelled" notify; free after the wait → one notify. A seat that changed hands during
+   the wait cancels the run. Then it POSTs `{"from":"morning-t3","date":…}` to the T3 webhook task
+   whose URL sits in `morningTaskUrlFile` (default `~/.config/t3-threads/morning-task-url`, mode 600,
+   never printed; the local twin of a relay URL first, at `t3Url`). HTTP 202 = started. Anything
+   else → exit 1 with a cause file → `OnFailure=unit-failure-alarm@%n.service`. State:
+   `<seat dir>/morning-t3/status` (`<date> <posted|waiting|cancelled|failed> <epoch> <pid>`).
+2. **The webhook task** opens the thread. A script cannot create T3 tasks, so a T3 thread creates
+   it once: `schedule_task` with `{"type": "webhook"}` and `bindToCurrentThread: false` (each request
+   = a fresh top-level thread), a fixed prompt (setup step 7b prints it; no `{{body…}}`
+   placeholders, so the URL starts nothing but that prompt), and `maxDeliveryAgeMinutes` (e.g.
+   `120`) so a request the relay held overnight does not start a thread at noon. Model and runtime
+   are inherited from the creating thread: `update_scheduled_task` changes them.
+3. **Morning takeover** (`orchestrator.sh claim --thread <id> --morning`). Allowed by the config
+   key `morningTakeover: {"allowed": true, "okBy": "<who, date>"}`: the user's standing word,
+   recorded once, so nobody is asked at runtime. Without it `--morning` is refused outright. It takes
+   the seat of a holder that is asleep in T3 (no live process, the sidecar names it) and whose
+   transcript has not moved for `MM_STALE_SEAT_MIN` (60), read off disk (an unreadable holder keeps
+   the seat). It deletes the old sidecar, keeps who it named (thread, title, report task, no URL)
+   in `<seat dir>/orchestrator.t3.previous.json` for `status` and the following `t3-bind` (which
+   files it as `previous` and wakes nobody), backfills the holder's wrap entry when it carries no
+   closed marker and its log entry is not completed (the same append-only `backfill` as an expired
+   seat), and prints the settle step: `delete_scheduled_task <its report task>`, then settle its
+   thread in the ritual (step 3). A gone holder outside T3 is taken as before, plus the backfill.
+   A live holder is never taken by `--morning`: the stale and expired rules apply.
+4. **No wake into the night coordinator while the claim is pending.** From the POST until the
+   morning thread binds (the sidecar is older than the post), `t3-watch.py` sends nothing into the
+   sidecar's thread: "limit over" and "other failure" go to you as a notify, the `Keepalive` retry
+   is skipped. The Stop hook (`hooks/t3-report.sh`) does not send the turn text of a session started
+   after the post (the morning thread itself), so a refused claim cannot wake the night's
+   coordinator either; the thread is visible to you, and the watchdog alarms.
+5. **Watchdog** (`morning-t3.sh --check`, `orch-morning-watchdog.timer`, weekdays 08:15 by
+   default). Quiet when today the seat marker was written (a coordinator claimed it) AND the ritual
+   window was stamped (`<seat dir>/morning-ritual/window`, ritual step 7), or when the trigger
+   cancelled itself today or still waits. Otherwise exit 1 with its cause → the same alarm.
+
+With [scopes](#scopes), `morningRoot` names the folder of the T3 project the morning task runs in;
+its seat is the one served (required with `scopeMode: "per-root"`). Holidays are not skipped:
+`systemctl --user disable --now orch-morning-t3.timer orch-morning-watchdog.timer`.
+
+**Assumptions, not verified end to end on a live T3 server:** that the local twin of the webhook
+relay URL starts the task as the relay does (proven for the report task by `t3-wake.sh`), and that
+a request answered with 202 has created the thread. The `schedule_task` tool description states
+the rest: `{"type": "webhook"}` runs once per request, `bindToCurrentThread: false` creates a fresh
+top-level thread per run, and the run sees the request only through prompt placeholders.
+
+Use this OR the [headless morning ritual](#headless-morning-ritual), not both: both act at the same
+time. A machine without T3 Code keeps the headless one.
 
 ## Follow-through
 
