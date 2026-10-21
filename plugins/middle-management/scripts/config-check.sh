@@ -99,7 +99,8 @@ validate() {
     and ((.prReview // {}) | (type == "object")
           and ((.repos // []) | type == "array" and all(type == "string" and test("\\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\z")))
           and ((.authors // []) | type == "array" and all(type == "string" and test("\\A[A-Za-z0-9][A-Za-z0-9-]*\\z")))
-          and ([.model, .securityModel, .reviewerName, .base] | all(. == null or (type == "string" and test("\\S"))))
+          and ([.model, .securityModel, .reviewerName] | all(. == null or (type == "string" and test("\\S"))))
+          and ((.base // "main") | type == "string" and test("\\A[A-Za-z0-9][A-Za-z0-9._/-]*\\z") and (startswith("refs/") | not))
           and ((.approve // false) | type == "boolean")
           and ((.maxRounds // 4) | (type == "number" and . >= 1 and . == floor)))
     # t3Url: the base URL of the T3 server (watcher, t3-token.sh); a plain http(s) URL, nothing else.

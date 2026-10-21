@@ -118,6 +118,10 @@ is "...gh never called" "$(cat "$FIX/gh.log" 2>/dev/null)" ""
 setup; pr 1 clean; touch "$FIX/list.fail"
 OUT=$(run); is "gh pr list fails -> exit 1" "$?" 1
 has "...the cause file names it" "acme/tools: gh pr list failed: HTTP 401" "$(cause)"
+vb() { setup "{\"base\": $1}"; CLAUDE_CONFIG_DIR="$C" bash "$S/config-check.sh" validate >/dev/null 2>&1; echo $?; }
+is "config base release/1.x -> valid" "$(vb '"release/1.x"')" 0
+is "config base refs/heads/main -> invalid (would match no PR, silently)" "$(vb '"refs/heads/main"')" 1
+is "config base with a trailing blank -> invalid" "$(vb '"main "')" 1
 
 echo "== B: skips =="
 setup; pr 1 docs alice false true
