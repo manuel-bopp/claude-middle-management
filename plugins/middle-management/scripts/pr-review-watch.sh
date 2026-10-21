@@ -9,7 +9,8 @@
 #
 # Config key prReview: repos ("owner/name"), authors (allowlist; empty = do nothing), model ("opus"),
 #   securityModel ("fable", used when the diff touches plugins/*/hooks/** or a path with "guard" in
-#   it), approve (false), reviewerName ("Mike"), maxRounds (4). userName = who an escalation asks.
+#   it), approve (false), reviewerName ("Mike"), maxRounds (4), base ("main": PRs into any other
+#   branch are not reviewed, a merge is a release only on main). userName = who an escalation asks.
 # Per repo, per open PR (gh pr list): drafts are skipped. A fork or an author outside the allowlist
 #   gets ONE "not reviewed" notify per head sha and nothing else. A head sha already reviewed or given
 #   up on, and an escalated PR, are skipped. A new head is cloned into a scratch dir (removed at exit):
@@ -79,7 +80,7 @@ if [ "${#REPOS[@]}" -eq 0 ] || [ -z "$AUTHORS" ]; then
 fi
 MODEL="$(cfg '.prReview.model // "opus"')"; SECMODEL="$(cfg '.prReview.securityModel // "fable"')"
 APPROVE="$(cfg '.prReview.approve // false')"; WHO="$(cfg '.prReview.reviewerName // "Mike"')"
-MAXR="$(cfg '.prReview.maxRounds // 4 | floor')"; ASK="$(cfg '.userName // "user"')"
+MAXR="$(cfg '.prReview.maxRounds // 4 | floor')"; BASEBR="$(cfg '.prReview.base // "main"')"; ASK="$(cfg '.userName // "user"')"
 
 mkdir -p "$ST" || fail "cannot create $ST" "check the permissions of $CFG_DIR/state"
 exec 9>"$ST/.lock" || fail "cannot open $ST/.lock" "check the permissions of $ST"
@@ -306,7 +307,7 @@ for R in "${REPOS[@]}"; do
     || { GHFAIL="${GHFAIL:+$GHFAIL; }$R: gh pr list failed: $(tail -c 300 "$RUN/list.err" | tr '\n' ' ')"; continue; }
   RD="$ST/$(printf '%s' "$R" | tr '/' '_')"
   mkdir -p "$RD" || fail "cannot create $RD"
-  mapfile -t PRS < <(jq -c '.[] | select(.isDraft != true)' <<<"$LIST")
+  mapfile -t PRS < <(jq -c --arg b "$BASEBR" '.[] | select(.isDraft != true and .baseRefName == $b)' <<<"$LIST")
   for PR in "${PRS[@]}"; do review "$PR"; done
 done
 [ -n "$GHFAIL" ] && fail "$GHFAIL${LOST:+; notifications not delivered: $LOST}" "gh auth status (the unit runs as you), then: systemctl --user start mm-pr-review.service"

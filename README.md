@@ -52,7 +52,10 @@ Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
 automatic for this marketplace unless you switch them on: see
 [Contributing and releases](#contributing-and-releases). The repository moved from
 `manuel-bopp/` to `manus-org/` on 2026-10-21; GitHub redirects the old name, so an install
-from the old source keeps working.
+from the old source keeps working. **Do not** point only an `extraKnownMarketplaces["dr-bopp"]`
+settings entry at the new name. If it no longer matches the source recorded in
+`~/.claude/plugins/known_marketplaces.json`, Claude Code ignores the marketplace and the plugin fails
+to load ("added but ignored"). Change both or neither.
 
 **Installed from `bopp-plugins` before?** The marketplace is now called `dr-bopp`, and a
 rename migrates nothing — re-register it once:

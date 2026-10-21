@@ -27,7 +27,8 @@ entry with "Re-run setup step N".
 
 **PR review runner.** New `scripts/pr-review-watch.sh` with `templates/systemd/mm-pr-review.{service,timer}`
 (every 15 minutes, OnFailure alarm), setup step 10 and the config key `prReview` (`repos`, `authors`,
-`model`, `securityModel`, `approve`, `reviewerName`, `maxRounds`; validated by `config-check.sh`).
+`model`, `securityModel`, `approve`, `reviewerName`, `maxRounds`, `base` (default `main`: a PR into
+any other branch is not reviewed); validated by `config-check.sh`).
 Each new head of an open pull request by an allowlisted author gets a version gate (a touched
 `plugins/<p>/` needs a higher `plugin.json` version than the base branch), `tests/run.sh` under a
 timeout in a scrubbed environment, and a headless `claude -p` in safe and restricted mode with

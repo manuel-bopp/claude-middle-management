@@ -131,6 +131,9 @@ setup; pr 1 docs bob
 OUT=$(run); has "an author outside the allowlist -> one notify" "its author bob is not on the allowlist" "$(notes)"
 is "...no claude call" "$(cat "$FIX/claude.n" 2>/dev/null)" ""
 OUT=$(run); is "...not repeated" "$(notes | grep -c 'NOT reviewed')" 1
+setup; pr 1 docs; jq '.[0].baseRefName = "lane/x"' "$FIX/prs.json" > "$FIX/p.tmp" && mv "$FIX/p.tmp" "$FIX/prs.json"
+OUT=$(run); is "a PR into a branch other than main -> exit 0" "$?" 0
+is "...not cloned, no review, no merge" "$(count 'repo clone\|pr review\|pr merge' "$FIX/gh.log")" 0
 
 echo "== C: CLEAN, green, gate ok -> merge =="
 setup; pr 1 clean
