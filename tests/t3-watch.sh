@@ -373,7 +373,8 @@ lacks "the successor claimed (sidecar names it): silent" "handover" "$(notes)"
 sidecar mcp:coord
 
 echo "N. morning takeover pending: the night coordinator is never woken"
-morning() { mkdir -p "$CFG/state/morning-t3"; printf '%s\tposted\t%s\t1\n' "$(date +%F)" "$T0" > "$CFG/state/morning-t3/status"; touch -d "1 hour ago" "$SIDE"; }
+morning() {  # posted at T0+1500 s: the hold covers ticks up to T0+3300 s
+  mkdir -p "$CFG/state/morning-t3"; printf '%s\tposted\t%s\t1\n' "$(date +%F)" "$((T0 + 1500))" > "$CFG/state/morning-t3/status"; touch -d "1 hour ago" "$SIDE"; }
 reset; sidecar mcp:coord; morning; echo ok > "$TMP/probe.mode"
 shell "[$COORD_OK, {\"id\":\"mcp:morning\",\"title\":\"morning\",$LIMITED}]"
 tick 0; has "the limited morning thread is notified" "morning (mcp:morning)" "$(notes)"
@@ -384,16 +385,22 @@ has "...and what to send" "send 'Continue where you left off.'" "$(notes)"
 tick 3600; is "...once per run id" "$(grep -c 'limit over' "$TMP/notify.log")" 1
 reset; sidecar mcp:coord; morning
 shell "[{\"id\":\"mcp:coord\",\"title\":\"Koordinator\",$LIMITED}]"
-tick 0; tick 1800; tick 3600; is "limited night coordinator: no Keepalive while the morning claim is pending" "$(nhook)" 0
+tick 0; tick 1800; is "limited night coordinator: no Keepalive while the morning claim is pending" "$(nhook)" 0
 reset; sidecar mcp:coord; morning
 shell "[$COORD_OK, {\"id\":\"mcp:morning\",\"title\":\"morning\",\"status\":\"failed\",\"lastErrorClass\":\"provider_error\",\"lastError\":\"boom\"}]"
 tick 0; is "other failure: no wake" "$(nhook)" 0; has "...notify instead" "other failure" "$(notes)"
-reset; sidecar mcp:coord; morning; touch "$SIDE"; echo ok > "$TMP/probe.mode"
+reset; sidecar mcp:coord; morning; touch -d "+1 hour" "$SIDE"; echo ok > "$TMP/probe.mode"
 shell "[$COORD_OK, {\"id\":\"mcp:w1\",\"title\":\"lane one\",$LIMITED}]"
 tick 0; tick 1800; is "the sidecar is newer than the post (bound): wakes as before" "$(nhook)" 1
 reset; sidecar mcp:coord; morning; sed -i "s/^$(date +%F)/2000-01-01/" "$CFG/state/morning-t3/status"; echo ok > "$TMP/probe.mode"
 shell "[$COORD_OK, {\"id\":\"mcp:w1\",\"title\":\"lane one\",$LIMITED}]"
 tick 0; tick 1800; is "an old post: wakes as before" "$(nhook)" 1
+reset; sidecar mcp:coord; morning; sed -i "s/\tposted\t/\trefused\t/" "$CFG/state/morning-t3/status"; echo ok > "$TMP/probe.mode"
+shell "[$COORD_OK, {\"id\":\"mcp:w1\",\"title\":\"lane one\",$LIMITED}]"
+tick 0; tick 1800; is "the morning claim was refused: wakes as before" "$(nhook)" 1
+reset; sidecar mcp:coord; morning; echo ok > "$TMP/probe.mode"
+shell "[$COORD_OK, {\"id\":\"mcp:w1\",\"title\":\"lane one\",$LIMITED}]"
+tick 2400; tick 4200; is "posted 40+ min ago and never claimed: the hold has ended" "$(nhook)" 1
 rm -rf "$CFG/state/morning-t3"; sidecar mcp:coord
 
 # ------------------------------------------------------------------------------------------ Z --

@@ -257,6 +257,25 @@ backfill() {
   return 0
 }
 
+# claim --morning's outcome for the morning chain (README "Morning coordinator in T3 Code"): the
+# trigger's status <seat dir>/morning-t3/status says "posted" while its thread has not claimed, and
+# hooks/t3-report.sh and scripts/t3-watch.py hold every wake into the night coordinator meanwhile.
+# Every exit of claim --morning ends that hold (claimed / refused); a refusal also reaches the user,
+# because the night coordinator keeps the seat and the morning thread sits there waiting.
+morning_outcome() {
+  local rc=$? f d st state cmd msg
+  f="$(dirname "$MARKER")/morning-t3/status"
+  IFS=$'\t' read -r d st _ < "$f" 2>/dev/null || return 0
+  [ "$d" = "$(date +%F)" ] && [ "$st" = posted ] || return 0
+  if [ "$rc" -eq 0 ]; then state=claimed; else state=refused; fi
+  printf '%s\t%s\t%s\t%s\n' "$d" "$state" "$(date +%s)" "$$" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f"
+  [ "$state" = refused ] || return 0
+  cmd=$(jq -r '.notifyCommand // ""' "$(bash "$DIR/config-check.sh" file)" 2>/dev/null)
+  msg="[$(hostname -s 2>/dev/null || echo host)] morning takeover REFUSED in \"$MY_NAME\" (claim --morning, exit $rc): the night coordinator keeps the seat. The morning thread shows why."
+  [ -n "$cmd" ] && { printf '%s\n' "$msg" | sh -c "$cmd" notify "$msg" >/dev/null 2>&1 || echo "WARNING: the refusal notice could not be sent (notifyCommand)."; }
+  return 0
+}
+
 HID=$(held_id); HNAME=""; [ -n "$HID" ] && HNAME=$(alive_name "$HID")
 # A holder alive in ANOTHER scope (a root was added, moved or nested over its start dir) does not
 # hold this seat: the role hook already calls it "not visibly alive", so claim and release <id> must
@@ -287,6 +306,7 @@ case "${1:-status}" in
     # the config, so no one is asked at runtime. Without it --morning refuses outright, whatever the
     # seat looks like: a flag that silently degrades to a plain claim would hide a missing word.
     if [ -n "$MORNING" ]; then
+      trap morning_outcome EXIT
       OKBY=$(jq -r 'if (.morningTakeover | type) == "object" and .morningTakeover.allowed == true
                     then (.morningTakeover.okBy | strings | select(test("\\S"))) else empty end' \
                "$(bash "$DIR/config-check.sh" file)" 2>/dev/null)
@@ -342,18 +362,16 @@ case "${1:-status}" in
         echo "  log      : $(log_state)"
         echo "  last line: $LAST"
         # The sidecar goes (its reportUrl must ring nobody's thread any more); who it named stays on
-        # record, without the URL, for status and the settle step. t3-bind consumes the note.
-        ( umask 077; jq -c '{sessionId, threadId, title, reportTaskId}' "$SIDE" > "$PREVF" ) 2>/dev/null || rm -f "$PREVF"
-        rm -f "$SIDE"
-        echo "SETTLE the predecessor: delete_scheduled_task $OLD_TASK (its report task, bound to thread $OLD_THREAD),"
-        echo "  then settle that thread (morning-ritual step 3). Never t3_thread_send it: that re-pays its whole context."
+        # record, without the URL, for status and the settle step: the note, written only once the
+        # marker is won (a lost race changes nothing), names its claimer, and only that claimer's
+        # t3-bind consumes it.
+        PREV_NOTE=$(jq -c --arg by "$MY_ID" '{sessionId, threadId, title, reportTaskId, by: $by}' "$SIDE" 2>/dev/null)
+        DROP_SIDE=morning
         if [ "$LOGOK" != true ] && [ "$CLOSED" != yes ]; then
           BACKFILL=1; BF_WHY="coordinator asleep at the morning takeover"; BF_ON="the morning takeover (standing word: $OKBY)"; BF_MIN_VAR=STALE_MIN
         fi
       else
-        rm -f "$SIDE"
-        echo "OVERRIDE (--t3-asleep-ok): the sidecar of the asleep coordinator is deleted. Delete its old report"
-        echo "  task too: delete_scheduled_task $OLD_TASK (bound to thread $OLD_THREAD)."
+        DROP_SIDE=override
       fi
     elif [ -n "$MORNING" ] && [ -z "$HANDOVER" ] && [ -n "$HID" ] && [ -z "$HNAME" ] && [ "$HID" != "$MY_ID" ] && [ -z "$HSCOPE" ]; then
       # A gone holder outside T3 (closed tab, no sidecar): the seat was free to take before; the morning
@@ -451,6 +469,21 @@ case "${1:-status}" in
       exit 1
     fi
     echo "OK: this session (\"$MY_NAME\") is the coordinator from now on."
+    # The old binding goes only now that the marker is won, so a lost race leaves it untouched. A
+    # predecessor note from an earlier morning claim that never bound is dropped by any later claim
+    # of another session (this session's own note survives its re-claim).
+    [ "$(jq -r '.by // empty' "$PREVF" 2>/dev/null)" = "$MY_ID" ] || rm -f "$PREVF"
+    if [ -n "${DROP_SIDE:-}" ] && [ "$(side_id)" = "$HID" ]; then
+      [ "$DROP_SIDE" = morning ] && [ -n "${PREV_NOTE:-}" ] && { ( umask 077; printf '%s\n' "$PREV_NOTE" > "$PREVF" ) 2>/dev/null || rm -f "$PREVF"; }
+      rm -f "$SIDE"
+      if [ "$DROP_SIDE" = morning ]; then
+        echo "SETTLE the predecessor: delete_scheduled_task $OLD_TASK (its report task, bound to thread $OLD_THREAD),"
+        echo "  then settle that thread (morning-ritual step 3). Never t3_thread_send it: that re-pays its whole context."
+      else
+        echo "OVERRIDE (--t3-asleep-ok): the sidecar of the asleep coordinator is deleted. Delete its old report"
+        echo "  task too: delete_scheduled_task $OLD_TASK (bound to thread $OLD_THREAD)."
+      fi
+    fi
     # Only the winner of the marker writes the backfill, so a lost race never files a second one.
     if [ -n "${BACKFILL:-}" ]; then
       if backfill 2>/dev/null; then
@@ -510,7 +543,7 @@ case "${1:-status}" in
         exit 1
       fi
     fi
-    rm -f "$MARKER"
+    rm -f "$MARKER" "$PREVF"
     [ "$(side_id)" = "$HID" ] && rm -f "$SIDE"
     [ -n "$RTASK" ] && echo "T3: the sidecar is deleted. Delete the report task now: delete_scheduled_task $RTASK"
     if [ "$HID" = "$MY_ID" ]; then
@@ -522,7 +555,7 @@ case "${1:-status}" in
     ;;
   status)
     echo "This session: \"$MY_NAME\" ($MY_ID)"
-    if [ -f "$PREVF" ]; then
+    if [ -f "$PREVF" ] && [ "$(jq -r '.by // empty' "$PREVF" 2>/dev/null)" = "$HID" ]; then
       echo "Predecessor:  $(jq -r '"thread \(.threadId // "?") \"\(.title // "?")\", session \(.sessionId // "?"), report task \(.reportTaskId // "?") (morning takeover; settle it)"' "$PREVF" 2>/dev/null)"
     fi
     if [ -f "$SIDE" ]; then   # never the URL
@@ -565,7 +598,7 @@ case "${1:-status}" in
       else echo "WARNING: the previous holder was NOT woken (t3-wake rc $WRC). Send it yourself: t3_thread_send $(side '.threadId // "?"') \"seat taken over by $F_TITLE (thread $F_THREAD)\""; fi
     elif [ "$OLD_SID" = "$MY_ID" ]; then
       PREV=$(jq -c '.previous // null' "$SIDE" 2>/dev/null) || PREV='null'   # a re-bind keeps it
-    elif [ -z "$OLD_SID" ] && [ -f "$PREVF" ]; then
+    elif [ -z "$OLD_SID" ] && [ -f "$PREVF" ] && [ "$(jq -r '.by // empty' "$PREVF" 2>/dev/null)" = "$MY_ID" ]; then
       PREV=$(jq -c '{sessionId, threadId, title, reportTaskId}' "$PREVF" 2>/dev/null) || PREV='null'   # morning takeover: no wake
     fi
     # The URL reaches jq through a process substitution (printf is a builtin: in no argv).

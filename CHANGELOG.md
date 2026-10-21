@@ -52,6 +52,15 @@ verification table, "two rounds with nothing new" as a second end, and the delta
 **self-wakeup skill.** Waiting on the user in escalating stages; nudges go through `notifyCommand`.
 New test matrices `tests/guard-canary.sh`, `tests/prompt-hooks.sh`.
 
+**Review fixes.** Every exit of `claim --morning` records `claimed` / `refused` in the morning status
+(a refusal also notifies the user), and the hold on reports into the night coordinator ends with it or
+30 min after the post; a held turn is a `failures.log` line the watcher sends, never silent. The old
+binding and the predecessor note change only after the marker is won; the note names its claimer, is
+consumed only by that claimer's `t3-bind`, and is dropped by any other claim and by `release`.
+`morning-t3.sh` checks `morningTakeover` before it probes or posts, tries the relay only when the local
+twin was unreachable, and names a later-deadline manual run in its cancel notice. `review-loop`: the
+"nothing new" stop is never clean.
+
 ## 0.11.0 - 2026-10-20
 
 **T3 Code mode.** Under T3 Code (`T3CODE_HOME` set) a thread's process ends after 30 minutes idle,

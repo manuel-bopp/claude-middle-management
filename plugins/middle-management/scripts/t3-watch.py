@@ -36,7 +36,8 @@ top-level threads of the scope's T3 project(s), the coordinator thread included:
   handover       sidecar.handover {toThreadId, toTitle, since} older than 30 min while the sidecar
                  still names the old holder -> notify once per handover
   morning        while today's morning thread is started (<seat dir>/morning-t3/status "posted", written
-                 by morning-t3.sh) and the sidecar is older than that post, the sidecar still names the
+                 by morning-t3.sh, not yet "claimed"/"refused" by claim --morning), at most 30 min
+                 after the post, and the sidecar is older than that post, the sidecar still names the
                  night coordinator, which is about to lose the seat: nothing wakes it. "limit over" and
                  "other failure" go to the user as a notify instead, the Keepalive retry is skipped.
 Plus: topics.py tick --scope <name> for every scope when topics.py exists (with or without sidecar).
@@ -60,6 +61,7 @@ STATE_DIR = os.path.join(CFG_DIR, "state", "t3-watch")
 NOW = float(os.environ.get("T3W_NOW") or time.time())
 TODAY = time.strftime("%Y-%m-%d", time.localtime(NOW))
 RETRY_S, CLICK_S, STUCK_S, HANDOVER_S = 30 * 60, 10 * 60, 3 * 3600, 30 * 60
+MORNING_HOLD_S = 30 * 60   # the morning hold ends at the latest 30 min after the post (hooks/t3-report.sh too)
 REQUIRED = ("id", "projectId", "title", "status", "activityRunStatus", "activeRunId", "latestRunId",
             "lastError", "lastErrorClass", "usageLimitResetAt", "pendingRuntimeRequest", "itemCount",
             "settledAt", "archivedAt", "modelSelection")
@@ -272,8 +274,9 @@ def threads_of(shell, name, ss, coord_id):
 
 
 def morning_pending(sdir):
-    """True while today's morning thread was started (morning-t3.sh status "posted") and has not bound
-    the seat yet (the sidecar is older than the post). The sidecar then still names the night
+    """True while today's morning thread was started (morning-t3.sh status "posted"; claim --morning
+    turns it into "claimed" or "refused"), the post is under 30 min old, and the seat is not bound
+    anew yet (the sidecar is older than the post). The sidecar then still names the night
     coordinator, and a wake would make it re-pay its whole context for a seat it is about to lose.
     ponytail: the window is told by time, not by thread id: any wake in it goes to the user instead."""
     try:
@@ -282,7 +285,7 @@ def morning_pending(sdir):
         at = float(at)
     except (OSError, ValueError):
         return False
-    if day != TODAY or state != "posted":
+    if day != TODAY or state != "posted" or NOW - at >= MORNING_HOLD_S:
         return False
     try:
         return os.path.getmtime(os.path.join(sdir, "orchestrator.t3.json")) < at

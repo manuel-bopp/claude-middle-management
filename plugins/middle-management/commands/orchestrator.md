@@ -96,7 +96,9 @@ coordinator's thread (README, "T3 Code"). A script cannot call MCP tools, so you
    thread and report task on record (`status` shows them as "Predecessor" until `t3-bind`, then as
    "previous holder"), and prints the settle step: `delete_scheduled_task <its report task>`, then
    settle its thread (morning-ritual step 3). Never `t3_thread_send` the predecessor. A live holder
-   is not taken by `--morning`: the stale and expired rules above apply as for any claim.
+   is not taken by `--morning`: the stale and expired rules above apply as for any claim. Every exit of
+   `claim --morning` records its outcome (`claimed` / `refused`) for the morning trigger, and a
+   refusal notifies the user: the night coordinator keeps the seat.
 
 `status` shows thread, title, report task, an open handover and the previous holder, never the URL.
 

@@ -132,9 +132,10 @@ reviewer dump to the human is the failure this step exists to prevent.
 ## Step 5: loop
 
 Back to step 3 with a NEW reviewer on the **revised** deliverable, fresh context again. The loop
-ends when a round returns **zero confirmed findings**, or when two consecutive rounds surface
-nothing new (only findings already confirmed-and-open or refuted before). Every round is cheaper
-than the correction round it prevents.
+ends **clean** when a round returns **zero confirmed findings**. It also stops, NOT clean, when two
+consecutive rounds surface nothing new (only findings already confirmed-and-open or refuted
+before): then it ends as after round 4 below, with the open confirmed findings reported and nothing
+called clean. Every round is cheaper than the correction round it prevents.
 
 **Hard cap: 4 rounds per deliverable, no exception.** After round 4 you stop, report the
 findings still open to the coordinator or your user, and do NOT call the deliverable clean,

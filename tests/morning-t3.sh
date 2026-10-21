@@ -73,7 +73,7 @@ C=""; NOTE=""
 setup() {  # fresh config dir; $1 = extra JSON for the config
   C=$(mktemp -d -p "$TMP"); NOTE=$C/notified; mkdir -p "$C/state"
   jq -n --arg n "printf '%s\\n---\\n' \"\$1\" >> $NOTE" --arg u "$C/morning-url" --arg t "http://127.0.0.1:$PORT" \
-    "{notifyCommand:\$n, morningTaskUrlFile:\$u, t3Url:\$t} + ${1:-{\}}" > "$C/middle-management.json"
+    "{notifyCommand:\$n, morningTaskUrlFile:\$u, t3Url:\$t, morningTakeover:{allowed:true, okBy:\"Alex, 2026-10-21\"}} + ${1:-{\}}" > "$C/middle-management.json"
   (umask 077; printf '%s\n' "$URL" > "$C/morning-url")
   echo ok > "$TMP/probe.plan"; rm -f "$TMP/probe.n" "$TMP/probe.log" "$TMP/hook.log" "$TMP/hook.mode"
 }
@@ -111,11 +111,23 @@ setup; (umask 077; printf 'https://relay.t3.codes/v1/hooks/env-1/task-r/%s\n' "$
 OUT=$(trig); RC=$?; ALL="$ALL$OUT"
 is "relay URL -> the local twin answers 202 -> exit 0" "$RC" 0
 is "...posted to <t3Url>/api/hooks/<task>/<token>" "$(cut -d' ' -f1 "$TMP/hook.log")" "/api/hooks/task-r/$SECRET"
+# the local twin was reached but did not answer 202 -> no second POST through the relay
+setup; (umask 077; printf 'https://relay.t3.codes/v1/hooks/env-1/task-r/%s\n' "$SECRET" > "$C/morning-url"); echo 500 > "$TMP/hook.mode"
+OUT=$(trig); RC=$?; ALL="$ALL$OUT"
+is "local twin reached, HTTP 500 -> exit 1" "$RC" 1
+has "...names the local URL" "HTTP 500 via the local URL" "$(cause orch-morning-t3.service)"
+is "...one POST only (no relay retry, no second thread)" "$(grep -c "^/api/hooks/" "$TMP/hook.log")" 1
+# no takeover word -> alarm, no probe, no POST
+setup '{"morningTakeover":{"allowed":false}}'
+OUT=$(trig); RC=$?; ALL="$ALL$OUT"
+is "no takeover word -> exit 1" "$RC" 1
+has "...cause says so" "no takeover word" "$(cause orch-morning-t3.service)"
+[ -e "$TMP/probe.log" ] || [ -e "$TMP/hook.log" ] && bad "...no probe, no POST" none "$(cat "$TMP/probe.log" "$TMP/hook.log" 2>/dev/null)" || ok "...no probe, no POST"
 # failed POST -> cause file, exit 1, and the alarm sends that cause
 setup; echo 500 > "$TMP/hook.mode"
 OUT=$(trig); RC=$?; ALL="$ALL$OUT"
 is "failed POST (HTTP 500) -> exit 1" "$RC" 1
-has "...cause names the HTTP code" "answered HTTP 500 (expected 202)" "$(cause orch-morning-t3.service)"
+has "...cause names the HTTP code" "answered HTTP 500 via the configured URL (expected 202)" "$(cause orch-morning-t3.service)"
 is "...status failed" "$(status)" failed
 env PATH="$BIN:$PATH" CLAUDE_CONFIG_DIR="$C" bash "$S/unit-failure-alarm.sh" orch-morning-t3.service >/dev/null 2>&1
 has "...the OnFailure alarm sends that cause" "morning thread NOT started" "$(notes)"
@@ -135,6 +147,7 @@ setup; echo limit > "$TMP/probe.plan"
 OUT=$(trig MM_MORNING_WAIT_UNTIL=00:00); RC=$?; ALL="$ALL$OUT"
 is "limited past the deadline -> exit 0" "$RC" 0
 has "...cancel notice" "morning thread cancelled today" "$(notes)"
+has "...the hint carries a later deadline" "MM_MORNING_WAIT_UNTIL=<HH:MM> bash" "$(notes)"
 [ -e "$TMP/hook.log" ] && bad "...no POST" none "$(cat "$TMP/hook.log")" || ok "...no POST"
 is "...status cancelled" "$(status)" cancelled
 # ...and when that notice cannot go out: exit 1, so the unit alarm (and its fallback) carries it
@@ -211,6 +224,18 @@ printf '%s\tposted\t%s\t1\n' "$(date -d yesterday +%F)" "$((NOWS - 30))" > "$CD/
 stop sess-m; has "yesterday's post -> the hold is off" "REFUSED: something" "$(cat "$TMP/hook.log" 2>/dev/null)"
 printf '%s\tposted\t%s\t1\n' "$(date +%F)" "$((NOWS - 30))" > "$CD/state/morning-t3/status"; rm -f "$CD/state/t3-report/sess-m"
 touch "$SIDE"; stop sess-m; has "a sidecar newer than the post (the thread bound) -> the hold is off" "REFUSED: something" "$(cat "$TMP/hook.log" 2>/dev/null)"
+# the hold is never silent, and it ends with the claim's outcome or after 30 min
+touch -d "1 hour ago" "$SIDE"; rm -f "$CD/state/t3-report/"sess-* "$CD/state/t3-report/failures.log"
+printf '%s\tposted\t%s\t1\n' "$(date +%F)" "$((NOWS - 30))" > "$CD/state/morning-t3/status"
+stop sess-m; has "a held turn becomes a failures.log line (the watcher tells the user)" "held: the morning thread has not claimed" "$(cat "$CD/state/t3-report/failures.log" 2>/dev/null)"
+printf '{"pid":3,"sessionId":"sess-w2","kind":"interactive","cwd":"/x","name":"late worker","startedAt":%s}\n' "$((NOWS * 1000))" > "$CD/sessions/3.json"
+printf '%s\trefused\t%s\t1\n' "$(date +%F)" "$NOWS" > "$CD/state/morning-t3/status"
+stop sess-w2; has "claim refused -> a worker started after the post reports again" "REFUSED: something" "$(cat "$TMP/hook.log" 2>/dev/null)"
+printf '%s\tclaimed\t%s\t1\n' "$(date +%F)" "$NOWS" > "$CD/state/morning-t3/status"; rm -f "$CD/state/t3-report/sess-w2"
+stop sess-w2; has "claimed (not bound yet) -> no hold" "REFUSED: something" "$(cat "$TMP/hook.log" 2>/dev/null)"
+printf '%s\tposted\t%s\t1\n' "$(date +%F)" "$((NOWS - 2400))" > "$CD/state/morning-t3/status"; rm -f "$CD/state/t3-report/sess-w2"
+printf '{"pid":3,"sessionId":"sess-w2","kind":"interactive","cwd":"/x","name":"late worker","startedAt":%s}\n' "$(( (NOWS - 2300) * 1000))" > "$CD/sessions/3.json"
+stop sess-w2; has "posted 40 min ago, no thread ever claimed -> the hold has ended" "REFUSED: something" "$(cat "$TMP/hook.log" 2>/dev/null)"
 
 echo "== E: templates =="
 TPL=$P/templates/systemd

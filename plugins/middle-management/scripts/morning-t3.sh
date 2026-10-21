@@ -45,6 +45,7 @@ UNIT="${MM_MORNING_UNIT:-}"
 CAUSE=""
 [ -n "$UNIT" ] && CAUSE="$CFG_DIR/state/unit-failure-alarm/$(printf '%s' "$UNIT" | tr -c 'A-Za-z0-9._-' '_').cause"
 RERUN="systemctl --user start orch-morning-t3.service"
+LATE="MM_MORNING_WAIT_UNTIL=<HH:MM> bash $HERE/morning-t3.sh"   # a manual run with a later deadline
 TODAY="$(date +%F)"
 
 fail() {  # $1 = headline, $2 = cause, $3 = fix
@@ -123,6 +124,11 @@ URL="$(head -c 4096 "$UF" | tr -d '[:space:]')"
 printf '%s' "$URL" | grep -Eq '^https?://[^"\\[:space:]]+$' \
   || fail "morning thread FAILED" "$UF holds no usable http(s) URL" "store the webhook URL of the T3 morning task there"
 
+# The standing word first: without it the thread could only be refused (and sit there all morning).
+[ "$(cfg 'if (.morningTakeover | type) == "object" and .morningTakeover.allowed == true then "yes" else "no" end')" = yes ] \
+  || fail "morning thread NOT started" "the morning trigger is armed, but the config has no takeover word (morningTakeover.allowed is not true), so the thread could not take the seat" \
+          "/middle-management-setup item 16b, or disarm: systemctl --user disable --now orch-morning-t3.timer orch-morning-watchdog.timer"
+
 WAIT_UNTIL="${MM_MORNING_WAIT_UNTIL:-$(cfg '.morningWaitUntil // "09:30"')}"
 DEADLINE="$(date -d "$TODAY $WAIT_UNTIL" +%s 2>/dev/null)" \
   || fail "morning thread FAILED" "morningWaitUntil \"$WAIT_UNTIL\" is no time of day" "HH:MM in the config"
@@ -152,8 +158,8 @@ while :; do
   NOW="$(date +%s)"
   if [ "$NOW" -ge "$DEADLINE" ]; then
     setstatus cancelled
-    notify "[$HOST] morning thread cancelled today: the account is still usage-limited at $WAIT_UNTIL ($WHY). Start it by hand later: $RERUN" \
-      || fail "morning thread cancelled" "usage limit until $WAIT_UNTIL, and the notice could not be sent" "$RERUN once the limit is over"
+    notify "[$HOST] morning thread cancelled today: the account is still usage-limited at $WAIT_UNTIL ($WHY). Start it by hand later, with a later deadline: $LATE" \
+      || fail "morning thread cancelled" "usage limit until $WAIT_UNTIL, and the notice could not be sent" "once the limit is over: $LATE"
     echo "morning-t3: cancelled, usage limit until the deadline $WAIT_UNTIL"
     exit 0
   fi
@@ -193,14 +199,19 @@ case $URL in
   https://relay.t3.codes/v1/hooks/*/*/*) R=${URL#https://relay.t3.codes/v1/hooks/}; LOCAL="${BASE%/}/api/hooks/${R#*/}" ;;
 esac
 BODY="$(jq -cn --arg d "$TODAY" '{from: "morning-t3", date: $d}')"
-post() {  # $1 = url; prints the HTTP code; the URL is in no argv (printf is a builtin)
-  curl -sS --connect-timeout 5 -m "${MM_MORNING_POST_TIMEOUT:-20}" -o /dev/null -w '%{http_code}' \
+post() {  # $1 = url; prints "<HTTP code> <connect seconds>"; the URL is in no argv (printf is a builtin)
+  curl -sS --connect-timeout 5 -m "${MM_MORNING_POST_TIMEOUT:-20}" -o /dev/null -w '%{http_code} %{time_connect}' \
     -K <(printf 'url = "%s"\n' "$1") -H 'content-type: application/json' --data-binary @- <<<"$BODY" 2>/dev/null
 }
-CODE=""
-[ -n "$LOCAL" ] && CODE="$(post "$LOCAL")"
-[ "$CODE" = 202 ] || CODE="$(post "$URL")"
-[ "$CODE" = 202 ] || fail "morning thread NOT started" "the T3 webhook task answered HTTP ${CODE:-000} (expected 202)" \
+# The relay only when the local twin could not even be reached: once it was connected, the request
+# may have started a thread already, and a second POST would start a second one.
+CODE=""; WHERE=configured
+if [ -n "$LOCAL" ]; then
+  read -r CODE TC <<<"$(post "$LOCAL")"; WHERE=local
+  if [ "$CODE" != 202 ] && awk -v t="${TC:-0}" 'BEGIN { exit !(t + 0 == 0) }'; then LOCAL=""; fi
+fi
+[ -z "$LOCAL" ] && { read -r CODE _ <<<"$(post "$URL")"; WHERE=configured; }
+[ "$CODE" = 202 ] || fail "morning thread NOT started" "the T3 webhook task answered HTTP ${CODE:-000} via the $WHERE URL (expected 202)" \
   "is t3code running and the task still there (list_scheduled_tasks)? Then: $RERUN"
 setstatus posted
 echo "morning-t3: morning thread started (HTTP 202)${WAITED:+ after a usage-limit wait}"

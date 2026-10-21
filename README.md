@@ -466,9 +466,11 @@ messaged: waking it would make it re-pay its whole context for a seat it is abou
    until `morningWaitUntil` (default `09:30`; `MM_MORNING_WAIT_UNTIL` wins for a late manual run),
    then one "cancelled" notify; free after the wait → one notify. A seat that changed hands during
    the wait cancels the run. Then it POSTs `{"from":"morning-t3","date":…}` to the T3 webhook task
-   whose URL sits in `morningTaskUrlFile` (default `~/.config/t3-threads/morning-task-url`, mode 600,
+   whose URL sits in `morningTaskUrlFile`; without `morningTakeover.allowed` it posts nothing and
+   alarms instead (the thread could only be refused) (default `~/.config/t3-threads/morning-task-url`, mode 600,
    never printed; the local twin of a relay URL first, at `t3Url`). HTTP 202 = started. Anything
-   else → exit 1 with a cause file → `OnFailure=unit-failure-alarm@%n.service`. State:
+   else → exit 1 with a cause file (the relay is tried only when the local twin could not be
+   reached at all: a reached twin may already have started the thread) → `OnFailure=unit-failure-alarm@%n.service`. State:
    `<seat dir>/morning-t3/status` (`<date> <posted|waiting|cancelled|failed> <epoch> <pid>`).
 2. **The webhook task** opens the thread. A script cannot create T3 tasks, so a T3 thread creates
    it once: `schedule_task` with `{"type": "webhook"}` and `bindToCurrentThread: false` (each request
@@ -489,11 +491,13 @@ messaged: waking it would make it re-pay its whole context for a seat it is abou
    thread in the ritual (step 3). A gone holder outside T3 is taken as before, plus the backfill.
    A live holder is never taken by `--morning`: the stale and expired rules apply.
 4. **No wake into the night coordinator while the claim is pending.** From the POST until the
-   morning thread binds (the sidecar is older than the post), `t3-watch.py` sends nothing into the
-   sidecar's thread: "limit over" and "other failure" go to you as a notify, the `Keepalive` retry
-   is skipped. The Stop hook (`hooks/t3-report.sh`) does not send the turn text of a session started
-   after the post (the morning thread itself), so a refused claim cannot wake the night's
-   coordinator either; the thread is visible to you, and the watchdog alarms.
+   morning thread's claim (status `posted`; every exit of `claim --morning` turns it into `claimed`
+   or `refused`), at most 30 minutes, and only while the sidecar is older than the post,
+   `t3-watch.py` sends nothing into the sidecar's thread: "limit over" and "other failure" go to you
+   as a notify, the `Keepalive` retry is skipped. The Stop hook (`hooks/t3-report.sh`) does not send
+   the turn text of a session started after the post into that thread; the held turn becomes a line
+   in `failures.log`, which the watcher sends to you as "report lost", and the session is told once.
+   A refused claim notifies you through `notifyCommand` and ends the hold at once.
 5. **Watchdog** (`morning-t3.sh --check`, `orch-morning-watchdog.timer`, weekdays 08:15 by
    default). Quiet when today the seat marker was written (a coordinator claimed it) AND the ritual
    window was stamped (`<seat dir>/morning-ritual/window`, ritual step 7), or when the trigger

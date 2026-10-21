@@ -269,6 +269,35 @@ has "...backfilled" "BACKFILLED" "$OUT"; has "...the entry closes c1" "- Session
 has "...says why" "coordinator gone at the morning takeover" "$(cat "$LOG")"
 OUT=$(as_s "$H" m2 "$H" claim); lacks "a plain claim never backfills" "BACKFILLED" "$OUT"
 
+echo "== G2: review fixes - outcome, order, note lifetime =="
+mstat() { mkdir -p "$H/.claude/state/morning-t3"; printf '%s\tposted\t%s\t1\n' "$(date +%F)" "$(date +%s)" > "$H/.claude/state/morning-t3/status"; }
+g_note() { jq --arg n "cat >> $H/notes" '. + {notifyCommand: $n}' "$H/.claude/middle-management.json" > "$TMP/x"; cp "$TMP/x" "$H/.claude/middle-management.json"; }
+g_home "5 minutes ago"; g_note; mstat
+OUT=$(as_s "$H" m1 "$H" claim --morning); is "a refused morning claim -> status refused" "$(cut -f2 "$H/.claude/state/morning-t3/status")" refused
+has "...the user is told" "morning takeover REFUSED" "$(cat "$H/notes" 2>/dev/null)"
+g_home "3 hours ago"; g_note; mstat
+OUT=$(as_s "$H" m1 "$H" claim --morning); is "a successful morning claim -> status claimed" "$(cut -f2 "$H/.claude/state/morning-t3/status")" claimed
+[ -s "$H/notes" ] && bad "...no refusal notice" none "$(cat "$H/notes")" || ok "...no refusal notice"
+g_home "3 hours ago"; jq 'del(.morningTakeover)' "$H/.claude/middle-management.json" > "$TMP/x"; cp "$TMP/x" "$H/.claude/middle-management.json"; g_note; mstat
+OUT=$(as_s "$H" m1 "$H" claim --morning); is "no takeover word -> status refused too" "$(cut -f2 "$H/.claude/state/morning-t3/status")" refused
+g_home "3 hours ago"; chmod 444 "$H/.claude/state/orchestrator"
+OUT=$(as_s "$H" m1 "$H" claim --morning); has "marker not writable -> FAILED" "FAILED" "$OUT"
+[ -e "$SIDE" ] && ok "...a claim that did not win keeps the old sidecar" || bad "...a claim that did not win keeps the old sidecar" present gone
+[ -e "$H/.claude/state/orchestrator.t3.previous.json" ] && bad "...and writes no predecessor note" none present || ok "...and writes no predecessor note"
+lacks "...prints no SETTLE line" "SETTLE" "$OUT"
+chmod 644 "$H/.claude/state/orchestrator"
+# the note belongs to its claimer: a later claim of another session drops it, a foreign t3-bind ignores it
+g_home "3 hours ago"; PF=$H/.claude/state/orchestrator.t3.previous.json
+as_s "$H" m1 "$H" claim --morning >/dev/null; is "note written, by m1" "$(jq -r .by "$PF")" sess-m1
+OUT=$(as_s "$H" m2 "$H" claim); has "m1 gone, m2 claims" "OK: this session" "$OUT"
+[ -e "$PF" ] && bad "...the stale note is dropped" gone present || ok "...the stale note is dropped"
+lacks "...status shows no predecessor" "Predecessor" "$(as_s "$H" m2 "$H" status)"
+printf '{"sessionId":"sess-c1","threadId":"mcp:t-c1","reportTaskId":"task-1","by":"sess-other"}\n' > "$PF"
+printf '%s\n' "$U2" | as_s "$H" m2 "$H" t3-bind --thread mcp:t-m2 --title m2 --task task-m2 --model m >/dev/null
+is "a foreign note is not filed as previous" "$(jq -r 'has("previous")' "$SIDE")" false
+printf '{"by":"sess-m2"}\n' > "$PF"; as_s "$H" m2 "$H" release >/dev/null
+[ -e "$PF" ] && bad "release drops the note" gone present || ok "release drops the note"
+
 echo "== Z =="
 lacks "no webhook secret in any output" "$S1" "$ALL"; lacks "...nor the second" "$S2" "$ALL"
 lacks "no [HH:MM] prefix in the changed texts" "[HH:MM]" "$(cat "$ORCH" "$ROLE" "$P/hooks/t3-report.sh")"
