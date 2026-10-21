@@ -57,6 +57,7 @@ if [ -n "$HAVE" ]; then
     ERR="$(bash "$S/copy-set.sh" "$d" 2>&1 >/dev/null)" || fail "${ERR:-copy-set.sh $d failed}"
   done
 fi
-printf '%s\n' "$V" > "$STAMP.tmp" && mv -f "$STAMP.tmp" "$STAMP" || fail "cannot write $STAMP"
+# Own tmp name: on a host without copy dirs no lock is taken, and two sessions may stamp at once.
+printf '%s\n' "$V" > "$STAMP.$$.tmp" && mv -f "$STAMP.$$.tmp" "$STAMP" || { rm -f "$STAMP.$$.tmp"; fail "cannot write $STAMP"; }
 rm -f "$STAMP.failed"
 exit 0

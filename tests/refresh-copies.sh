@@ -105,6 +105,14 @@ OUT=$(hook); is "the next session start -> no-op" "$(cat "$C/middle-management-r
 setup
 OUT=$(hook); is "no copy dir at all -> exit 0" "$?" 0; is "...the stamp is written anyway" "$(cat "$C/state/plugin-version")" "$V"
 is "...nothing created" "$(ls "$C" | grep -c middle-management-)" 0
+setup
+for i in 1 2 3 4 5 6 7 8; do hook > "$C/out.$i" & done; wait
+is "eight sessions starting at once, no copy dir -> no failure" "$(cat "$C"/out.* | grep -c systemMessage)" 0
+is "...stamped" "$(cat "$C/state/plugin-version")" "$V"
+setup; mkdir -p "$C/middle-management-canary"
+for i in 1 2 3 4 5 6 7 8; do hook > "$C/out.$i" & done; wait
+is "eight sessions starting at once, with a copy dir -> no failure" "$(cat "$C"/out.* | grep -c systemMessage)" 0
+cmp -s "$P/scripts/guard-canary.sh" "$C/middle-management-canary/guard-canary.sh" && ok "...refreshed" || bad "...refreshed" copied missing
 
 echo "== D: failure =="
 setup; mkdir -p "$C/middle-management-canary"; chmod 555 "$C/middle-management-canary"

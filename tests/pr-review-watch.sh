@@ -42,15 +42,17 @@ bump() { echo "{\"name\": \"mm\", \"version\": \"$1\"}" > "$SEED/plugins/mm/.cla
 branch() {  # $1 = name, then a shell snippet run in the seed
   git -C "$SEED" checkout -q -b "$1" main; (cd "$SEED" && eval "$2"); git -C "$SEED" add -A; git -C "$SEED" commit -qm "$1"
 }
-branch clean   'echo "echo y" > plugins/mm/x.sh; bump 0.2.0; echo "- template changed: re-run setup step 6" >> CHANGELOG.md'
+branch clean   'echo "echo y" > plugins/mm/x.sh; bump 0.2.0; printf "%s\n" "- Re-run setup step 6 (a template changed)." "Prose that mentions re-run setup steps 5-9 is not quoted." >> CHANGELOG.md'
 branch nobump  'echo "echo z" > plugins/mm/x.sh'
 branch nobump2 'echo "echo zz" > plugins/mm/x.sh'
 branch red     'echo "echo y" > plugins/mm/x.sh; bump 0.2.0; touch tests/red'
 branch docs    'echo "more" >> README.md'
 branch hook    'mkdir -p plugins/mm/hooks; echo "exit 0" > plugins/mm/hooks/h.sh; bump 0.2.0'
+branch delplug 'rm -r plugins/mm'
 git -C "$SEED" checkout -q main
 FIX=$TMP/fix; mkdir -p "$FIX/remote/acme"
 git clone -q --bare "$SEED" "$FIX/remote/acme/tools.git"
+git clone -q --bare "$SEED" "$FIX/remote/acme/tools2.git"   # a second repo with the same PR numbers
 sha() { git -C "$SEED" rev-parse "$1"; }
 
 # --- stubs -------------------------------------------------------------------------------------
@@ -141,14 +143,15 @@ has "merge notify: repo and number" "PR merged by Mike: acme/tools #1" "$(notes)
 has "...version" "Version: mm 0.2.0" "$(notes)"
 has "...link" "https://github.com/acme/tools/pull/1" "$(notes)"
 has "...when it is active" "from the second session start after the merge, or /reload-plugins" "$(notes)"
-has "...repeats the CHANGELOG's re-run line" "re-run setup step 6" "$(notes)"
+has "...repeats the CHANGELOG's re-run line" "Re-run setup step 6 (a template changed)." "$(notes)"
+lacks "...but not prose that merely mentions it" "Prose that mentions" "$(notes)"
 A=$(cat "$FIX/claude.args")
 has "reviewer: read-only tools only" "--tools Read,Grep,Glob" "$A"
 has "...safe mode (no CLAUDE.md of the PR, no hooks, no plugins)" "--safe-mode" "$A"
 has "...restricted" "--restricted" "$A"; has "...no prompts" "--permission-prompts none" "$A"
 has "...no MCP" "--strict-mcp-config" "$A"; has "...the configured model" "--model opus" "$A"
 lacks "...no Bash" "Bash" "$A"
-case "$(cat "$FIX/claude.pwd")" in "$TMP"/scratch/mm-pr-review.*/1/repo) ok "...cwd = the scratch checkout" ;; *) bad "...cwd = the scratch checkout" "<scratch>/1/repo" "$(cat "$FIX/claude.pwd")" ;; esac
+case "$(cat "$FIX/claude.pwd")" in "$TMP"/scratch/mm-pr-review.*/acme_tools-1/repo) ok "...cwd = the scratch checkout" ;; *) bad "...cwd = the scratch checkout" "<scratch>/1/repo" "$(cat "$FIX/claude.pwd")" ;; esac
 has "...the diff file was there" "+echo y" "$(cat "$FIX/claude.diff" 2>/dev/null)"
 PR_TXT=$(cat "$FIX/claude.prompt")
 has "...the prompt marks PR content as untrusted data" "UNTRUSTED" "$PR_TXT"
@@ -158,6 +161,12 @@ is "the scratch dir is removed" "$(ls "$TMP/scratch")" ""
 has "state: reviewed + merged" "\"merged\": \"$(sha clean)\"" "$(state 1)"
 OUT=$(run); is "the same head next run -> no second review" "$(cat "$FIX/claude.n")" 1
 is "...no second post" "$(wc -l < "$FIX/reviews.log")" 1
+
+setup '{"repos": ["acme/tools", "acme/tools2"]}'; pr 1 clean
+OUT=$(run); is "two repos, the same PR number in one tick -> both reviewed" "$(wc -l < "$FIX/reviews.log")" 2
+is "...both merged" "$(wc -l < "$FIX/merges.log")" 2
+lacks "...no error" "error" "$(notes)"
+has "...state per repo" "\"merged\"" "$(cat "$C/state/pr-review/acme_tools2/1.json")"
 
 echo "== D: version gate =="
 setup; pr 2 nobump
@@ -169,6 +178,9 @@ has "...notify: changes requested with the link" "PR changes requested by Mike: 
 has "...link" "pull/2" "$(notes)"
 setup; pr 5 docs
 OUT=$(run); has "no plugin touched -> no gate, merged" "Version: no plugin version changed" "$(notes)"
+setup; pr 6 delplug
+OUT=$(run); has "a PR that deletes a plugin -> no gate, merged" "PR merged by Mike: acme/tools #6" "$(notes)"
+lacks "...no version finding" "version gate" "$(cat "$FIX/body.last")"
 
 echo "== E: red tests =="
 setup; pr 3 red

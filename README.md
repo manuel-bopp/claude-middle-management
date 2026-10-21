@@ -709,8 +709,9 @@ session log is the one file that is NOT per project: its skeleton sits beside th
    included. Never push `main`, never merge your own pull request by hand.
 2. **Bump and log.** A pull request that touches `plugins/middle-management/` raises `version` in
    `plugins/middle-management/.claude-plugin/plugin.json` and adds a CHANGELOG entry. The version is
-   what every host compares, so the same version means no rollout. A change to a unit template says
-   "re-run setup step N" in that entry.
+   what every host compares, so the same version means no rollout. A change to a unit template gets
+   a line in that entry that starts with `Re-run setup step N` (the runner's merge notice repeats
+   such lines).
 3. **Review and merge.** The PR review runner (setup step 10, on the one machine that reviews) takes
    every new head of a pull request by an allowlisted author: the version gate, `tests/run.sh`, and
    a headless review with read-only tools in which the pull request's text is data, never an
@@ -721,7 +722,9 @@ session log is the one file that is NOT per project: its skeleton sits beside th
    request again only once you remove its state file,
    `<config-dir>/state/pr-review/<owner>_<repo>/<number>.json`. The merge is decided by the
    runner from the verdict line, the tests and the gate. Forks and other authors are never reviewed
-   or merged. While the runner's `gh` login is the authors' own account, the verdict is a review
+   or merged. The allowlist names the pull request's author, not whoever pushed to its branch: anyone
+   with write access to the repository can push onto an allowlisted author's branch, so the trust
+   boundary is the repository's collaborator list. While the runner's `gh` login is the authors' own account, the verdict is a review
    comment (GitHub refuses to approve your own pull request); `prReview.approve: true` switches to
    approve / request changes once it has an account of its own.
 4. **Rollout.** Per host, in the user settings (`~/.claude/settings.json`):

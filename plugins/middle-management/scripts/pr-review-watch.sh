@@ -14,7 +14,7 @@
 #   gets ONE "not reviewed" notify per head sha and nothing else. A head sha already reviewed or given
 #   up on, and an escalated PR, are skipped. A new head is cloned into a scratch dir (removed at exit):
 #   a. version gate: a dir plugins/<p>/ touched without raising plugins/<p>/.claude-plugin/plugin.json
-#      over the base branch's version is a finding (no rollout without a bump);
+#      over the base branch's version is a finding (no rollout without a bump; a deleted dir is not);
 #   b. tests/run.sh, when the PR has one, under timeout, in a scrubbed environment; red = a finding;
 #   c. a headless `claude -p` with Read/Grep/Glob only (safe mode: no CLAUDE.md of the PR, no hooks,
 #      no MCP), cwd = the checkout; its last line must be exactly VERDICT: CLEAN or VERDICT: FINDINGS.
@@ -137,7 +137,7 @@ $URL"
   [ "$(sget '.gaveUp // ""')" = "$SHA" ] && return
   echo "pr-review: $R #$N head ${SHA:0:7}: reviewing"
 
-  W="$RUN/$N"; CO="$W/repo"; mkdir -p "$W/home"
+  W="$RUN/$(printf '%s' "$R" | tr '/' '_')-$N"; CO="$W/repo"; mkdir -p "$W/home"   # per repo AND number
   gh repo clone "$R" "$CO" -- -q > "$W/clone.log" 2>&1 </dev/null \
     || { err "clone failed: $(tail -c 300 "$W/clone.log")"; return; }
   git -C "$CO" -c advice.detachedHead=false checkout -q --detach "$SHA" 2> "$W/checkout.log" \
@@ -152,6 +152,7 @@ $URL"
   # a. version gate: same version = no rollout, so the PR has to raise it.
   while IFS= read -r p; do
     [ -n "$p" ] || continue
+    git -C "$CO" cat-file -e "$SHA:plugins/$p" 2>/dev/null || continue   # the PR deletes this plugin
     pj="plugins/$p/.claude-plugin/plugin.json"
     new="$(git -C "$CO" show "$SHA:$pj" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)"
     old="$(git -C "$CO" show "origin/$BASE:$pj" 2>/dev/null | jq -r '.version // empty' 2>/dev/null)"
@@ -251,8 +252,9 @@ EOF
     if gh pr merge "$N" --repo "$R" --merge --match-head-commit "$SHA" \
          --subject "Merge $HREF: $TITLE (#$N, reviewed by $WHO)" > "$W/merge.log" 2>&1 </dev/null; then
       sput --arg s "$SHA" '.merged = $s'
-      RERUN="$(git -C "$CO" diff "origin/$BASE...$SHA" -- CHANGELOG.md | grep '^+[^+]' | grep -i 're-run setup step' \
-               | sed 's/^+//' | cut -c1-300 | head -3)"
+      # the convention (README "Contributing and releases"): a line of the entry starts with it
+      RERUN="$(git -C "$CO" diff "origin/$BASE...$SHA" -- CHANGELOG.md | grep -E '^\+[-*[:space:]]*Re-run setup step' \
+               | sed 's/^+[-*[:space:]]*//' | cut -c1-300 | head -3)"
       notify "[$HOST] PR merged by $WHO: $R #$N
 $TITLE
 Version: ${VERS:-no plugin version changed}

@@ -22,7 +22,8 @@ version differs from `<config dir>/state/plugin-version`, it refreshes every cop
 and restarts nothing; a matching stamp exits at once. A failure is a systemMessage in the session,
 one notify per version through `notifyCommand` (or `notifyFallbackCommand`), and a retry at the next
 session start; the session is never blocked. "After every plugin update re-run setup steps 5-9" is
-gone from README, setup and skill: a release that changes a unit template says so in its entry.
+gone from README, setup and skill: a release that changes a unit template starts a line of its
+entry with "Re-run setup step N".
 
 **PR review runner.** New `scripts/pr-review-watch.sh` with `templates/systemd/mm-pr-review.{service,timer}`
 (every 15 minutes, OnFailure alarm), setup step 10 and the config key `prReview` (`repos`, `authors`,
@@ -33,10 +34,10 @@ timeout in a scrubbed environment, and a headless `claude -p` in safe and restri
 Read/Grep/Glob only, whose last line must be `VERDICT: CLEAN` or `VERDICT: FINDINGS` (anything else
 is an error: notify, nothing posted, retry, give up after 3 per head). One review per head
 (`--comment` while `approve` is false, else `--approve` / `--request-changes`); clean + green + gate
-ok merges with `--match-head-commit` and sends a notice with the version and any "re-run setup step"
-line of the CHANGELOG; findings notify the user; `maxRounds` rounds with findings ask `userName` and
-stop until the PR's state file is removed. Forks and other authors get one "not reviewed" notice per
-head and are never reviewed or merged. New matrices `tests/refresh-copies.sh`,
+ok merges with `--match-head-commit` and sends a notice with the version and the CHANGELOG lines
+that start with "Re-run setup step"; findings notify the user; `maxRounds` rounds with findings
+ask `userName` and stop until the PR's state file is removed. Forks and other authors get one "not
+reviewed" notice per head and are never reviewed or merged. New matrices `tests/refresh-copies.sh`,
 `tests/pr-review-watch.sh`.
 
 **Upgrade.** No setup re-run is needed for 0.12.0: no existing unit template changed, and the first
