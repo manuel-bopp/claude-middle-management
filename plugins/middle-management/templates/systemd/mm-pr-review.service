@@ -1,0 +1,23 @@
+# middle-management plugin: USER unit template, started by mm-pr-review.timer, never enabled itself.
+# One tick of the PR review runner (scripts/pr-review-watch.sh): reviews the open pull requests of the
+# allowlisted authors in prReview.repos and merges the clean ones. A failure leaves its cause on file
+# and the OnFailure= alarm sends it (with the notifyFallbackCommand route).
+# /middle-management-setup step 10 installs it with the placeholders filled in; __PRREVIEW_DIR__ is a
+# COPY (scripts/copy-sets.json, set middle-management-prreview), because the plugin cache path changes
+# with every update. The systemd user manager inherits no shell environment: the config dir and a PATH
+# that finds gh, git, jq, claude, timeout and flock are written in here. gh uses the login of the user
+# the unit runs as.
+# TimeoutStartSec: per new head, the tests (MM_PR_REVIEW_TESTS_MIN, 15) plus the model review
+# (MM_PR_REVIEW_TIMEOUT_MIN, 20); no new head starts after MM_PR_REVIEW_BUDGET_MIN (80), so one more
+# head still fits. A tick still running when the timer fires again is not started twice.
+[Unit]
+Description=middle-management: PR review runner tick
+OnFailure=unit-failure-alarm@%n.service
+
+[Service]
+Type=oneshot
+Environment=CLAUDE_CONFIG_DIR=__CONFIG_DIR__
+Environment=PATH=__PATH__
+Environment=MM_PR_REVIEW_UNIT=%n
+ExecStart=__PRREVIEW_DIR__/pr-review-watch.sh
+TimeoutStartSec=2h

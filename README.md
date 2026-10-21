@@ -43,12 +43,19 @@ what you open when a lane is worth a conversation of its own.
 ## Install
 
 ```
-/plugin marketplace add manuel-bopp/claude-middle-management
+/plugin marketplace add manus-org/claude-middle-management
 /plugin install middle-management@dr-bopp
 ```
 
 Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
-`/middle-management-setup` once to configure the optional worktree part.
+`/middle-management-setup` once to configure the optional worktree part. Updates are not
+automatic for this marketplace unless you switch them on: see
+[Contributing and releases](#contributing-and-releases). The repository moved from
+`manuel-bopp/` to `manus-org/` on 2026-10-21; GitHub redirects the old name, so an install
+from the old source keeps working. **Do not** point only an `extraKnownMarketplaces["dr-bopp"]`
+settings entry at the new name. If it no longer matches the source recorded in
+`~/.claude/plugins/known_marketplaces.json`, Claude Code ignores the marketplace and the plugin fails
+to load ("added but ignored"). Change both or neither.
 
 **Installed from `bopp-plugins` before?** The marketplace is now called `dr-bopp`, and a
 rename migrates nothing — re-register it once:
@@ -56,14 +63,16 @@ rename migrates nothing — re-register it once:
 ```
 /plugin uninstall middle-management@bopp-plugins
 /plugin marketplace remove bopp-plugins
-/plugin marketplace add manuel-bopp/claude-middle-management
+/plugin marketplace add manus-org/claude-middle-management
 /plugin install middle-management@dr-bopp
 ```
 
-**After every plugin update, re-run `/middle-management-setup` steps 5, 6 and 7** for whichever of
-the heartbeat, the lane reaper and the headless morning ritual you installed — their units run a
-copy of the scripts, because the plugin's own cache path is versioned and goes stale with each
-update.
+**Updates reach the timers by themselves (0.12.0).** The units of setup steps 5-10 run a copy of
+the scripts under `<config-dir>/middle-management-*/`, because the plugin's own cache path is
+versioned and goes stale with each update. The SessionStart hook `hooks/refresh-copies.sh` refreshes
+every installed copy at the first session start on a new version (see
+[Contributing and releases](#contributing-and-releases)). Re-run a setup step only when the
+CHANGELOG of a release says so (a changed unit template).
 
 ### First five minutes
 
@@ -106,6 +115,8 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 | Guard canary | systemd user timer (optional, Linux) | Hourly: the config is valid, the plugin enabled, its guard hooks registered and not wired twice, and the direct deny probes deny; once a day a headless model probe proves the CLI still loads the hooks. Alarms through the failure alarm. Setup step 9; see [Guard canary](#guard-canary). |
 | Reply timestamp, intent check | UserPromptSubmit hooks (optional) | `replyTimestamp`: the literal `[HH:MM]` prefix for every reply. `intentCheck`: an intent reminder in front of prompts that read like a work order. Both off by default; see [Optional prompt hooks](#optional-prompt-hooks). |
 | `self-wakeup` skill | skill | Waiting on the user without stalling: escalating self-wakeups, one nudge through `notifyCommand`, and proceeding alone only on a safe, reversible default it is at least 75 % sure of. |
+| PR review runner | systemd user timer (optional, Linux) | Every 15 minutes: each new head of an open pull request by an allowlisted author gets a version gate, `tests/run.sh` and a headless read-only review, then one review on the PR; clean + green + gate ok merges it (`--match-head-commit`), findings go back to the author, after `maxRounds` it asks you. Forks and other authors are never reviewed or merged. Setup step 10; see [Contributing and releases](#contributing-and-releases). |
+| Copy refresh | SessionStart hook | The timers of setup steps 5-10 run copies of the scripts; at the first session start on a new plugin version, every installed copy dir gets its full file set from `scripts/copy-sets.json` again (atomic, the user's poke prompt kept), then a version stamp. No unit is touched; a failure says so in the session and once through `notifyCommand`. |
 | Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. The same tick keeps waiting sessions warm: a live, unwrapped session idle 45 to 55 minutes on an open question (or a hold file) gets one "reply ok" ping, at most 3 per wait phase, so the answer does not cost it its whole context again. Installed by setup step 5. |
 
 ## How the roles work
@@ -220,7 +231,7 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   `notifyCommand`. `scripts/unit-failure-alarm.sh` runs it only when `notifyCommand` is missing or
   fails, with the text prefixed `[fallback route: the main alarm channel failed]`. Every unit that
   fails loudly ends in that alarm (the watcher and the heartbeat exit 1 when their own notify
-  fails), so one fallback covers them all. Set it before installing any unit (setup steps 5-8).
+  fails), so one fallback covers them all. Set it before installing any unit (setup steps 5-10).
 - `sessionLog` (optional, default `~/logs/session-log.md`): the machine's session log — see
   [The session log](#the-session-log). Must be absolute (`~` is expanded); a relative path makes
   the config invalid, because it would name a different file per caller. `$MM_SESSION_LOG`
@@ -250,6 +261,11 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
 - `userName`, `okBy`, `remindAfterHours`, `remindWindow`, `pageCommand` (optional, defaults
   `user` / the user / `2` / `08:00-22:00` / none): follow-through. See [Follow-through](#follow-through).
 - `workPackagesGate` (optional, default `true`): the sub-agent report gate. See [Sub-agents](#sub-agents).
+- `prReview` (optional, 0.12.0): the PR review runner of setup step 10: `repos` (`owner/name`),
+  `authors` (the allowlist; empty = it does nothing), `model` (`opus`), `securityModel` (`fable`,
+  for a diff under `plugins/*/hooks/` or with `guard` in a path), `approve` (`false`),
+  `reviewerName` (`Mike`), `maxRounds` (`4`), `base` (`main`; a pull request into any other
+  branch is not reviewed). See [Contributing and releases](#contributing-and-releases).
 - No config file = roles **plus the staging guard**: blanket staging is blocked out of the box,
   because sessions share a checkout long before anyone configures one. The worktree part is what
   stays completely silent. Working solo? `surgicalStaging: false` turns the guard off.
@@ -690,6 +706,51 @@ nothing reads these as templates at runtime, they are a starting point, not a fr
 session log is the one file that is NOT per project: its skeleton sits beside them as
 `templates/session-log.md` and belongs at the machine-wide path above.
 
+## Contributing and releases
+
+1. **Branch and pull request.** Every change goes on a branch and into a pull request against
+   `main`. `main` is protected: a pull request is required, no force push, no deletion, admins
+   included. Never push `main`, never merge your own pull request by hand.
+2. **Bump and log.** A pull request that touches `plugins/middle-management/` raises `version` in
+   `plugins/middle-management/.claude-plugin/plugin.json` and adds a CHANGELOG entry. The version is
+   what every host compares, so the same version means no rollout. A change to a unit template gets
+   a line in that entry that starts with `Re-run setup step N` (the runner's merge notice repeats
+   such lines).
+3. **Review and merge.** The PR review runner (setup step 10, on the one machine that reviews) takes
+   every new head of a pull request by an allowlisted author: the version gate, `tests/run.sh`, and
+   a headless review with read-only tools in which the pull request's text is data, never an
+   instruction. It posts one review headed `<reviewerName> review` with the round. Clean, green and
+   gate ok: it merges (`Merge <branch>: <title> (#N, reviewed by <reviewerName>)`, only the head it
+   reviewed) and sends a notice with the version. Findings: fix them and push; the new head is the
+   next round. After `maxRounds` (4) rounds with findings it asks you, and reviews that pull
+   request again only once you remove its state file,
+   `<config-dir>/state/pr-review/<owner>_<repo>/<number>.json`. The merge is decided by the
+   runner from the verdict line, the tests and the gate. Forks and other authors are never reviewed
+   or merged. The allowlist names the pull request's author, not whoever pushed to its branch: anyone
+   with write access to the repository can push onto an allowlisted author's branch, so the trust
+   boundary is the repository's collaborator list. While the runner's `gh` login is the authors' own account, the verdict is a review
+   comment (GitHub refuses to approve your own pull request); `prReview.approve: true` switches to
+   approve / request changes once it has an account of its own.
+4. **Rollout.** Per host, in the user settings (`~/.claude/settings.json`):
+
+   ```json
+   "extraKnownMarketplaces": {
+     "dr-bopp": {
+       "source": { "source": "github", "repo": "manus-org/claude-middle-management" },
+       "autoUpdate": true
+     }
+   }
+   ```
+
+   An interactive session then fetches a new version in the background after its first message,
+   and the next launch loads it (or `/reload-plugins`): a merge is active on a host from the
+   **second** session start after it. Headless runs (`claude -p`) never update; a host that only
+   runs those updates with
+   `claude plugin marketplace update dr-bopp && claude plugin update middle-management@dr-bopp`.
+5. **Copies.** The first session start on the new version refreshes the script copies the timers run
+   (`hooks/refresh-copies.sh`, see [Install](#install)). No unit is restarted, no running session is touched; a
+   release that changed a unit template still needs its "re-run setup step N".
+
 ## Failure policy (loud, not silent)
 
 If `jq` is missing, the session registry is absent, the config file is invalid, or an
@@ -704,8 +765,12 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
 - The staging guard's escape hatch: only when your user explicitly allows a direct
   main-checkout edit in the session, the deny message names an override marker;
   delete the marker right after — the role hook nags while it exists.
-- Hooks **auto-update** with the marketplace by default. After an update, restart open
-  sessions. If a broken update worries you, disable auto-update for this marketplace.
+- Hooks change only when the plugin updates, and auto-update is **off by default** for a
+  third-party marketplace like `dr-bopp`: switch it on per host (`autoUpdate: true`, see
+  [Contributing and releases](#contributing-and-releases)) or update by hand. A running session
+  keeps the version it started with; the new one loads at the next launch or `/reload-plugins`.
+  With auto-update on, a merged `main` runs on every host at its next session start, which is
+  why the review runner gives diffs under `hooks/` or with `guard` in a path the stronger model.
 - Command names `/wt`, `/orchestrator` are short and generic; collision behavior with
   same-named commands from other plugins is untested.
 - Uninstall (`/plugin uninstall middle-management`) removes the plugin but NOT your data:
@@ -713,8 +778,8 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   stay; delete them by hand if you want a clean slate. The heartbeat, if installed, keeps
   running from its copy — disarm and uninstall it per the skill.
 - The heartbeat's units point at a COPY under `<config-dir>/middle-management-heartbeat/`
-  (the plugin cache path is versioned and would go stale on the next update): **after a
-  plugin update, re-run setup step 5** to refresh that copy. `last-tick` under
+  (the plugin cache path is versioned and would go stale on the next update); the refresh hook
+  renews that copy at the first session start after an update. `last-tick` under
   `<config-dir>/state/orch-heartbeat/` older than 15 minutes means the timer is not running.
 - The lane reaper decides from `wt list` alone. The `pr` column reads `-` whenever there is no
   pull-request information to be had (no `gh`, no GitHub remote, `gh` never logged in), and
@@ -723,8 +788,8 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   ones are listed instead — the safe half of that trade. Such a branch then keeps its ref for
   good: once the worktree is gone the lane is never listed again, so delete it yourself with
   the `update-ref` line `/wt … done` printed. The reaper never kills a process by pid, and its
-  units point at a COPY under `<config-dir>/middle-management-reaper/`, so re-run setup step 6
-  after a plugin update.
+  units point at a COPY under `<config-dir>/middle-management-reaper/`, which the refresh hook
+  renews after a plugin update.
 - **There is no idle rule.** Deciding that a lane is idle means reading request lines out of
   its server's log, and the plugin cannot know what those look like; a unit nobody uses is
   caught by `reaperMaxHours` instead — later, but without guessing.

@@ -1,5 +1,5 @@
 ---
-description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user and its fallback; optionally install the stuck-coordinator heartbeat, the lane reaper, the headless morning ritual or the T3 morning coordinator, and the T3 Code watcher
+description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user and its fallback; optionally install the stuck-coordinator heartbeat, the lane reaper, the headless morning ritual or the T3 morning coordinator, the T3 Code watcher, the guard canary and the PR review runner
 allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 ---
 
@@ -52,12 +52,16 @@ Schema (nothing else is valid):
   "morningRoot": "/abs/path/project",
   "replyTimestamp": false,
   "intentCheck": false,
-  "intentCheckVerbs": ""
+  "intentCheckVerbs": "",
+  "prReview": { "repos": ["owner/repo"], "authors": ["login"], "model": "opus",
+                "securityModel": "fable", "approve": false, "reviewerName": "Mike", "maxRounds": 4, "base": "main" }
 }
 ```
 
 `name`, `root` and `base` are required per entry; `install`, `serve` and
-`worktreeDir` are optional. `name`, `root`, `board` are required per scope entry. Every top-level key except `protectedCheckouts` is
+`worktreeDir` are optional. `name`, `root`, `board` are required per scope entry.
+In `prReview`, `repos` and `authors` are required for the runner to do anything (an empty
+list = it reviews nothing); the other keys default as shown. Every top-level key except `protectedCheckouts` is
 optional and has the default shown above; write only the ones the user decides
 on, and leave the rest out.
 
@@ -173,7 +177,7 @@ repositories; the user names them.
 9b. **Fallback alarm route.** Ask for a second command that reaches the user when the first one
     fails (another bot, a mail, a second chat), same contract. It becomes `notifyFallbackCommand`;
     `unit-failure-alarm.sh` runs it only when `notifyCommand` is missing or fails. Ask this BEFORE
-    steps 5-8: each of them rewrites the alarm unit, and an alarm that fires before the key exists
+    steps 5-10: each of them rewrites the alarm unit, and an alarm that fires before the key exists
     has no second route. Omit the key when there is none.
 
 10. **Session log.** Show the path step 1 resolved and ask only whether the user
@@ -207,8 +211,7 @@ repositories; the user names them.
     must exist, must differ from every other root (nesting is fine, the longest
     root wins); `name` = basename of the root unless the user picks one (letters,
     digits, `-`, `_`; not `default`; unique); `board` = absolute path, required;
-    offer to create a missing board file with a title line. Where the headless ritual
-    is installed, re-run step 7 afterwards so its copy gets `scope.py`. Explain the rule in
+    offer to create a missing board file with a title line. Explain the rule in
     two sentences: a session belongs to the scope of the directory it was started
     in (a linked worktree counts as the same subpath of its main checkout), every
     other session to the scope `default`; a scope gets a coordinator only when one
@@ -273,6 +276,16 @@ repositories; the user names them.
     `<config dir>/morning-ritual.local.md` with the user's answers for the ritual's CUSTOMIZE steps
     (where the team talks, which repos and branch pairs, board block sections, how the day plan
     reaches the phone). Names and paths of secret files only, never their values.
+
+20. **PR review runner** (README "Contributing and releases"; only on the one machine that reviews
+    and merges the pull requests of an infra repo). `prReview.repos`: the `owner/name` repos it
+    watches. `prReview.authors`: the GitHub logins whose pull requests it reviews and may merge
+    (the allowlist, required: a fork or anyone else gets one "not reviewed" notice and nothing
+    more). `model` (`opus`) and `securityModel` (`fable`, used when the diff touches
+    `plugins/*/hooks/**` or a path with `guard` in it), `reviewerName` (`Mike`), `maxRounds` (4,
+    then the PR waits for `userName`). `approve` stays `false` while the runner's `gh` login is the
+    PR authors' own account (GitHub refuses to approve your own PR; the verdict is then a review
+    comment); `true` once it has its own account. Then offer step 10.
 
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped
@@ -360,14 +373,15 @@ echo "linger: $(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo
 
 Install — copies the heartbeat files OUT of the plugin, because the plugin
 cache path changes with every update and a unit pointing there would die
-silently — then arms the timer:
+silently — then arms the timer. `scripts/copy-set.sh` copies the set named in
+`scripts/copy-sets.json` (the one list of what each copy dir holds; the poke
+prompt only when it is absent):
 
 ```bash
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; HB="$CFG_DIR/middle-management-heartbeat"; UNITS="$HOME/.config/systemd/user"
-mkdir -p "$HB" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{orch-heartbeat.sh,poke-session.py,peer-state.py,scope.py,unit-failure-alarm.sh} "$HB/"
-[ -e "$HB/orch-heartbeat-poke.md" ] || cp "${CLAUDE_PLUGIN_ROOT}/scripts/orch-heartbeat-poke.md" "$HB/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-heartbeat || exit 1
 # The units carry the resolved config dir: the systemd user manager inherits no shell environment,
 # so a CLAUDE_CONFIG_DIR set in the shell would otherwise never reach the tick.
 for u in orch-heartbeat.timer orch-heartbeat.service unit-failure-alarm@.service; do
@@ -379,8 +393,10 @@ systemctl --user list-timers orch-heartbeat.timer --no-pager
 
 Then tell the user, in plain text: the poke prompt to customize is
 `$HB/orch-heartbeat-poke.md` (board path, commit convention, alarm line — the
-CUSTOMIZE marks; this copy survives plugin updates); **after every plugin update
-re-run this step** so the scripts are refreshed; and
+CUSTOMIZE marks; this copy survives plugin updates); the scripts are refreshed
+by the plugin itself at the first session start after an update (README
+"Contributing and releases"), so this step is re-run only when the CHANGELOG
+says so; and
 `cat "$(bash "$CHECK" dir)/state/orch-heartbeat/last-tick"` answers "is it
 still armed" — older than 15 minutes means it is not running. Offer a test
 alarm and run it ONLY when the user says yes, because it reaches their phone:
@@ -404,7 +420,7 @@ Never a session parked on a permission prompt. Tell the user the two switches:
 `touch <config dir>/state/keep-warm/<sessionId>` holds a session warm that has no
 detected question, and `touch <config dir>/state/keep-warm/off` turns keep-warm
 off on this machine. The units run the copies, so a plugin update reaches
-keep-warm only after this step is re-run.
+keep-warm with the refresh at the next session start.
 
 Disarm and uninstall are in the skill; never run them here unasked.
 
@@ -427,17 +443,15 @@ reason as step 5, then arms the timer:
 ```bash
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; RP="$CFG_DIR/middle-management-reaper"; UNITS="$HOME/.config/systemd/user"
-mkdir -p "$RP" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{lane-reaper.sh,wt,config-check.sh} "$RP/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-reaper || exit 1
 # The unit inherits no shell environment: the config dir and a PATH that finds git, jq and gh
 # have to be written into it.
 for u in lane-reaper.service lane-reaper.timer; do
   sed "s|__REAPER_DIR__|$RP|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
 done
-# the reaper's OnFailure= points at the same alarm unit step 5 installs — written every time,
-# so re-running this step after a plugin update really refreshes every copy
-cp "${CLAUDE_PLUGIN_ROOT}/scripts/unit-failure-alarm.sh" "$RP/"
+# the reaper's OnFailure= points at the same alarm unit step 5 installs (its copy is in the set)
 sed "s|__HEARTBEAT_DIR__|$RP|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
   "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
 systemctl --user daemon-reload && systemctl --user enable --now lane-reaper.timer
@@ -452,8 +466,9 @@ bash "$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" dir)/middle-managem
 
 Tell them, in plain text: the listing lands in `<config dir>/state/wt/reaper-latest.md`
 and is where the morning ritual reads what was cleaned up; a lane that must stay up
-gets `/wt <name> hold <topic> <hours>`; and **after every plugin update re-run this
-step**, because the units run the copies, not the plugin. Thresholds are the config
+gets `/wt <name> hold <topic> <hours>`; and the units run the copies, not the plugin,
+which the plugin refreshes at the first session start after an update (re-run this step
+only when the CHANGELOG says so). Thresholds are the config
 keys `reaperMaxHours`, `reaperOwnerlessMinutes` and `reaperDigestHour`.
 
 Disarm with `systemctl --user disable --now lane-reaper.timer`; never run that here
@@ -485,8 +500,8 @@ Install — copies the runner and its helpers OUT of the plugin, for the same re
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; MR="$CFG_DIR/middle-management-morning"; UNITS="$HOME/.config/systemd/user"
 FB=""   # the fallback file path the user named, or empty
-mkdir -p "$MR" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-headless.sh,config-check.sh,open-items.py,peer-state.py,scope.py,unit-failure-alarm.sh} "$MR/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-morning || exit 1
 for u in orch-morning-ritual.service orch-morning-ritual.timer; do
   sed "s|__MORNING_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g; s|__FALLBACK_ENV__|$FB|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
@@ -500,7 +515,8 @@ systemctl --user list-timers orch-morning-ritual.timer --no-pager
 Then tell the user, in plain text: budget, timeout, model and permission mode are
 `Environment=MM_MORNING_*` lines in `~/.config/systemd/user/orch-morning-ritual.service` (names in
 the header of the runner); a test run is `systemctl --user start orch-morning-ritual.service` and
-reaches their phone; **after every plugin update re-run this step**. Disarm with
+reaches their phone; the copy is refreshed at the first session start after a plugin update
+(re-run this step only when the CHANGELOG says so). Disarm with
 `systemctl --user disable --now orch-morning-ritual.timer`; never run that here unasked.
 
 ## Step 7b — morning coordinator in T3 Code (optional, Linux only, only with T3 Code)
@@ -551,8 +567,8 @@ Ask for the trigger time (default `Mon..Fri 07:30`) and the watchdog time (defau
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; MR="$CFG_DIR/middle-management-morning"; UNITS="$HOME/.config/systemd/user"
 AT="Mon..Fri 07:30"; CHK="Mon..Fri 08:15"   # what the user chose
-mkdir -p "$MR" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-t3.sh,config-check.sh,scope.py,unit-failure-alarm.sh} "$MR/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-morning || exit 1
 for u in orch-morning-t3.service orch-morning-t3.timer orch-morning-watchdog.service orch-morning-watchdog.timer; do
   sed "s|__MORNING_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g; s|__MORNING_TIME__|$AT|g; s|__CHECK_TIME__|$CHK|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
@@ -570,7 +586,8 @@ A `morningWaitUntil` later than two hours after the trigger time needs a longer
 `systemctl --user start orch-morning-t3.service` and opens a real morning thread in T3 (offer it,
 run it only on their yes); holidays are not skipped (disarm with
 `systemctl --user disable --now orch-morning-t3.timer orch-morning-watchdog.timer`, never run that
-here unasked); **after every plugin update re-run this step**.
+here unasked); the copy is refreshed at the first session start after a plugin update (re-run
+this step only when the CHANGELOG says so).
 
 ## Step 8: T3 Code watcher (optional, Linux only, only with T3 Code)
 
@@ -594,8 +611,8 @@ Install: copies the scripts OUT of the plugin, for the same reason as step 5:
 ```bash
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; TW="$CFG_DIR/middle-management-t3watch"; UNITS="$HOME/.config/systemd/user"
-mkdir -p "$TW" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{t3-watch.py,t3-wake.sh,topics.py,open-items.py,peer-state.py,config-check.sh,scope.py,unit-failure-alarm.sh} "$TW/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-t3watch || exit 1
 for u in t3-watch.service t3-watch.timer; do
   sed "s|__T3WATCH_DIR__|$TW|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
@@ -608,8 +625,9 @@ python3 "$TW/t3-watch.py" --dry-run
 ```
 
 The dry run prints what a tick would send and sends nothing. Tell the user, in plain text: post
-counts per thread and day are `t3-watch.py --stats`; **after every plugin update re-run this
-step**. Disarm with `systemctl --user disable --now t3-watch.timer`; never run that here unasked.
+counts per thread and day are `t3-watch.py --stats`; the copy is refreshed at the first session
+start after a plugin update (re-run this step only when the CHANGELOG says so). Disarm with
+`systemctl --user disable --now t3-watch.timer`; never run that here unasked.
 
 ## Step 9 — guard canary (optional, Linux only)
 
@@ -628,8 +646,8 @@ one tool, in the first protected checkout and in a throwaway repo under the cana
 ```bash
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; GC="$CFG_DIR/middle-management-canary"; UNITS="$HOME/.config/systemd/user"
-mkdir -p "$GC" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{guard-canary.sh,unit-failure-alarm.sh} "$GC/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-canary || exit 1
 for u in mm-guard-canary.service mm-guard-canary.timer; do
   sed "s|__CANARY_DIR__|$GC|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
@@ -642,5 +660,54 @@ MM_CANARY_NO_E2E=1 bash "$GC/guard-canary.sh"
 
 The last line runs the static checks once, without the model probe. Tell the user: a failure
 reaches them through the alarm (with its fallback route); `<config dir>/state/guard-canary/` keeps
-the end-to-end streams for a week; **after every plugin update re-run this step**. Disarm with
+the end-to-end streams for a week; the copy is refreshed at the first session start after a plugin
+update (re-run this step only when the CHANGELOG says so). Disarm with
 `systemctl --user disable --now mm-guard-canary.timer`; never run that here unasked.
+
+## Step 10 — PR review runner (optional, Linux only)
+
+`scripts/pr-review-watch.sh` is a systemd **user** timer (every 15 minutes): for every open pull
+request of an allowlisted author in `prReview.repos` with a head it has not reviewed yet, it checks
+the version gate (a touched `plugins/<p>/` needs a higher `plugin.json` version than the base
+branch), runs `tests/run.sh`, runs a headless review with read-only tools, posts one review, and
+merges the PR when the verdict is `CLEAN`, the tests are green and the gate holds. Every merge, every
+round with findings and every error reaches the user through `notifyCommand`. Offer it only on the
+one machine that reviews an infra repo (README "Contributing and releases"); otherwise skip this
+step and say so.
+
+Preconditions: the four of step 5, plus `gh`, `git`, `claude`, `timeout` and `flock` on this PATH,
+`prReview.repos` and `prReview.authors` from step 2 item 20, and a `gh` login that can review and
+merge in those repos (the unit runs as this user and uses that login):
+
+```bash
+for c in gh git claude timeout flock; do command -v "$c" >/dev/null && echo "$c: ok" || echo "NO $c on PATH"; done
+gh auth status 2>&1 | head -3
+```
+
+Tell the user before installing: the first tick reviews every open pull request of an allowlisted
+author, and merges the clean ones. Then:
+
+```bash
+CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
+CFG_DIR="$(bash "$CHECK" dir)"; PR="$CFG_DIR/middle-management-prreview"; UNITS="$HOME/.config/systemd/user"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-prreview || exit 1
+for u in mm-pr-review.service mm-pr-review.timer; do
+  sed "s|__PRREVIEW_DIR__|$PR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
+    "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
+done
+sed "s|__HEARTBEAT_DIR__|$PR|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
+  "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
+systemctl --user daemon-reload && systemctl --user enable --now mm-pr-review.timer
+systemctl --user list-timers mm-pr-review.timer --no-pager
+```
+
+Then tell the user, in plain text: state per pull request lives in
+`<config dir>/state/pr-review/<owner>_<repo>/<number>.json`; a pull request that reached
+`maxRounds` with findings is not reviewed again until that file is removed (`rm` it once the
+findings are dealt with, and the next tick starts over at round 1); test and review time limits and
+the per-tick budget are `Environment=MM_PR_REVIEW_TESTS_MIN=` / `MM_PR_REVIEW_TIMEOUT_MIN=` /
+`MM_PR_REVIEW_BUDGET_MIN=` lines in `~/.config/systemd/user/mm-pr-review.service` (defaults 15 / 20 /
+80 minutes); the copy is refreshed at
+the first session start after a plugin update (re-run this step only when the CHANGELOG says so).
+Disarm with `systemctl --user disable --now mm-pr-review.timer`; never run that here unasked.
