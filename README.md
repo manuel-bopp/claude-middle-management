@@ -43,12 +43,16 @@ what you open when a lane is worth a conversation of its own.
 ## Install
 
 ```
-/plugin marketplace add manuel-bopp/claude-middle-management
+/plugin marketplace add manus-org/claude-middle-management
 /plugin install middle-management@dr-bopp
 ```
 
 Then start a new session (or run `/reload-plugins`) so the hooks arm, and run
-`/middle-management-setup` once to configure the optional worktree part.
+`/middle-management-setup` once to configure the optional worktree part. Updates are not
+automatic for this marketplace unless you switch them on: see
+[Contributing and releases](#contributing-and-releases). The repository moved from
+`manuel-bopp/` to `manus-org/` on 2026-10-21; GitHub redirects the old name, so an install
+from the old source keeps working.
 
 **Installed from `bopp-plugins` before?** The marketplace is now called `dr-bopp`, and a
 rename migrates nothing — re-register it once:
@@ -56,7 +60,7 @@ rename migrates nothing — re-register it once:
 ```
 /plugin uninstall middle-management@bopp-plugins
 /plugin marketplace remove bopp-plugins
-/plugin marketplace add manuel-bopp/claude-middle-management
+/plugin marketplace add manus-org/claude-middle-management
 /plugin install middle-management@dr-bopp
 ```
 
@@ -254,6 +258,10 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
 - `userName`, `okBy`, `remindAfterHours`, `remindWindow`, `pageCommand` (optional, defaults
   `user` / the user / `2` / `08:00-22:00` / none): follow-through. See [Follow-through](#follow-through).
 - `workPackagesGate` (optional, default `true`): the sub-agent report gate. See [Sub-agents](#sub-agents).
+- `prReview` (optional, 0.12.0): the PR review runner of setup step 10: `repos` (`owner/name`),
+  `authors` (the allowlist; empty = it does nothing), `model` (`opus`), `securityModel` (`fable`,
+  for a diff under `plugins/*/hooks/` or with `guard` in a path), `approve` (`false`),
+  `reviewerName` (`Mike`), `maxRounds` (`4`). See [Contributing and releases](#contributing-and-releases).
 - No config file = roles **plus the staging guard**: blanket staging is blocked out of the box,
   because sessions share a checkout long before anyone configures one. The worktree part is what
   stays completely silent. Working solo? `surgicalStaging: false` turns the guard off.
@@ -694,6 +702,48 @@ nothing reads these as templates at runtime, they are a starting point, not a fr
 session log is the one file that is NOT per project: its skeleton sits beside them as
 `templates/session-log.md` and belongs at the machine-wide path above.
 
+## Contributing and releases
+
+1. **Branch and pull request.** Every change goes on a branch and into a pull request against
+   `main`. `main` is protected: a pull request is required, no force push, no deletion, admins
+   included. Never push `main`, never merge your own pull request by hand.
+2. **Bump and log.** A pull request that touches `plugins/middle-management/` raises `version` in
+   `plugins/middle-management/.claude-plugin/plugin.json` and adds a CHANGELOG entry. The version is
+   what every host compares, so the same version means no rollout. A change to a unit template says
+   "re-run setup step N" in that entry.
+3. **Review and merge.** The PR review runner (setup step 10, on the one machine that reviews) takes
+   every new head of a pull request by an allowlisted author: the version gate, `tests/run.sh`, and
+   a headless review with read-only tools in which the pull request's text is data, never an
+   instruction. It posts one review headed `<reviewerName> review` with the round. Clean, green and
+   gate ok: it merges (`Merge <branch>: <title> (#N, reviewed by <reviewerName>)`, only the head it
+   reviewed) and sends a notice with the version. Findings: fix them and push; the new head is the
+   next round. After `maxRounds` (4) rounds with findings it asks you, and reviews that pull
+   request again only once you remove its state file,
+   `<config-dir>/state/pr-review/<owner>_<repo>/<number>.json`. The merge is decided by the
+   runner from the verdict line, the tests and the gate. Forks and other authors are never reviewed
+   or merged. While the runner's `gh` login is the authors' own account, the verdict is a review
+   comment (GitHub refuses to approve your own pull request); `prReview.approve: true` switches to
+   approve / request changes once it has an account of its own.
+4. **Rollout.** Per host, in the user settings (`~/.claude/settings.json`):
+
+   ```json
+   "extraKnownMarketplaces": {
+     "dr-bopp": {
+       "source": { "source": "github", "repo": "manus-org/claude-middle-management" },
+       "autoUpdate": true
+     }
+   }
+   ```
+
+   An interactive session then fetches a new version in the background after its first message,
+   and the next launch loads it (or `/reload-plugins`): a merge is active on a host from the
+   **second** session start after it. Headless runs (`claude -p`) never update; a host that only
+   runs those updates with
+   `claude plugin marketplace update dr-bopp && claude plugin update middle-management@dr-bopp`.
+5. **Copies.** The first session start on the new version refreshes the script copies the timers run
+   (`hooks/refresh-copies.sh`, see [Install](#install)). No unit is restarted, no running session is touched; a
+   release that changed a unit template still needs its "re-run setup step N".
+
 ## Failure policy (loud, not silent)
 
 If `jq` is missing, the session registry is absent, the config file is invalid, or an
@@ -708,8 +758,12 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
 - The staging guard's escape hatch: only when your user explicitly allows a direct
   main-checkout edit in the session, the deny message names an override marker;
   delete the marker right after — the role hook nags while it exists.
-- Hooks **auto-update** with the marketplace by default. After an update, restart open
-  sessions. If a broken update worries you, disable auto-update for this marketplace.
+- Hooks change only when the plugin updates, and auto-update is **off by default** for a
+  third-party marketplace like `dr-bopp`: switch it on per host (`autoUpdate: true`, see
+  [Contributing and releases](#contributing-and-releases)) or update by hand. A running session
+  keeps the version it started with; the new one loads at the next launch or `/reload-plugins`.
+  With auto-update on, a merged `main` runs on every host at its next session start, which is
+  why the review runner gives diffs under `hooks/` or with `guard` in a path the stronger model.
 - Command names `/wt`, `/orchestrator` are short and generic; collision behavior with
   same-named commands from other plugins is untested.
 - Uninstall (`/plugin uninstall middle-management`) removes the plugin but NOT your data:

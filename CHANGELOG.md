@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.12.0 - 2026-10-21
+
+**Release path.** Changes go through a pull request on a protected `main`, with a version bump and
+a CHANGELOG entry; README "Contributing and releases" describes the flow, the per-host rollout
+(`extraKnownMarketplaces["dr-bopp"].autoUpdate: true`, active from the second session start after a
+merge; headless-only hosts update with `claude plugin marketplace update` + `claude plugin update`)
+and the review runner. The repository moved to `manus-org/claude-middle-management` (`plugin.json`
+`homepage` / `repository` and the install lines follow; GitHub redirects the old name). The README
+no longer claims that hooks auto-update by default: for a third-party marketplace that is off.
+
+**One copy manifest.** `scripts/copy-sets.json` lists the files of every copy dir the timers run
+(`middle-management-{heartbeat,reaper,morning,t3watch,canary,prreview}`; the morning dir is the union
+of steps 7 and 7b; `orch-heartbeat-poke.md` is never overwritten). `scripts/copy-set.sh <dir>` installs
+one set (`<file>.tmp` + `mv`, a new inode, so a running timer script keeps its old file). Setup steps
+5-10 call it instead of their own `cp` lists.
+
+**Copies refresh themselves.** New SessionStart hook `hooks/refresh-copies.sh`: when the plugin's
+version differs from `<config dir>/state/plugin-version`, it refreshes every copy dir that exists
+(under `flock`, the full set, so new helpers arrive too), then writes the stamp. It touches no unit
+and restarts nothing; a matching stamp exits at once. A failure is a systemMessage in the session,
+one notify per version through `notifyCommand` (or `notifyFallbackCommand`), and a retry at the next
+session start; the session is never blocked. "After every plugin update re-run setup steps 5-9" is
+gone from README, setup and skill: a release that changes a unit template says so in its entry.
+
+**PR review runner.** New `scripts/pr-review-watch.sh` with `templates/systemd/mm-pr-review.{service,timer}`
+(every 15 minutes, OnFailure alarm), setup step 10 and the config key `prReview` (`repos`, `authors`,
+`model`, `securityModel`, `approve`, `reviewerName`, `maxRounds`; validated by `config-check.sh`).
+Each new head of an open pull request by an allowlisted author gets a version gate (a touched
+`plugins/<p>/` needs a higher `plugin.json` version than the base branch), `tests/run.sh` under a
+timeout in a scrubbed environment, and a headless `claude -p` in safe and restricted mode with
+Read/Grep/Glob only, whose last line must be `VERDICT: CLEAN` or `VERDICT: FINDINGS` (anything else
+is an error: notify, nothing posted, retry, give up after 3 per head). One review per head
+(`--comment` while `approve` is false, else `--approve` / `--request-changes`); clean + green + gate
+ok merges with `--match-head-commit` and sends a notice with the version and any "re-run setup step"
+line of the CHANGELOG; findings notify the user; `maxRounds` rounds with findings ask `userName` and
+stop until the PR's state file is removed. Forks and other authors get one "not reviewed" notice per
+head and are never reviewed or merged. New matrices `tests/refresh-copies.sh`,
+`tests/pr-review-watch.sh`.
+
+**Upgrade.** No setup re-run is needed for 0.12.0: no existing unit template changed, and the first
+session start on 0.12.0 refreshes every installed copy, also ones left by an older release. A host
+that skipped an older release whose entry asked for a setup re-run still owes that re-run once.
+
 ## 0.11.1 - 2026-10-21
 
 **Morning coordinator in T3 Code.** A weekday timer starts a fresh, visible coordinator thread
