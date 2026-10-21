@@ -5,8 +5,10 @@
 #   stale-marker hint printed by hooks/session-role.sh, tests/run.sh, tests/t3-seat.sh.
 #   The sidecar it writes is read by hooks/t3-report.sh, hooks/session-role.sh, scripts/t3-wake.sh,
 #   scripts/t3-watch.py, scripts/peer-state.py and scripts/orch-heartbeat.sh.
-#   The marker it writes is read by hooks/session-role.sh; the wrap entry it backfills on an
-#   expired seat is read by scripts/peer-state.py.
+#   The marker it writes is read by hooks/session-role.sh and scripts/morning-t3.sh (--check: claimed
+#   today?); the wrap entry it backfills on an expired seat or a morning takeover (claim --morning) is
+#   read by scripts/peer-state.py. orchestrator.t3.previous.json (morning takeover) is read by t3-bind
+#   and status here only.
 #   Calls scripts/peer-state.py (stale-seat check on claim, holder line on status) and, only
 #   when the config has a "scopes" key or "scopeMode": "per-root", scripts/scope.py (which seat this
 #   session's scope uses); t3-bind calls scripts/t3-wake.sh (the one takeover wake to the old holder).
@@ -60,6 +62,9 @@ fi
 # T3 Code (plan 1.1): the coordinator's thread binding beside the marker. reportUrl is a capability
 # into a full-access thread: it is never printed, logged or put in argv.
 SIDE="$(dirname "$MARKER")/orchestrator.t3.json"
+# The predecessor a morning takeover deleted the sidecar of (no reportUrl in it): t3-bind files it as
+# "previous", so status and the settle step still name its thread and report task.
+PREVF="$(dirname "$MARKER")/orchestrator.t3.previous.json"
 side() { jq -r "$1" "$SIDE" 2>/dev/null; }   # $1 = a jq filter that never selects reportUrl
 side_id() { [ -f "$SIDE" ] && side '.sessionId // empty'; }
 # Rewrite the sidecar from a jq filter on the old one ($1, args after it), 0600 from the first byte,
@@ -76,13 +81,15 @@ my_thread() {
   m=${m##*/events.}; printf '%s' "${m%.log}"
 }
 norm() { printf '%s' "${1//:/-}"; }
-# Flags (anywhere after the subcommand): --t3-asleep-ok (only on the user's word), --thread/--title/
+# Flags (anywhere after the subcommand): --t3-asleep-ok (only on the user's word), --morning (the
+# morning thread; only with the standing word in the config key morningTakeover), --thread/--title/
 # --task/--model (t3-bind, claim --thread), --to-thread/--to-title (t3-handover).
-ASLEEP_OK=""; F_THREAD=""; F_TITLE=""; F_TASK=""; F_MODEL=""; F_TO_THREAD=""; F_TO_TITLE=""; POS=()
+ASLEEP_OK=""; MORNING=""; F_THREAD=""; F_TITLE=""; F_TASK=""; F_MODEL=""; F_TO_THREAD=""; F_TO_TITLE=""; POS=()
 CMD="${1:-status}"; [ $# -gt 0 ] && shift
 while [ $# -gt 0 ]; do
   case "$1" in
     --t3-asleep-ok) ASLEEP_OK=1 ;;
+    --morning)   MORNING=1 ;;
     --thread)    F_THREAD="${2:-}"; shift ;;
     --title)     F_TITLE="${2:-}"; shift ;;
     --task)      F_TASK="${2:-}"; shift ;;
@@ -176,7 +183,7 @@ check_min() {  # $1 = the shell variable holding the value, $2 = the env name it
 # an empty W means "we do not know", and every caller must then treat the holder as working.
 # Fail closed — two coordinators at once is a worse failure than one expensive wake.
 read_peer() {  # $1 = sessionId
-  W=""; LOGOK=""; IDLE_S=""; IDLE=""; CTX=""; EV=""; LAST=""; TR=""; NOREAD=""
+  W=""; LOGOK=""; IDLE_S=""; IDLE=""; CTX=""; EV=""; LAST=""; TR=""; NOREAD=""; CLOSED=""
   [ -f "$DIR/peer-state.py" ] || { NOREAD="scripts/peer-state.py is not there"; return 0; }
   # jq is checked at the top of this script; python3 is checked here and not there, because
   # only this route needs it — status and release must not die on a machine without it.
@@ -195,6 +202,9 @@ read_peer() {  # $1 = sessionId
          ((.evidence // []) | join("; ") | gsub("\t"; " ")),
          ((.last // "-") | gsub("\t"; " ")), (.transcript // "-")] | @tsv' 2>/dev/null) || return 0
   IFS=$'\t' read -r W LOGOK IDLE_S IDLE CTX EV LAST TR <<<"$PEER_ROW"
+  # Its closed marker decided the verdict (its wrap ran): the morning route then writes no second one.
+  # An asleep T3 holder has no registry entry left, so its log entry (looked up by name) reads null.
+  CLOSED=$(printf '%s' "$PEER_JSON" | jq -r 'if .[0].closed_marker then "yes" else "no" end' 2>/dev/null)
 }
 
 # Expired (issue #1): past EXPIRED_MIN the holder's closing line is no longer required. The reader
@@ -224,6 +234,7 @@ log_state() {
 # shape (README, "The session log"), appended at the end, a day heading first when the file's last one
 # is not today, and the closed marker keyed by the holder's sessionId, so the tab list reads it as
 # finished from now on. Nothing in it is invented: idle, log state and last line are what was read.
+BF_WHY="coordinator seat expired"; BF_ON="taking the expired coordinator seat"; BF_MIN_VAR=EXPIRED_MIN
 backfill() {
   local day hhmm last
   day=$(date +%F); hhmm=$(date +%H:%M)
@@ -231,9 +242,9 @@ backfill() {
   last=$(sed -nE 's/^##[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$/\1/p' "$SESSION_LOG" 2>/dev/null | tail -1)
   {
     [ "$last" = "$day" ] || printf '\n## %s\n' "$day"
-    printf '\n### %s – [%s] – coordinator seat expired, wrap backfilled\n' "$hhmm" "${HNAME%% *}"
-    printf -- '- Backfilled by %s (%s) on taking the expired coordinator seat; the holder was NOT messaged.\n' "$MY_NAME" "$MY_ID"
-    printf -- '- Idle %s (threshold %s min); its own session-log entry: %s.\n' "$IDLE" "$EXPIRED_MIN" "$(log_state)"
+    printf '\n### %s – [%s] – %s, wrap backfilled\n' "$hhmm" "${BF_NAME:-${HNAME%% *}}" "$BF_WHY"
+    printf -- '- Backfilled by %s (%s) on %s; the holder was NOT messaged.\n' "$MY_NAME" "$MY_ID" "$BF_ON"
+    printf -- '- Idle %s (threshold %s min); its own session-log entry: %s.\n' "$IDLE" "${!BF_MIN_VAR}" "$(log_state)"
     printf -- '- Its last line: %s\n' "$LAST"
     printf -- '- Status: completed\n'
     printf -- '- Session: closed · %s — backfilled by %s at %s %s\n' "$HID" "$MY_NAME" "$day" "$hhmm"
@@ -241,8 +252,30 @@ backfill() {
   # Its open-items drop gets the WRAPPED line too: without it `open-items.py list` calls the holder
   # "died unwrapped" and routes the next ritual to resume it, the wake this takeover exists to avoid.
   local drop="$CFG_DIR/open-items/${HID:0:8}-session-notes.md"
-  [ -f "$drop" ] && printf -- '- WRAPPED %s · backfilled by %s at %s (expired seat; items not swept, file the open keys from list)\n' \
-    "$hhmm" "$MY_NAME" "$day" >> "$drop"
+  [ -f "$drop" ] && printf -- '- WRAPPED %s · backfilled by %s at %s (%s; items not swept, file the open keys from list)\n' \
+    "$hhmm" "$MY_NAME" "$day" "$BF_WHY" >> "$drop"
+  return 0
+}
+
+# claim --morning's outcome for the morning chain (README "Morning coordinator in T3 Code"): the
+# trigger's status <seat dir>/morning-t3/status says "posted" while its thread has not claimed, and
+# hooks/t3-report.sh and scripts/t3-watch.py hold every wake into the night coordinator meanwhile.
+# Every exit of claim --morning ends that hold (claimed / refused); a refusal also reaches the user,
+# because the night coordinator keeps the seat and the morning thread sits there waiting. The refused
+# claimer's sessionId goes into the 5th column: t3-report.sh keeps holding that one session's turns
+# (the user already has the REFUSED notice), so the refusal does not wake the night coordinator.
+# A lost race (RACE LOST) writes nothing: the winner's claim records the outcome.
+morning_outcome() {
+  local rc=$? f d st state cmd msg
+  f="$(dirname "$MARKER")/morning-t3/status"
+  IFS=$'\t' read -r d st _ < "$f" 2>/dev/null || return 0
+  [ "$d" = "$(date +%F)" ] && [ "$st" = posted ] && [ -z "${RACE_LOST:-}" ] || return 0
+  if [ "$rc" -eq 0 ]; then state=claimed; else state=refused; fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$d" "$state" "$(date +%s)" "$$" "$MY_ID" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f"
+  [ "$state" = refused ] || return 0
+  cmd=$(jq -r '.notifyCommand // ""' "$(bash "$DIR/config-check.sh" file)" 2>/dev/null)
+  msg="[$(hostname -s 2>/dev/null || echo host)] morning takeover REFUSED in \"$MY_NAME\" (claim --morning, exit $rc): the night coordinator keeps the seat. The morning thread shows why."
+  [ -n "$cmd" ] && { printf '%s\n' "$msg" | sh -c "$cmd" notify "$msg" >/dev/null 2>&1 || echo "WARNING: the refusal notice could not be sent (notifyCommand)."; }
   return 0
 }
 
@@ -272,6 +305,19 @@ if [ -n "$SCOPE" ]; then echo "Scope: $SCOPE (seat marker $MARKER)"; fi
 
 case "${1:-status}" in
   claim)
+    # The morning route (README "Morning coordinator in T3 Code"): the user's standing word lives in
+    # the config, so no one is asked at runtime. Without it --morning refuses outright, whatever the
+    # seat looks like: a flag that silently degrades to a plain claim would hide a missing word.
+    if [ -n "$MORNING" ]; then
+      trap morning_outcome EXIT
+      OKBY=$(jq -r 'if (.morningTakeover | type) == "object" and .morningTakeover.allowed == true
+                    then (.morningTakeover.okBy | strings | select(test("\\S"))) else empty end' \
+               "$(bash "$DIR/config-check.sh" file)" 2>/dev/null)
+      [ -n "$OKBY" ] || {
+        echo "REFUSED: claim --morning needs the user's standing word in the config: \"morningTakeover\": {\"allowed\": true,"
+        echo "  \"okBy\": \"<who, date>\"} (/middle-management-setup). Nothing changed."
+        exit 1; }
+    fi
     if [ -n "$HUNKNOWN" ] && [ "$HID" != "$MY_ID" ]; then
       echo "BUSY: the coordinator \"$HNAME\" is alive, but its scope cannot be resolved right now (scope.py: git failed on"
       echo "its worktree $HCWD). The seat stays where it is; try again once git answers."
@@ -291,16 +337,55 @@ case "${1:-status}" in
     # Asleep is not gone (plan 1.2.6, F13): T3 ends an idle thread's process after 30 min, the seat
     # holder then has no live registry entry, but its thread still wakes on every message.
     if [ -z "$HANDOVER" ] && [ -n "$HID" ] && [ -z "$HNAME" ] && [ "$HID" != "$MY_ID" ] && [ "$(side_id)" = "$HID" ]; then
-      if [ -z "$ASLEEP_OK" ]; then
+      if [ -z "$ASLEEP_OK" ] && [ -z "$MORNING" ]; then
         echo "REFUSED: the coordinator $HID is asleep in T3 thread \"$(side '.title // "?"')\" ($(side '.threadId // "?"')), not gone."
         echo "Wake it: t3_thread_send $(side '.threadId // "?"') (a message wakes a T3 thread). A handover goes through"
-        echo "its t3-handover. Only on your user's explicit word: claim --t3-asleep-ok."
+        echo "its t3-handover. Only on your user's explicit word: claim --t3-asleep-ok (the morning thread: claim --morning,"
+        echo "which needs that word stored in the config key morningTakeover)."
         exit 1
       fi
       OLD_TASK=$(side '.reportTaskId // "?"'); OLD_THREAD=$(side '.threadId // "?"')
-      rm -f "$SIDE"
-      echo "OVERRIDE (--t3-asleep-ok): the sidecar of the asleep coordinator is deleted. Delete its old report"
-      echo "  task too: delete_scheduled_task $OLD_TASK (bound to thread $OLD_THREAD)."
+      if [ -n "$MORNING" ] && [ -z "$ASLEEP_OK" ]; then
+        # Asleep is proven (no live process, the sidecar names it); quiet is read off disk on top, so a
+        # holder that was still typing a minute before its thread went idle keeps its seat. Fail closed.
+        check_min STALE_MIN MM_STALE_SEAT_MIN
+        read_peer "$HID"
+        case "$W" in
+          yes|no) [ "${IDLE_S:-x}" -ge "$((STALE_MIN * 60))" ] 2>/dev/null || {
+                    echo "REFUSED (--morning): the asleep coordinator $HID moved $IDLE ago (threshold ${STALE_MIN} min, MM_STALE_SEAT_MIN)."
+                    echo "  It may still be in use. Nothing changed; your user decides (claim --t3-asleep-ok on their word)."
+                    exit 1; } ;;
+          *) echo "REFUSED (--morning): the asleep coordinator $HID could not be read off disk (${NOREAD:-no usable answer from peer-state.py})."
+             echo "  Without that read the takeover fails closed. Nothing changed."
+             exit 1 ;;
+        esac
+        BF_NAME="$(side '.title // empty')"; [ -n "$BF_NAME" ] || BF_NAME="${HID:0:8}"
+        echo "MORNING TAKEOVER (standing word: $OKBY): the coordinator \"$BF_NAME\" is asleep in T3 thread $OLD_THREAD and"
+        echo "  has not moved in $IDLE (threshold ${STALE_MIN} min). Taking the seat; the holder is NOT messaged."
+        echo "  log      : $(log_state)"
+        echo "  last line: $LAST"
+        # The sidecar goes (its reportUrl must ring nobody's thread any more); who it named stays on
+        # record, without the URL, for status and the settle step: the note, written only once the
+        # marker is won (a lost race changes nothing), names its claimer, and only that claimer's
+        # t3-bind consumes it.
+        PREV_NOTE=$(jq -c --arg by "$MY_ID" '{sessionId, threadId, title, reportTaskId, by: $by}' "$SIDE" 2>/dev/null)
+        DROP_SIDE=morning
+        if [ "$LOGOK" != true ] && [ "$CLOSED" != yes ]; then
+          BACKFILL=1; BF_WHY="coordinator asleep at the morning takeover"; BF_ON="the morning takeover (standing word: $OKBY)"; BF_MIN_VAR=STALE_MIN
+        fi
+      else
+        DROP_SIDE=override
+      fi
+    elif [ -n "$MORNING" ] && [ -z "$HANDOVER" ] && [ -n "$HID" ] && [ -z "$HNAME" ] && [ "$HID" != "$MY_ID" ] && [ -z "$HSCOPE" ]; then
+      # A gone holder outside T3 (closed tab, no sidecar): the seat was free to take before; the morning
+      # route adds its wrap when its log entry is not completed and the reader could read it.
+      read_peer "$HID"
+      case "$W" in yes|no)
+        if [ "$LOGOK" != true ] && [ "$CLOSED" != yes ]; then
+          BF_NAME="${HID:0:8}"; check_min STALE_MIN MM_STALE_SEAT_MIN
+          BACKFILL=1; BF_WHY="coordinator gone at the morning takeover"; BF_ON="the morning takeover (standing word: $OKBY)"; BF_MIN_VAR=STALE_MIN
+        fi ;;
+      esac
     fi
     if [ -z "$HANDOVER" ] && [ -n "$HNAME" ] && [ "$HID" != "$MY_ID" ]; then
       # Its tab is open — but it may have wrapped last night and simply never been closed.
@@ -376,6 +461,7 @@ case "${1:-status}" in
     fi
     take_marker; TOOK=$?
     if [ "$TOOK" -eq 3 ]; then
+      RACE_LOST=1
       echo "RACE LOST: another session claimed the seat while this one was deciding — the marker"
       echo "now names $(held_id), not this session (\"$MY_NAME\"). This session is NOT the coordinator."
       echo "Check with 'bash $SELF status' and only claim again if your user still wants it here."
@@ -387,10 +473,25 @@ case "${1:-status}" in
       exit 1
     fi
     echo "OK: this session (\"$MY_NAME\") is the coordinator from now on."
+    # The old binding goes only now that the marker is won, so a lost race leaves it untouched. A
+    # predecessor note from an earlier morning claim that never bound is dropped by any later claim
+    # of another session (this session's own note survives its re-claim).
+    [ "$(jq -r '.by // empty' "$PREVF" 2>/dev/null)" = "$MY_ID" ] || rm -f "$PREVF"
+    if [ -n "${DROP_SIDE:-}" ] && [ "$(side_id)" = "$HID" ]; then
+      [ "$DROP_SIDE" = morning ] && [ -n "${PREV_NOTE:-}" ] && { ( umask 077; printf '%s\n' "$PREV_NOTE" > "$PREVF" ) 2>/dev/null || rm -f "$PREVF"; }
+      rm -f "$SIDE"
+      if [ "$DROP_SIDE" = morning ]; then
+        echo "SETTLE the predecessor: delete_scheduled_task $OLD_TASK (its report task, bound to thread $OLD_THREAD),"
+        echo "  then settle that thread (morning-ritual step 3). Never t3_thread_send it: that re-pays its whole context."
+      else
+        echo "OVERRIDE (--t3-asleep-ok): the sidecar of the asleep coordinator is deleted. Delete its old report"
+        echo "  task too: delete_scheduled_task $OLD_TASK (bound to thread $OLD_THREAD)."
+      fi
+    fi
     # Only the winner of the marker writes the backfill, so a lost race never files a second one.
     if [ -n "${BACKFILL:-}" ]; then
       if backfill 2>/dev/null; then
-        echo "BACKFILLED: wrap entry for \"$HNAME\" appended to $SESSION_LOG (- Session: closed · $HID)."
+        echo "BACKFILLED: wrap entry for \"${BF_NAME:-$HNAME}\" appended to $SESSION_LOG (- Session: closed · $HID)."
       else
         echo "WARNING: the seat is yours, but the backfill could not be appended to $SESSION_LOG —"
         echo "  write the holder's wrap entry by hand (middle-management:wrap, step 4) with: - Session: closed · $HID"
@@ -446,7 +547,7 @@ case "${1:-status}" in
         exit 1
       fi
     fi
-    rm -f "$MARKER"
+    rm -f "$MARKER" "$PREVF"
     [ "$(side_id)" = "$HID" ] && rm -f "$SIDE"
     [ -n "$RTASK" ] && echo "T3: the sidecar is deleted. Delete the report task now: delete_scheduled_task $RTASK"
     if [ "$HID" = "$MY_ID" ]; then
@@ -458,6 +559,9 @@ case "${1:-status}" in
     ;;
   status)
     echo "This session: \"$MY_NAME\" ($MY_ID)"
+    if [ -f "$PREVF" ] && [ "$(jq -r '.by // empty' "$PREVF" 2>/dev/null)" = "$HID" ]; then
+      echo "Predecessor:  $(jq -r '"thread \(.threadId // "?") \"\(.title // "?")\", session \(.sessionId // "?"), report task \(.reportTaskId // "?") (morning takeover; settle it)"' "$PREVF" 2>/dev/null)"
+    fi
     if [ -f "$SIDE" ]; then   # never the URL
       echo "T3 sidecar:   $(side '"thread \(.threadId // "?") \"\(.title // "?")\", session \(.sessionId // "?"), model \(.model // "?"), report task \(.reportTaskId // "?")"')"
       [ -n "$(side '.handover // empty')" ] && echo "              handover open to $(side '"\(.handover.toTitle // "?") (thread \(.handover.toThreadId // "?")) since \(.handover.since // 0 | todate)"')"
@@ -498,6 +602,8 @@ case "${1:-status}" in
       else echo "WARNING: the previous holder was NOT woken (t3-wake rc $WRC). Send it yourself: t3_thread_send $(side '.threadId // "?"') \"seat taken over by $F_TITLE (thread $F_THREAD)\""; fi
     elif [ "$OLD_SID" = "$MY_ID" ]; then
       PREV=$(jq -c '.previous // null' "$SIDE" 2>/dev/null) || PREV='null'   # a re-bind keeps it
+    elif [ -z "$OLD_SID" ] && [ -f "$PREVF" ] && [ "$(jq -r '.by // empty' "$PREVF" 2>/dev/null)" = "$MY_ID" ]; then
+      PREV=$(jq -c '{sessionId, threadId, title, reportTaskId}' "$PREVF" 2>/dev/null) || PREV='null'   # morning takeover: no wake
     fi
     # The URL reaches jq through a process substitution (printf is a builtin: in no argv).
     side_write '{sessionId: $s, threadId: $t, title: $ti, model: $m, reportTaskId: $k, reportUrl: ($u | rtrimstr("\n")), previous: $p}
@@ -505,6 +611,7 @@ case "${1:-status}" in
       --arg s "$MY_ID" --arg t "$F_THREAD" --arg ti "$F_TITLE" --arg m "$F_MODEL" --arg k "$F_TASK" \
       --rawfile u <(printf '%s\n' "$URL") --argjson p "$PREV" \
       || { echo "FAILED: could not write $SIDE. Nothing is bound; delete the report task or retry."; exit 1; }
+    rm -f "$PREVF"
     echo "OK: T3 thread $F_THREAD (\"$F_TITLE\") bound to the seat, report task $F_TASK, model $F_MODEL."
     echo "After a model or effort change: update_scheduled_task $F_TASK (or claim + t3-bind again)."
     ;;
@@ -516,5 +623,5 @@ case "${1:-status}" in
       || { echo "FAILED: could not write $SIDE."; exit 1; }
     echo "OK: handover to \"$F_TO_TITLE\" ($F_TO_THREAD) recorded. You keep the seat and the report task until it claims."
     ;;
-  *) echo "Usage: orchestrator.sh [claim [--thread <id>] [--t3-asleep-ok]|release [<sessionId of the not visibly alive holder>] [--t3-asleep-ok]|status|t3-bind --thread <id> --title <t> --task <taskId> --model <m>|t3-handover --to-thread <id> --to-title <t>]"; exit 1 ;;
+  *) echo "Usage: orchestrator.sh [claim [--thread <id>] [--t3-asleep-ok|--morning]|release [<sessionId of the not visibly alive holder>] [--t3-asleep-ok]|status|t3-bind --thread <id> --title <t> --task <taskId> --model <m>|t3-handover --to-thread <id> --to-title <t>]"; exit 1 ;;
 esac

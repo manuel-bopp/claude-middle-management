@@ -5,7 +5,9 @@
 #   commands/middle-management-setup.md (via Bash),
 #   scripts/wt, scripts/orchestrator.sh, scripts/morning-headless.sh, scripts/t3-wake.sh,
 #   scripts/t3-token.sh, hooks/t3-report.sh, hooks/require-work-packages.sh,
-#   hooks/subagent-report-check.sh, tests/run.sh, tests/t3-seat.sh.
+#   hooks/subagent-report-check.sh, hooks/reply-timestamp.sh, hooks/intent-check.sh,
+#   scripts/morning-t3.sh, tests/run.sh, tests/t3-seat.sh,
+#   tests/morning-t3.sh.
 #
 # Usage:
 #   config-check.sh dir        print the resolved Claude config dir
@@ -79,6 +81,19 @@ validate() {
     and ((.remindAfterHours // 2) | (type == "number" and . > 0))
     and ((.remindWindow // "08:00-22:00") | (type == "string" and test("\\A\\d{1,2}:\\d{2}-\\d{1,2}:\\d{2}\\z")))
     and ((.workPackagesGate // true) | type == "boolean")
+    # 0.11.1 (README "Morning coordinator in T3 Code", "Alarm fallback"): the morning chain and the
+    # second alarm route. morningTakeover carries the standing word of the user: allowed + who said it.
+    and ([.notifyFallbackCommand, .morningTaskUrlFile] | all(. == null or type == "string"))
+    # optional prompt hooks (README "Optional prompt hooks"), both default false
+    and ((.replyTimestamp // false) | type == "boolean")
+    and ((.intentCheck // false) | type == "boolean")
+    and ((.intentCheckVerbs // "x") | (type == "string" and length > 0))
+    and ((.morningRoot // "/") | (type == "string" and startswith("/")))
+    and ((.morningWaitUntil // "09:30") | (type == "string" and test("\\A([01]?\\d|2[0-3]):[0-5]\\d\\z")))
+    and ((.morningTakeover // {"allowed": false}) | (type == "object")
+          and (.allowed | type == "boolean")
+          and ((.okBy // "") | type == "string")
+          and (if .allowed then ((.okBy // "") | test("\\S")) else true end))
     # t3Url: the base URL of the T3 server (watcher, t3-token.sh); a plain http(s) URL, nothing else.
     and ((.t3Url // "http://x") | (type == "string" and test("\\Ahttps?://[^\\s\"]+\\z")))
     and ((.protectedCheckouts // []) | (type == "array") and all(

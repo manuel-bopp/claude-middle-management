@@ -8,6 +8,18 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-role.sh\"",
             "timeout": 10,
             "statusMessage": "middle-management: session role"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/reply-timestamp.sh\"",
+            "timeout": 5,
+            "statusMessage": "middle-management: reply timestamp"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/intent-check.sh\"",
+            "timeout": 10,
+            "statusMessage": "middle-management: intent check"
           }
         ]
       }

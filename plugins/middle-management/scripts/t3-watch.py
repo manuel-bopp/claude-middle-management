@@ -4,7 +4,8 @@
 Consumers: templates/systemd/t3-watch.service (started every 10 min by t3-watch.timer; both
   installed as USER units by /middle-management-setup), tests/t3-watch.sh, by hand for
   `--dry-run` / `--stats`. Calls t3-wake.sh, scope.py and, when it exists, topics.py (all beside
-  it). Reads <cfg>/state/t3-report/{failures.log,posts.tsv}, which t3-wake.sh writes.
+  it). Reads <cfg>/state/t3-report/{failures.log,posts.tsv}, which t3-wake.sh writes, and
+  <seat dir>/morning-t3/status, which morning-t3.sh writes.
 
 Usage: t3-watch.py [--dry-run] | --stats
   --dry-run  print every notify, wake and probe instead of doing it, keep no state; scopes without
@@ -34,6 +35,11 @@ top-level threads of the scope's T3 project(s), the coordinator thread included:
   no coordinator the sidecar's thread is gone, settled or archived -> notify once per episode
   handover       sidecar.handover {toThreadId, toTitle, since} older than 30 min while the sidecar
                  still names the old holder -> notify once per handover
+  morning        while today's morning thread is started (<seat dir>/morning-t3/status "posted", written
+                 by morning-t3.sh, not yet "claimed"/"refused" by claim --morning), at most 30 min
+                 after the post, and the sidecar is older than that post, the sidecar still names the
+                 night coordinator, which is about to lose the seat: nothing wakes it. "limit over" and
+                 "other failure" go to the user as a notify instead, the Keepalive retry is skipped.
 Plus: topics.py tick --scope <name> for every scope when topics.py exists (with or without sidecar).
 A T3 API problem (HTTP 400 / missing keys, token rejected, server down twice in a row) -> one
 notify per kind and day, never a crash. Secrets: the token (config t3TokenFile, default
@@ -55,6 +61,7 @@ STATE_DIR = os.path.join(CFG_DIR, "state", "t3-watch")
 NOW = float(os.environ.get("T3W_NOW") or time.time())
 TODAY = time.strftime("%Y-%m-%d", time.localtime(NOW))
 RETRY_S, CLICK_S, STUCK_S, HANDOVER_S = 30 * 60, 10 * 60, 3 * 3600, 30 * 60
+MORNING_HOLD_S = 30 * 60   # the morning hold ends at the latest 30 min after the post (hooks/t3-report.sh too)
 REQUIRED = ("id", "projectId", "title", "status", "activityRunStatus", "activeRunId", "latestRunId",
             "lastError", "lastErrorClass", "usageLimitResetAt", "pendingRuntimeRequest", "itemCount",
             "settledAt", "archivedAt", "modelSelection")
@@ -266,12 +273,35 @@ def threads_of(shell, name, ss, coord_id):
     return out, coord
 
 
+def morning_pending(sdir):
+    """True while today's morning thread was started (morning-t3.sh status "posted"; claim --morning
+    turns it into "claimed" or "refused"), the post is under 30 min old, and the seat is not bound
+    anew yet (the sidecar is older than the post). The sidecar then still names the night
+    coordinator, and a wake would make it re-pay its whole context for a seat it is about to lose.
+    ponytail: the window is told by time, not by thread id: any wake in it goes to the user instead."""
+    try:
+        with open(os.path.join(sdir, "morning-t3", "status"), encoding="utf-8") as f:
+            day, state, at = (f.readline().rstrip("\n").split("\t") + ["", "", ""])[:3]
+        at = float(at)
+    except (OSError, ValueError):
+        return False
+    if day != TODAY or state != "posted" or NOW - at >= MORNING_HOLD_S:
+        return False
+    try:
+        return os.path.getmtime(os.path.join(sdir, "orchestrator.t3.json")) < at
+    except OSError:
+        return False
+
+
 def check_scope(name, sdir, side, shell, ss):
     st_path = os.path.join(STATE_DIR, name + ".json")
     st = load(st_path, {})
     coord_id = side.get("threadId") if isinstance(side.get("threadId"), str) else ""
     threads, coord = threads_of(shell, name, ss, coord_id)
     is_coord = lambda t: coord is not None and t["id"] == coord["id"]  # noqa: E731
+    pending = morning_pending(sdir)
+    held = "the night coordinator %s is NOT woken: today's morning thread has not claimed the seat yet" % (
+        side.get("title") or coord_id or "?")
     live = lambda t: t.get("activityRunStatus") == "running"           # noqa: E731
 
     # no coordinator: the seat names a thread that is gone, settled or archived
@@ -343,12 +373,19 @@ def check_scope(name, sdir, side, shell, ss):
         workers = [t for i, t in sorted(limited.items()) if not is_coord(t) and i not in freed]
 
         def limit_over(ts):
+            if pending:
+                notify(name, "limit over", [label(t) for t in ts] + [
+                    held, "open each in T3 and send 'Continue where you left off.'"])
+                freed.update((t["id"], nruns[t["id"]]) for t in ts)
+                return
             if wake(name, "limit over for:\n%s\nsend 'Continue where you left off.' to each (t3_thread_send)."
                     % "\n".join(label(t) for t in ts)):
                 freed.update((t["id"], nruns[t["id"]]) for t in ts)
 
         if coord is not None and coord["id"] in limited:
-            if NOW - ep["last_retry"] >= RETRY_S:
+            if pending:
+                pass              # the seat is about to change hands: no Keepalive into the old holder
+            elif NOW - ep["last_retry"] >= RETRY_S:
                 ep["last_retry"] = NOW
                 ep["keepalive"] = wake(name, "", keepalive=True) or ep["keepalive"]
         elif workers and ep.get("keepalive") and coord is not None and not live(coord):
@@ -396,6 +433,8 @@ def check_scope(name, sdir, side, shell, ss):
                 facts = [label(t), "class %s" % (t.get("lastErrorClass") or "unknown"), err_text(t)]
                 if is_coord(t):
                     notify(name, "the coordinator's last run failed", facts + ["look at the thread in T3"])
+                elif pending:
+                    notify(name, "other failure", facts + [held, "look at the thread in T3"])
                 else:
                     wake(name, "other failure in %s: %s. %s" % (label(t), t.get("lastErrorClass") or "unknown",
                                                                  err_text(t)))

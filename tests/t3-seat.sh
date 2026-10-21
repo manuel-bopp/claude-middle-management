@@ -7,6 +7,7 @@
 #   C  session-role.sh: asleep T3 coordinator, T3 worker lines, T3 coordinator lines, former coordinator
 #   D  scopeMode per-root: two roots, no catch-all, a standalone session
 #   E  peer-state.py: thread column, "asleep (T3)" · F orch-heartbeat.sh skips a T3-bound coordinator
+#   G  the morning takeover: claim --morning gated by morningTakeover, quiet check, backfill, predecessor note
 #   Z  no webhook URL in any output
 # The takeover wake runs the REAL t3-wake.sh against a local HTTP stub that logs the request path.
 set -uo pipefail
@@ -205,6 +206,98 @@ printf '{"sessionId":"sess-hb","threadId":"t"}\n' > "$H/.claude/state/orchestrat
 HOME="$H" CLAUDE_CONFIG_DIR="" OHB_ALARM_SINK="$TMP/alarms" OHB_POKE_SINK="$TMP/pokes" OHB_PEERS=/dev/null bash "$P/scripts/orch-heartbeat.sh" tick >/dev/null 2>&1
 has "tick ends as t3-coordinator" "t3-coordinator" "$(cat "$H"/.claude/state/orch-heartbeat/last-tick 2>/dev/null)"
 [ -s "$TMP/alarms" ] && bad "...no alarm" none "$(cat "$TMP/alarms")" || ok "...no alarm"
+
+echo "== G: the morning takeover (claim --morning) =="
+# g_home: c1 bound and asleep (its process gone), its transcript quiet for $1 (a date -d phrase)
+g_home() {
+  H=$(new_home); SIDE=$H/.claude/state/orchestrator.t3.json; LOG=$H/logs/session-log.md; mkdir -p "$H/logs" "$H/.claude/projects/-x"; : > "$LOG"
+  printf '{"sessionLog":"%s","morningTakeover":{"allowed":true,"okBy":"Alex, 2026-10-21"}}\n' "$LOG" > "$H/.claude/middle-management.json"
+  as_s "$H" c1 "$H" claim >/dev/null; printf '%s\n' "$U1" | as_s "$H" c1 "$H" t3-bind --thread mcp:t-c1 --title "coord one" --task task-1 --model m >/dev/null
+  printf '{"type":"assistant","timestamp":"%s","message":{"content":[{"type":"text","text":"night work done"}]}}\n' \
+    "$(date -u -d "$1" +%Y-%m-%dT%H:%M:%SZ)" > "$H/.claude/projects/-x/sess-c1.jsonl"
+  touch -d "$1" "$H/.claude/projects/-x/sess-c1.jsonl"
+}
+g_home "3 hours ago"; jq 'del(.morningTakeover)' "$H/.claude/middle-management.json" > "$TMP/x"; cp "$TMP/x" "$H/.claude/middle-management.json"
+OUT=$(as_s "$H" m1 "$H" claim --morning); has "--morning without the standing word -> refused" "needs the user's standing word" "$OUT"
+is "...marker unchanged" "$(cat "$H/.claude/state/orchestrator")" sess-c1
+jq '.morningTakeover = {allowed: false}' "$H/.claude/middle-management.json" > "$TMP/x"; cp "$TMP/x" "$H/.claude/middle-management.json"
+has "allowed false -> refused" "needs the user's standing word" "$(as_s "$H" m1 "$H" claim --morning)"
+has "the plain asleep refusal names the morning route" "claim --morning" "$(as_s "$H" m1 "$H" claim)"
+g_home "5 minutes ago"
+OUT=$(as_s "$H" m1 "$H" claim --morning); has "holder moved 5 min ago -> refused" "REFUSED (--morning): the asleep coordinator sess-c1 moved" "$OUT"
+is "...marker unchanged" "$(cat "$H/.claude/state/orchestrator")" sess-c1; [ -e "$SIDE" ] && ok "...sidecar kept" || bad "...sidecar kept" present gone
+g_home "3 hours ago"; N0=$(wc -l < "$TMP/hook.log")
+OUT=$(as_s "$H" m1 "$H" claim --thread mcp:t-m1 --morning); ALL="$ALL$OUT"
+has "asleep + quiet + standing word -> MORNING TAKEOVER" "MORNING TAKEOVER (standing word: Alex, 2026-10-21)" "$OUT"
+has "...OK" "OK: this session" "$OUT"; is "...marker names m1" "$(cat "$H/.claude/state/orchestrator")" sess-m1
+has "...SETTLE line names the old report task" "delete_scheduled_task task-1" "$OUT"
+has "...never message it" "Never t3_thread_send it" "$OUT"
+has "...log not completed -> backfilled" "BACKFILLED: wrap entry for \"coord one\"" "$OUT"
+has "...the entry closes c1" "- Session: closed · sess-c1" "$(cat "$LOG")"
+has "...and says why" "coordinator asleep at the morning takeover, wrap backfilled" "$(cat "$LOG")"
+has "...and whose word" "the morning takeover (standing word: Alex, 2026-10-21)" "$(cat "$LOG")"
+is "...nobody was woken" "$(wc -l < "$TMP/hook.log")" "$N0"
+[ -e "$SIDE" ] && bad "...the old sidecar is gone" gone present || ok "...the old sidecar is gone"
+PF=$H/.claude/state/orchestrator.t3.previous.json
+is "...the predecessor note, 0600" "$(stat -c %a "$PF" 2>/dev/null)" 600
+is "...names thread and task, no URL" "$(jq -c '[.sessionId,.threadId,.reportTaskId,has("reportUrl")]' "$PF")" '["sess-c1","mcp:t-c1","task-1",false]'
+has "status shows the predecessor" "Predecessor:  thread mcp:t-c1" "$(as_s "$H" m1 "$H" status)"
+OUT=$(printf '%s\n' "$U2" | as_s "$H" m1 "$H" t3-bind --thread mcp:t-m1 --title "morning" --task task-m --model m); ALL="$ALL$OUT"
+lacks "t3-bind after the morning takeover wakes nobody" "Woke the previous holder" "$OUT"; is "...no POST" "$(wc -l < "$TMP/hook.log")" "$N0"
+is "...previous = c1 from the note" "$(jq -c '.previous | [.sessionId,.threadId,.reportTaskId]' "$SIDE")" '["sess-c1","mcp:t-c1","task-1"]'
+[ -e "$PF" ] && bad "...the note is consumed" gone present || ok "...the note is consumed"
+# completed log entry -> no backfill
+# wrapped (its closed marker in the log) -> no second entry; the marker reader needs a hex sessionId
+g_home "3 hours ago"; HX=abcdef12-0000-4000-8000-000000000001
+echo "$HX" > "$H/.claude/state/orchestrator"; jq --arg x "$HX" '.sessionId = $x' "$SIDE" > "$TMP/x"; cp "$TMP/x" "$SIDE"
+mv "$H/.claude/projects/-x/sess-c1.jsonl" "$H/.claude/projects/-x/$HX.jsonl"
+printf '## %s\n\n### %s – [c1] – night\n- Status: completed\n- Session: closed · %s\n' "$(date -d '3 hours ago' +%F)" "$(date -d '3 hours ago' +%H:%M)" "$HX" > "$LOG"
+SL=$(wc -l < "$LOG"); OUT=$(as_s "$H" m1 "$H" claim --morning)
+has "wrapped (closed marker) -> takeover" "MORNING TAKEOVER" "$OUT"; lacks "...no second wrap entry" "BACKFILLED" "$OUT"; is "...log untouched" "$(wc -l < "$LOG")" "$SL"
+# no transcript to read -> fail closed
+g_home "3 hours ago"; rm -f "$H/.claude/projects/-x/sess-c1.jsonl"
+OUT=$(as_s "$H" m1 "$H" claim --morning); has "holder unreadable -> refused (fail closed)" "could not be read off disk" "$OUT"
+is "...marker unchanged" "$(cat "$H/.claude/state/orchestrator")" sess-c1
+# a live holder is never taken by --morning
+g_home "3 hours ago"; GP=$(live "$H" c1 "$H")
+OUT=$(as_s "$H" m1 "$H" claim --morning); has "live holder -> the usual rules (BUSY)" "BUSY" "$OUT"
+is "...marker unchanged" "$(cat "$H/.claude/state/orchestrator")" sess-c1; kill "$GP" 2>/dev/null
+# a gone holder outside T3 (no sidecar), its log not completed -> taken (as before) and backfilled
+g_home "3 hours ago"; rm -f "$SIDE"
+OUT=$(as_s "$H" m1 "$H" claim --morning); has "gone non-T3 holder -> taken" "OK: this session" "$OUT"
+has "...backfilled" "BACKFILLED" "$OUT"; has "...the entry closes c1" "- Session: closed · sess-c1" "$(cat "$LOG")"
+has "...says why" "coordinator gone at the morning takeover" "$(cat "$LOG")"
+OUT=$(as_s "$H" m2 "$H" claim); lacks "a plain claim never backfills" "BACKFILLED" "$OUT"
+
+echo "== G2: review fixes - outcome, order, note lifetime =="
+mstat() { mkdir -p "$H/.claude/state/morning-t3"; printf '%s\tposted\t%s\t1\n' "$(date +%F)" "$(date +%s)" > "$H/.claude/state/morning-t3/status"; }
+g_note() { jq --arg n "cat >> $H/notes" '. + {notifyCommand: $n}' "$H/.claude/middle-management.json" > "$TMP/x"; cp "$TMP/x" "$H/.claude/middle-management.json"; }
+g_home "5 minutes ago"; g_note; mstat
+OUT=$(as_s "$H" m1 "$H" claim --morning); is "a refused morning claim -> status refused" "$(cut -f2 "$H/.claude/state/morning-t3/status")" refused
+is "...names the refused claimer (5th column)" "$(cut -f5 "$H/.claude/state/morning-t3/status")" sess-m1
+has "...the user is told" "morning takeover REFUSED" "$(cat "$H/notes" 2>/dev/null)"
+g_home "3 hours ago"; g_note; mstat
+OUT=$(as_s "$H" m1 "$H" claim --morning); is "a successful morning claim -> status claimed" "$(cut -f2 "$H/.claude/state/morning-t3/status")" claimed
+[ -s "$H/notes" ] && bad "...no refusal notice" none "$(cat "$H/notes")" || ok "...no refusal notice"
+g_home "3 hours ago"; jq 'del(.morningTakeover)' "$H/.claude/middle-management.json" > "$TMP/x"; cp "$TMP/x" "$H/.claude/middle-management.json"; g_note; mstat
+OUT=$(as_s "$H" m1 "$H" claim --morning); is "no takeover word -> status refused too" "$(cut -f2 "$H/.claude/state/morning-t3/status")" refused
+g_home "3 hours ago"; chmod 444 "$H/.claude/state/orchestrator"
+OUT=$(as_s "$H" m1 "$H" claim --morning); has "marker not writable -> FAILED" "FAILED" "$OUT"
+[ -e "$SIDE" ] && ok "...a claim that did not win keeps the old sidecar" || bad "...a claim that did not win keeps the old sidecar" present gone
+[ -e "$H/.claude/state/orchestrator.t3.previous.json" ] && bad "...and writes no predecessor note" none present || ok "...and writes no predecessor note"
+lacks "...prints no SETTLE line" "SETTLE" "$OUT"
+chmod 644 "$H/.claude/state/orchestrator"
+# the note belongs to its claimer: a later claim of another session drops it, a foreign t3-bind ignores it
+g_home "3 hours ago"; PF=$H/.claude/state/orchestrator.t3.previous.json
+as_s "$H" m1 "$H" claim --morning >/dev/null; is "note written, by m1" "$(jq -r .by "$PF")" sess-m1
+OUT=$(as_s "$H" m2 "$H" claim); has "m1 gone, m2 claims" "OK: this session" "$OUT"
+[ -e "$PF" ] && bad "...the stale note is dropped" gone present || ok "...the stale note is dropped"
+lacks "...status shows no predecessor" "Predecessor" "$(as_s "$H" m2 "$H" status)"
+printf '{"sessionId":"sess-c1","threadId":"mcp:t-c1","reportTaskId":"task-1","by":"sess-other"}\n' > "$PF"
+printf '%s\n' "$U2" | as_s "$H" m2 "$H" t3-bind --thread mcp:t-m2 --title m2 --task task-m2 --model m >/dev/null
+is "a foreign note is not filed as previous" "$(jq -r 'has("previous")' "$SIDE")" false
+printf '{"by":"sess-m2"}\n' > "$PF"; as_s "$H" m2 "$H" release >/dev/null
+[ -e "$PF" ] && bad "release drops the note" gone present || ok "release drops the note"
 
 echo "== Z =="
 lacks "no webhook secret in any output" "$S1" "$ALL"; lacks "...nor the second" "$S2" "$ALL"

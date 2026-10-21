@@ -102,6 +102,10 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 | T3 watcher | systemd user timer (optional, Linux) | Every 10 minutes, no model: usage limits (with a retry), clicks pending, stuck runs, lost reports, an open handover, a folder without coordinator, and the topics tick. Installed by setup step 8. |
 | Follow-through | script + timer tick | `scripts/topics.py` is the one writer of a topic's state: it appends the session-log entry and keeps a table `<board>.topics.md`, a reminder digest and a daily digest, so no topic drops out of sight before it is done, reviewed and OK'd. See [Follow-through](#follow-through). |
 | `work-packages` skill + two hooks | skill, PreToolUse + SubagentStop hooks | Every sub-agent writes its package list into a report file first and appends each result at once, so a sub-agent that dies at 99 % leaves its work behind. A prompt without a `Report file:` line is refused; a sub-agent that ends without touching its report is held once. See [Sub-agents](#sub-agents). |
+| Morning coordinator (T3) | systemd user timers (optional, Linux, T3 Code) | Weekdays 07:30: waits out a usage limit, then starts a fresh, visible coordinator thread through a T3 webhook task; the thread takes the seat with `claim --morning` (allowed by the user's standing word in `morningTakeover`), settles the night's coordinator without waking it, runs the ritual and waits for you. A watchdog at 08:15 alarms when nobody claimed. Setup step 7b; see [Morning coordinator in T3 Code](#morning-coordinator-in-t3-code). |
+| Guard canary | systemd user timer (optional, Linux) | Hourly: the config is valid, the plugin enabled, its guard hooks registered and not wired twice, and the direct deny probes deny; once a day a headless model probe proves the CLI still loads the hooks. Alarms through the failure alarm. Setup step 9; see [Guard canary](#guard-canary). |
+| Reply timestamp, intent check | UserPromptSubmit hooks (optional) | `replyTimestamp`: the literal `[HH:MM]` prefix for every reply. `intentCheck`: an intent reminder in front of prompts that read like a work order. Both off by default; see [Optional prompt hooks](#optional-prompt-hooks). |
+| `self-wakeup` skill | skill | Waiting on the user without stalling: escalating self-wakeups, one nudge through `notifyCommand`, and proceeding alone only on a safe, reversible default it is at least 75 % sure of. |
 | Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. The same tick keeps waiting sessions warm: a live, unwrapped session idle 45 to 55 minutes on an open question (or a hold file) gets one "reply ok" ping, at most 3 per wait phase, so the answer does not cost it its whole context again. Installed by setup step 5. |
 
 ## How the roles work
@@ -212,6 +216,11 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   text; any decoration (a bold first line, a parse mode, the fallback to plain when the rich
   form is rejected) lives inside this one command, so an alarm never dies of formatting. Keep
   tokens in a mode-600 env file the command sources — setup prints this file back to you.
+- `notifyFallbackCommand` (optional, 0.11.1): the second alarm route, same contract as
+  `notifyCommand`. `scripts/unit-failure-alarm.sh` runs it only when `notifyCommand` is missing or
+  fails, with the text prefixed `[fallback route: the main alarm channel failed]`. Every unit that
+  fails loudly ends in that alarm (the watcher and the heartbeat exit 1 when their own notify
+  fails), so one fallback covers them all. Set it before installing any unit (setup steps 5-8).
 - `sessionLog` (optional, default `~/logs/session-log.md`): the machine's session log — see
   [The session log](#the-session-log). Must be absolute (`~` is expanded); a relative path makes
   the config invalid, because it would name a different file per caller. `$MM_SESSION_LOG`
@@ -234,6 +243,10 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   it), `t3TokenFile` (optional, default `~/.config/t3-threads/token`, mode 600) and
   `onLimitCommand` (optional, run once per usage-limit episode with the limited thread ids as
   arguments): the T3 watcher and `scripts/t3-token.sh`. See [T3 Code](#t3-code).
+- `morningTakeover`, `morningTaskUrlFile`, `morningWaitUntil`, `morningRoot` (optional, 0.11.1):
+  the morning chain under T3 Code. See [Morning coordinator in T3 Code](#morning-coordinator-in-t3-code).
+- `replyTimestamp`, `intentCheck`, `intentCheckVerbs` (optional, 0.11.1, defaults `false` /
+  `false` / the built-in list): the two prompt hooks. See [Optional prompt hooks](#optional-prompt-hooks).
 - `userName`, `okBy`, `remindAfterHours`, `remindWindow`, `pageCommand` (optional, defaults
   `user` / the user / `2` / `08:00-22:00` / none): follow-through. See [Follow-through](#follow-through).
 - `workPackagesGate` (optional, default `true`): the sub-agent report gate. See [Sub-agents](#sub-agents).
@@ -439,6 +452,72 @@ every thread, hooks included).
   deletes threads. The heartbeat skips a coordinator with a sidecar; poke and keep-warm do not
   apply in T3.
 
+## Morning coordinator in T3 Code
+
+0.11.1. You work at night with a coordinator thread and go to bed; its process ends after 30
+minutes idle, and it stays "asleep in T3". In the morning a systemd timer starts a FRESH, visible
+coordinator thread, which takes the seat, settles the night's coordinator without waking it, runs
+the morning ritual and then waits for you in that thread. The night's coordinator is never
+messaged: waking it would make it re-pay its whole context for a seat it is about to lose.
+
+1. **Trigger** (`scripts/morning-t3.sh`, `orch-morning-t3.timer`, weekdays 07:30 by default, no
+   catch-up after a reboot; setup step 7b). It probes the login with one tiny `claude -p` (no
+   tools, no MCP). Usage-limited → one notify, a probe every 10 minutes (`MM_MORNING_RETRY_SEC`)
+   until `morningWaitUntil` (default `09:30`; `MM_MORNING_WAIT_UNTIL` wins for a late manual run),
+   then one "cancelled" notify; free after the wait → one notify. A seat that changed hands during
+   the wait cancels the run. Then it POSTs `{"from":"morning-t3","date":…}` to the T3 webhook task
+   whose URL sits in `morningTaskUrlFile`; without `morningTakeover.allowed` it posts nothing and
+   alarms instead (the thread could only be refused) (default `~/.config/t3-threads/morning-task-url`, mode 600,
+   never printed; the local twin of a relay URL first, at `t3Url`). HTTP 202 = started. Anything
+   else → exit 1 with a cause file (the relay is tried after the local twin only when the twin
+   could not be reached or answered 404/405: any other answer may already have started the thread) → `OnFailure=unit-failure-alarm@%n.service`. State:
+   `<seat dir>/morning-t3/status` (`<date> <posted|waiting|cancelled|failed> <epoch> <pid>`).
+2. **The webhook task** opens the thread. A script cannot create T3 tasks, so a T3 thread creates
+   it once: `schedule_task` with `{"type": "webhook"}` and `bindToCurrentThread: false` (each request
+   = a fresh top-level thread), a fixed prompt (setup step 7b prints it; no `{{body…}}`
+   placeholders, so the URL starts nothing but that prompt), and `maxDeliveryAgeMinutes` (e.g.
+   `120`) so a request the relay held overnight does not start a thread at noon. Model and runtime
+   are inherited from the creating thread: `update_scheduled_task` changes them.
+3. **Morning takeover** (`orchestrator.sh claim --thread <id> --morning`). Allowed by the config
+   key `morningTakeover: {"allowed": true, "okBy": "<who, date>"}`: the user's standing word,
+   recorded once, so nobody is asked at runtime. Without it `--morning` is refused outright. It takes
+   the seat of a holder that is asleep in T3 (no live process, the sidecar names it) and whose
+   transcript has not moved for `MM_STALE_SEAT_MIN` (60), read off disk (an unreadable holder keeps
+   the seat). It deletes the old sidecar, keeps who it named (thread, title, report task, no URL)
+   in `<seat dir>/orchestrator.t3.previous.json` for `status` and the following `t3-bind` (which
+   files it as `previous` and wakes nobody), backfills the holder's wrap entry when it carries no
+   closed marker and its log entry is not completed (the same append-only `backfill` as an expired
+   seat), and prints the settle step: `delete_scheduled_task <its report task>`, then settle its
+   thread in the ritual (step 3). A gone holder outside T3 is taken as before, plus the backfill.
+   A live holder is never taken by `--morning`: the stale and expired rules apply.
+4. **No wake into the night coordinator while the claim is pending.** From the POST until the
+   morning thread's claim (status `posted`; every exit of `claim --morning` turns it into `claimed`
+   or `refused`), at most 30 minutes, and only while the sidecar is older than the post,
+   `t3-watch.py` sends nothing into the sidecar's thread: "limit over" and "other failure" go to you
+   as a notify, the `Keepalive` retry is skipped. The Stop hook (`hooks/t3-report.sh`) does not send
+   the turn text of a session started after the post into that thread; the held turn becomes a line
+   in `failures.log`, which the watcher sends to you as "report lost", and the session is told once.
+   A refused claim notifies you through `notifyCommand` and ends the hold for every other session;
+   the refused morning thread itself stays held for the day (it is named in the status line), so a
+   refusal never wakes the night coordinator.
+5. **Watchdog** (`morning-t3.sh --check`, `orch-morning-watchdog.timer`, weekdays 08:15 by
+   default). Quiet when today the seat marker was written (a coordinator claimed it) AND the ritual
+   window was stamped (`<seat dir>/morning-ritual/window`, ritual step 7), or when the trigger
+   cancelled itself today or still waits. Otherwise exit 1 with its cause → the same alarm.
+
+With [scopes](#scopes), `morningRoot` names the folder of the T3 project the morning task runs in;
+its seat is the one served (required with `scopeMode: "per-root"`). Holidays are not skipped:
+`systemctl --user disable --now orch-morning-t3.timer orch-morning-watchdog.timer`.
+
+**Assumptions, not verified end to end on a live T3 server:** that the local twin of the webhook
+relay URL starts the task as the relay does (proven for the report task by `t3-wake.sh`), and that
+a request answered with 202 has created the thread. The `schedule_task` tool description states
+the rest: `{"type": "webhook"}` runs once per request, `bindToCurrentThread: false` creates a fresh
+top-level thread per run, and the run sees the request only through prompt placeholders.
+
+Use this OR the [headless morning ritual](#headless-morning-ritual), not both: both act at the same
+time. A machine without T3 Code keeps the headless one.
+
 ## Follow-through
 
 `scripts/topics.py` keeps every topic in sight until it is really finished.
@@ -531,6 +610,76 @@ around `claude -p` with hard-coded paths and its own sender) moves onto this one
 
 Re-running setup step 7 writes exactly these unit lines; the old unit and its timer are disabled
 by hand (`systemctl --user disable --now <old>.timer`) once the new one has delivered a morning.
+
+## Optional prompt hooks
+
+Two UserPromptSubmit hooks, registered by the plugin and silent until switched on in the config.
+
+- **`replyTimestamp: true`** (`hooks/reply-timestamp.sh`): every user message gets one line of
+  context, `Your reply starts literally with: [HH:MM] (copy it, never compute or estimate it; local
+  time of this message: …; a wrap recap starts with [DD.MM.YYYY HH:MM])`. With many parallel
+  sessions the prefix shows when a reply was written and how long something has been lying. Pair it
+  with a line in your house rules ("start every reply with the prefix the hook gives").
+- **`intentCheck: true`** (`hooks/intent-check.sh`): a prompt of 25+ characters that contains a
+  work-order verb gets a three-line reminder: state the goal behind the wording, name the
+  operations it implies that the words left out (read next to write, delete next to create, list,
+  live updates, migration, the other environment), ask one question when wording and goal diverge.
+  `intentCheckVerbs` (a case-insensitive extended regex) replaces the built-in English and German
+  verb list. Injected system turns are skipped.
+
+A machine that already runs its own copies of these hooks from `settings.json` removes those
+entries when it switches the keys on, or both fire.
+
+## Guard canary
+
+`scripts/guard-canary.sh` (`mm-guard-canary.timer`, hourly; setup step 9) exits 1 with one cause
+line, which the failure alarm sends, when a precondition of "the guards are live" breaks: the
+config is missing or invalid (the checkout guard then fails open), the plugin is not enabled or
+its `installPath` is gone, its `hooks.json` does not register the role, staging and checkout hooks,
+the same hooks are also wired in `settings.json`, or a direct deny probe (no model) does not deny.
+Once a day, from `MM_CANARY_E2E_HOUR` (9), a headless `claude -p` must attempt a blocked Write in
+the first protected checkout and a blocked blanket staging in a throwaway repo, and get the
+plugin's own deny text back. The prompt says that the denial IS the expected result (a small model
+otherwise refuses to try a blocked command), and a run without the tool call is retried once on
+the next model of `MM_CANARY_MODELS` ("haiku sonnet"). A probe file that got written is moved to
+`<config-dir>/state/guard-canary/leftovers/` and alarms. Streams stay a week in that state dir.
+
+## Morning ritual: the local fill file
+
+The `morning-ritual` skill has CUSTOMIZE steps: where your team talks, which repos and branch
+pairs to check, how the board block looks, how the day plan reaches the phone. Their answers live
+in one optional file, `<config-dir>/morning-ritual.local.md`, so the skill itself ships unchanged
+and an update never overwrites them. The skill reads it before step 1 (the coordinator, the
+headless run and the T3 morning thread alike). Format:
+
+```markdown
+# Morning ritual: local fill (<machine>)
+
+## Step 1: Messages delta
+- Slack: token from the file named in <path> (variable SLACK_BOT_TOKEN, never printed);
+  channels C0123 (#team), C0456 (#ops); thread replies for every watched thread in <path>.
+
+## Step 2: Repo state
+- fetch /abs/repo-a, /abs/repo-b; promotion check: origin/alpha is an ancestor of origin/dev.
+
+## Step 4: Board
+- block sections in this order: Waits on the user (numbered, link in the line), Day plan, ...
+
+## Step 7: Day plan
+- language, channel (a voice-note skill, a links message), length.
+
+## Extra steps
+### After step 5: Phone channel
+- the inbound poller unit must be active; restart it once, say so in the day plan.
+
+## Never
+- never post into #team from the ritual.
+```
+
+`## Step <n>` sections fill step n (any title after the number), `### After step <n>:` entries
+run right after step n, `## Never` adds limits. The file only adds: a line that contradicts a rule
+of the skill loses, and the day plan names it. No secret values in it, only the names and paths of
+the files that hold them. No file = the skill's defaults.
 
 ## Starting a project from the templates
 

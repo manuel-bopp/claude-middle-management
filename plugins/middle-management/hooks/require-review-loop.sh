@@ -5,7 +5,8 @@
 # A plan or a handoff doc reaches your user only after the review-loop skill ran in this session:
 # ExitPlanMode with a plan of 900+ characters, or a Write to a file named <YYYY-MM-DD>_handoff-*.md
 # in any directory (the name both wraps give a handoff), is denied until the skill's marker
-# <config dir>/state/review-loop/<sessionId>.json exists and is under an hour old.
+# <config dir>/state/review-loop/<sessionId>.json (or the older gate's state/plan-review/<sessionId>.json)
+# exists and is under an hour old.
 # Known limit: this gates the Write TOOL. A handoff written through a shell heredoc bypasses it;
 # the gate raises the cost of skipping the review, it does not make skipping impossible.
 # Ported from a gate that held plans back after one moved a system's writes and forgot its reads.
@@ -31,10 +32,13 @@ case "$TOOL" in
   *) exit 0 ;;
 esac
 
-MARKER="$(bash "$CHECK" dir)/state/review-loop/${SESSION}.json"
-if [ -n "$SESSION" ] && [ -f "$MARKER" ]; then
-  [ $(( $(date +%s) - $(stat -c %Y "$MARKER") )) -lt "$MAX_AGE" ] && exit 0
-fi
+# The older completeness gate's marker (state/plan-review/, a site-local plan-review skill) counts
+# too, same age rule: a machine switching to this loop keeps the gates its sessions already opened.
+for MARKER in "$(bash "$CHECK" dir)"/state/{review-loop,plan-review}/"${SESSION}.json"; do
+  if [ -n "$SESSION" ] && [ -f "$MARKER" ]; then
+    [ $(( $(date +%s) - $(stat -c %Y "$MARKER") )) -lt "$MAX_AGE" ] && exit 0
+  fi
+done
 
 jq -n '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:
   "Review gate (reviewLoopGate): this plan or handoff has not been through the review-loop skill in this session within the last hour. Draft it somewhere else (your scratch dir), run the review-loop skill on the draft (a fresh-context reviewer, findings verified, fixed, re-reviewed, at most 4 rounds), and the skill writes the marker that opens this gate. Skill: middle-management:review-loop."}}'

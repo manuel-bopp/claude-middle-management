@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.11.1 - 2026-10-21
+
+**Morning coordinator in T3 Code.** A weekday timer starts a fresh, visible coordinator thread
+that takes over from the night's coordinator without waking it. New `scripts/morning-t3.sh` with
+`templates/systemd/orch-morning-t3.{service,timer}` (07:30): waits out a usage limit (probe every
+10 min until `morningWaitUntil`, default 09:30, one notify each for wait, free, cancel; a seat that
+changed hands meanwhile cancels), then POSTs to a T3 webhook task (`schedule_task {type: webhook}`,
+`bindToCurrentThread: false`, created once by a T3 thread, setup step 7b) whose URL sits in
+`morningTaskUrlFile` (mode 600, never printed; local twin first). A non-202 answer fails the unit
+with its cause on file. `morning-t3.sh --check` with `orch-morning-watchdog.{service,timer}` (08:15)
+alarms when no coordinator claimed the seat and stamped the ritual today.
+
+**Morning takeover.** `orchestrator.sh claim --morning`, honoured only with the user's standing
+word in the new config key `morningTakeover: {"allowed": true, "okBy": "<who, date>"}`: takes the
+seat of a holder asleep in T3 and quiet for `MM_STALE_SEAT_MIN`, backfills its wrap when it has no
+closed marker and its log entry is not completed, keeps its thread and report task in
+`orchestrator.t3.previous.json` (shown by `status`, filed as `previous` by `t3-bind`, no wake) and
+prints the settle step. `commands/orchestrator.md` and the `morning-ritual` skill name the
+exception to the `--t3-asleep-ok` rule and the morning thread's order: claim, bind, settle, ritual,
+wait for the user.
+
+**No wake into the night coordinator.** While the morning thread has not bound the seat,
+`t3-watch.py` notifies the user instead of waking the sidecar's thread ("limit over", "other
+failure") and skips the `Keepalive` retry; `hooks/t3-report.sh` does not send the turns of a session
+started after the morning post.
+
+**Alarm fallback.** New config key `notifyFallbackCommand`: `unit-failure-alarm.sh` runs it when
+`notifyCommand` is missing or fails. New config keys validated by `config-check.sh`:
+`notifyFallbackCommand`, `morningTakeover`, `morningTaskUrlFile`, `morningWaitUntil`, `morningRoot`.
+New test matrix `tests/morning-t3.sh`; `tests/t3-seat.sh` section G, `tests/t3-watch.sh` section N.
+
+**Guard canary.** New `scripts/guard-canary.sh` + `templates/systemd/mm-guard-canary.{service,timer}`
+(hourly, setup step 9): config, plugin enabled, hooks registered and not wired twice, direct deny
+probes; a daily end-to-end `claude -p` probe whose prompt states that the denial is the expected
+result, retried once on the next model when the first made no call.
+
+**Morning ritual fill file.** The `morning-ritual` skill reads `<config dir>/morning-ritual.local.md`
+(`## Step <n>`, `## Extra steps`, `## Never`) for the machine's CUSTOMIZE answers, so the skill
+ships unchanged; README "Morning ritual: the local fill file".
+
+**Review loop: the ten plan lenses verbatim.** `review-loop` carries the completeness gate's ten
+lenses word for word, the second walkthrough reviewer for multi-repo or contract changes, the
+"question the human would have asked" line, the CONFIRMED / PARTIAL / REFUTED / OPEN QUESTION
+verification table, "two rounds with nothing new" as a second end, and the delta report. The
+4-round cap stays. The gate also accepts the older `state/plan-review/<sessionId>.json` marker.
+
+**Optional prompt hooks.** `hooks/reply-timestamp.sh` (`replyTimestamp`) and `hooks/intent-check.sh`
+(`intentCheck`, `intentCheckVerbs`), both off by default.
+
+**self-wakeup skill.** Waiting on the user in escalating stages; nudges go through `notifyCommand`.
+New test matrices `tests/guard-canary.sh`, `tests/prompt-hooks.sh`.
+
+**Review fixes.** Every exit of `claim --morning` records `claimed` / `refused` in the morning status
+(a refusal also notifies the user), and the hold on reports into the night coordinator ends with it or
+30 min after the post; a held turn is a `failures.log` line the watcher sends, never silent. The old
+binding and the predecessor note change only after the marker is won; the note names its claimer, is
+consumed only by that claimer's `t3-bind`, and is dropped by any other claim and by `release`.
+`morning-t3.sh` checks `morningTakeover` before it probes or posts, tries the relay only when the local
+twin was unreachable, and names a later-deadline manual run in its cancel notice. `review-loop`: the
+"nothing new" stop is never clean.
+
+**Review round 2.** A refused `claim --morning` names its session in the status line; only that
+morning thread stays held for the day, so a refusal never wakes the night coordinator. The trigger
+also tries the relay when the local twin answers 404/405. A lost marker race records no outcome;
+a held session logs one "report lost" line per post, not one per turn.
+
 ## 0.11.0 - 2026-10-20
 
 **T3 Code mode.** Under T3 Code (`T3CODE_HOME` set) a thread's process ends after 30 minutes idle,
