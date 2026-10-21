@@ -643,8 +643,8 @@ wakes a thread on its next message). The heartbeat skips a coordinator that has 
 `t3-watch` covers it.
 
 Files after the install: `<config dir>/middle-management-heartbeat/` — the scripts and
-your copy of the poke prompt, which later plugin updates do not touch; **after a plugin
-update, re-run setup step 5** so the scripts are refreshed — plus
+your copy of the poke prompt, which later plugin updates do not touch; the scripts are
+refreshed by the plugin's SessionStart hook at the first session start after an update — plus
 `~/.config/systemd/user/orch-heartbeat.{timer,service}` and `unit-failure-alarm@.service`,
 and state under `<config dir>/state/orch-heartbeat/` (one open episode per coordinator,
 `latches`, `last-tick`, and a `keepwarm-<sessionId>` ping counter per waiting session).
@@ -720,7 +720,9 @@ Operating it:
   delete `<config dir>/middle-management-reaper/` and the two unit files in
   `~/.config/systemd/user/`. Its state (markers, listings) lives under
   `<config dir>/state/wt/` and is yours to delete.
-- **After a plugin update, re-run setup step 6** — the units run a copy, not the plugin.
+- **After a plugin update** the units keep running their copy, which the plugin's SessionStart
+  hook refreshes at the first session start on the new version; re-run setup step 6 only when
+  the CHANGELOG says so.
 
 ## The headless morning ritual
 

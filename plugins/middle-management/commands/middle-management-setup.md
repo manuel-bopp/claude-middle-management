@@ -360,14 +360,15 @@ echo "linger: $(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo
 
 Install — copies the heartbeat files OUT of the plugin, because the plugin
 cache path changes with every update and a unit pointing there would die
-silently — then arms the timer:
+silently — then arms the timer. `scripts/copy-set.sh` copies the set named in
+`scripts/copy-sets.json` (the one list of what each copy dir holds; the poke
+prompt only when it is absent):
 
 ```bash
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; HB="$CFG_DIR/middle-management-heartbeat"; UNITS="$HOME/.config/systemd/user"
-mkdir -p "$HB" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{orch-heartbeat.sh,poke-session.py,peer-state.py,scope.py,unit-failure-alarm.sh} "$HB/"
-[ -e "$HB/orch-heartbeat-poke.md" ] || cp "${CLAUDE_PLUGIN_ROOT}/scripts/orch-heartbeat-poke.md" "$HB/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-heartbeat || exit 1
 # The units carry the resolved config dir: the systemd user manager inherits no shell environment,
 # so a CLAUDE_CONFIG_DIR set in the shell would otherwise never reach the tick.
 for u in orch-heartbeat.timer orch-heartbeat.service unit-failure-alarm@.service; do
@@ -379,8 +380,10 @@ systemctl --user list-timers orch-heartbeat.timer --no-pager
 
 Then tell the user, in plain text: the poke prompt to customize is
 `$HB/orch-heartbeat-poke.md` (board path, commit convention, alarm line — the
-CUSTOMIZE marks; this copy survives plugin updates); **after every plugin update
-re-run this step** so the scripts are refreshed; and
+CUSTOMIZE marks; this copy survives plugin updates); the scripts are refreshed
+by the plugin itself at the first session start after an update (README
+"Contributing and releases"), so this step is re-run only when the CHANGELOG
+says so; and
 `cat "$(bash "$CHECK" dir)/state/orch-heartbeat/last-tick"` answers "is it
 still armed" — older than 15 minutes means it is not running. Offer a test
 alarm and run it ONLY when the user says yes, because it reaches their phone:
@@ -404,7 +407,7 @@ Never a session parked on a permission prompt. Tell the user the two switches:
 `touch <config dir>/state/keep-warm/<sessionId>` holds a session warm that has no
 detected question, and `touch <config dir>/state/keep-warm/off` turns keep-warm
 off on this machine. The units run the copies, so a plugin update reaches
-keep-warm only after this step is re-run.
+keep-warm with the refresh at the next session start.
 
 Disarm and uninstall are in the skill; never run them here unasked.
 
@@ -427,17 +430,15 @@ reason as step 5, then arms the timer:
 ```bash
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; RP="$CFG_DIR/middle-management-reaper"; UNITS="$HOME/.config/systemd/user"
-mkdir -p "$RP" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{lane-reaper.sh,wt,config-check.sh} "$RP/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-reaper || exit 1
 # The unit inherits no shell environment: the config dir and a PATH that finds git, jq and gh
 # have to be written into it.
 for u in lane-reaper.service lane-reaper.timer; do
   sed "s|__REAPER_DIR__|$RP|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
 done
-# the reaper's OnFailure= points at the same alarm unit step 5 installs — written every time,
-# so re-running this step after a plugin update really refreshes every copy
-cp "${CLAUDE_PLUGIN_ROOT}/scripts/unit-failure-alarm.sh" "$RP/"
+# the reaper's OnFailure= points at the same alarm unit step 5 installs (its copy is in the set)
 sed "s|__HEARTBEAT_DIR__|$RP|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
   "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
 systemctl --user daemon-reload && systemctl --user enable --now lane-reaper.timer
@@ -452,8 +453,9 @@ bash "$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" dir)/middle-managem
 
 Tell them, in plain text: the listing lands in `<config dir>/state/wt/reaper-latest.md`
 and is where the morning ritual reads what was cleaned up; a lane that must stay up
-gets `/wt <name> hold <topic> <hours>`; and **after every plugin update re-run this
-step**, because the units run the copies, not the plugin. Thresholds are the config
+gets `/wt <name> hold <topic> <hours>`; and the units run the copies, not the plugin,
+which the plugin refreshes at the first session start after an update (re-run this step
+only when the CHANGELOG says so). Thresholds are the config
 keys `reaperMaxHours`, `reaperOwnerlessMinutes` and `reaperDigestHour`.
 
 Disarm with `systemctl --user disable --now lane-reaper.timer`; never run that here
@@ -485,8 +487,8 @@ Install — copies the runner and its helpers OUT of the plugin, for the same re
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; MR="$CFG_DIR/middle-management-morning"; UNITS="$HOME/.config/systemd/user"
 FB=""   # the fallback file path the user named, or empty
-mkdir -p "$MR" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-headless.sh,config-check.sh,open-items.py,peer-state.py,scope.py,unit-failure-alarm.sh} "$MR/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-morning || exit 1
 for u in orch-morning-ritual.service orch-morning-ritual.timer; do
   sed "s|__MORNING_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g; s|__FALLBACK_ENV__|$FB|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
@@ -500,7 +502,8 @@ systemctl --user list-timers orch-morning-ritual.timer --no-pager
 Then tell the user, in plain text: budget, timeout, model and permission mode are
 `Environment=MM_MORNING_*` lines in `~/.config/systemd/user/orch-morning-ritual.service` (names in
 the header of the runner); a test run is `systemctl --user start orch-morning-ritual.service` and
-reaches their phone; **after every plugin update re-run this step**. Disarm with
+reaches their phone; the copy is refreshed at the first session start after a plugin update
+(re-run this step only when the CHANGELOG says so). Disarm with
 `systemctl --user disable --now orch-morning-ritual.timer`; never run that here unasked.
 
 ## Step 7b — morning coordinator in T3 Code (optional, Linux only, only with T3 Code)
@@ -551,8 +554,8 @@ Ask for the trigger time (default `Mon..Fri 07:30`) and the watchdog time (defau
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; MR="$CFG_DIR/middle-management-morning"; UNITS="$HOME/.config/systemd/user"
 AT="Mon..Fri 07:30"; CHK="Mon..Fri 08:15"   # what the user chose
-mkdir -p "$MR" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{morning-t3.sh,config-check.sh,scope.py,unit-failure-alarm.sh} "$MR/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-morning || exit 1
 for u in orch-morning-t3.service orch-morning-t3.timer orch-morning-watchdog.service orch-morning-watchdog.timer; do
   sed "s|__MORNING_DIR__|$MR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g; s|__MORNING_TIME__|$AT|g; s|__CHECK_TIME__|$CHK|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
@@ -570,7 +573,8 @@ A `morningWaitUntil` later than two hours after the trigger time needs a longer
 `systemctl --user start orch-morning-t3.service` and opens a real morning thread in T3 (offer it,
 run it only on their yes); holidays are not skipped (disarm with
 `systemctl --user disable --now orch-morning-t3.timer orch-morning-watchdog.timer`, never run that
-here unasked); **after every plugin update re-run this step**.
+here unasked); the copy is refreshed at the first session start after a plugin update (re-run
+this step only when the CHANGELOG says so).
 
 ## Step 8: T3 Code watcher (optional, Linux only, only with T3 Code)
 
@@ -594,8 +598,8 @@ Install: copies the scripts OUT of the plugin, for the same reason as step 5:
 ```bash
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; TW="$CFG_DIR/middle-management-t3watch"; UNITS="$HOME/.config/systemd/user"
-mkdir -p "$TW" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{t3-watch.py,t3-wake.sh,topics.py,open-items.py,peer-state.py,config-check.sh,scope.py,unit-failure-alarm.sh} "$TW/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-t3watch || exit 1
 for u in t3-watch.service t3-watch.timer; do
   sed "s|__T3WATCH_DIR__|$TW|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
@@ -608,8 +612,9 @@ python3 "$TW/t3-watch.py" --dry-run
 ```
 
 The dry run prints what a tick would send and sends nothing. Tell the user, in plain text: post
-counts per thread and day are `t3-watch.py --stats`; **after every plugin update re-run this
-step**. Disarm with `systemctl --user disable --now t3-watch.timer`; never run that here unasked.
+counts per thread and day are `t3-watch.py --stats`; the copy is refreshed at the first session
+start after a plugin update (re-run this step only when the CHANGELOG says so). Disarm with
+`systemctl --user disable --now t3-watch.timer`; never run that here unasked.
 
 ## Step 9 — guard canary (optional, Linux only)
 
@@ -628,8 +633,8 @@ one tool, in the first protected checkout and in a throwaway repo under the cana
 ```bash
 CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
 CFG_DIR="$(bash "$CHECK" dir)"; GC="$CFG_DIR/middle-management-canary"; UNITS="$HOME/.config/systemd/user"
-mkdir -p "$GC" "$UNITS"
-cp "${CLAUDE_PLUGIN_ROOT}"/scripts/{guard-canary.sh,unit-failure-alarm.sh} "$GC/"
+mkdir -p "$UNITS"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-canary || exit 1
 for u in mm-guard-canary.service mm-guard-canary.timer; do
   sed "s|__CANARY_DIR__|$GC|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
     "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
@@ -642,5 +647,6 @@ MM_CANARY_NO_E2E=1 bash "$GC/guard-canary.sh"
 
 The last line runs the static checks once, without the model probe. Tell the user: a failure
 reaches them through the alarm (with its fallback route); `<config dir>/state/guard-canary/` keeps
-the end-to-end streams for a week; **after every plugin update re-run this step**. Disarm with
+the end-to-end streams for a week; the copy is refreshed at the first session start after a plugin
+update (re-run this step only when the CHANGELOG says so). Disarm with
 `systemctl --user disable --now mm-guard-canary.timer`; never run that here unasked.

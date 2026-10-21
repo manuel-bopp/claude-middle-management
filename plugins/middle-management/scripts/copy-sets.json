@@ -1,0 +1,10 @@
+{
+  "neverOverwrite": ["orch-heartbeat-poke.md"],
+  "sets": {
+    "middle-management-heartbeat": ["orch-heartbeat.sh", "poke-session.py", "peer-state.py", "scope.py", "unit-failure-alarm.sh", "orch-heartbeat-poke.md"],
+    "middle-management-reaper": ["lane-reaper.sh", "wt", "config-check.sh", "unit-failure-alarm.sh"],
+    "middle-management-morning": ["morning-headless.sh", "morning-t3.sh", "config-check.sh", "open-items.py", "peer-state.py", "scope.py", "unit-failure-alarm.sh"],
+    "middle-management-t3watch": ["t3-watch.py", "t3-wake.sh", "topics.py", "open-items.py", "peer-state.py", "config-check.sh", "scope.py", "unit-failure-alarm.sh"],
+    "middle-management-canary": ["guard-canary.sh", "unit-failure-alarm.sh"]
+  }
+}

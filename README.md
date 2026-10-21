@@ -60,10 +60,12 @@ rename migrates nothing — re-register it once:
 /plugin install middle-management@dr-bopp
 ```
 
-**After every plugin update, re-run `/middle-management-setup` steps 5, 6 and 7** for whichever of
-the heartbeat, the lane reaper and the headless morning ritual you installed — their units run a
-copy of the scripts, because the plugin's own cache path is versioned and goes stale with each
-update.
+**Updates reach the timers by themselves (0.12.0).** The units of setup steps 5-10 run a copy of
+the scripts under `<config-dir>/middle-management-*/`, because the plugin's own cache path is
+versioned and goes stale with each update. The SessionStart hook `hooks/refresh-copies.sh` refreshes
+every installed copy at the first session start on a new version (see
+[Contributing and releases](#contributing-and-releases)). Re-run a setup step only when the
+CHANGELOG of a release says so (a changed unit template).
 
 ### First five minutes
 
@@ -106,6 +108,7 @@ registry) — if it says nothing at all, the hooks are not armed yet: restart th
 | Guard canary | systemd user timer (optional, Linux) | Hourly: the config is valid, the plugin enabled, its guard hooks registered and not wired twice, and the direct deny probes deny; once a day a headless model probe proves the CLI still loads the hooks. Alarms through the failure alarm. Setup step 9; see [Guard canary](#guard-canary). |
 | Reply timestamp, intent check | UserPromptSubmit hooks (optional) | `replyTimestamp`: the literal `[HH:MM]` prefix for every reply. `intentCheck`: an intent reminder in front of prompts that read like a work order. Both off by default; see [Optional prompt hooks](#optional-prompt-hooks). |
 | `self-wakeup` skill | skill | Waiting on the user without stalling: escalating self-wakeups, one nudge through `notifyCommand`, and proceeding alone only on a safe, reversible default it is at least 75 % sure of. |
+| Copy refresh | SessionStart hook | The timers of setup steps 5-10 run copies of the scripts; at the first session start on a new plugin version, every installed copy dir gets its full file set from `scripts/copy-sets.json` again (atomic, the user's poke prompt kept), then a version stamp. No unit is touched; a failure says so in the session and once through `notifyCommand`. |
 | Heartbeat | systemd user timer (optional, Linux) | Watches the coordinator session: a turn with no answer for 45 minutes → one alarm through your `notifyCommand` and a poke written into the session's own socket (no model call), hourly, giving up after 24 h. The same tick keeps waiting sessions warm: a live, unwrapped session idle 45 to 55 minutes on an open question (or a hold file) gets one "reply ok" ping, at most 3 per wait phase, so the answer does not cost it its whole context again. Installed by setup step 5. |
 
 ## How the roles work
@@ -713,8 +716,8 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   stay; delete them by hand if you want a clean slate. The heartbeat, if installed, keeps
   running from its copy — disarm and uninstall it per the skill.
 - The heartbeat's units point at a COPY under `<config-dir>/middle-management-heartbeat/`
-  (the plugin cache path is versioned and would go stale on the next update): **after a
-  plugin update, re-run setup step 5** to refresh that copy. `last-tick` under
+  (the plugin cache path is versioned and would go stale on the next update); the refresh hook
+  renews that copy at the first session start after an update. `last-tick` under
   `<config-dir>/state/orch-heartbeat/` older than 15 minutes means the timer is not running.
 - The lane reaper decides from `wt list` alone. The `pr` column reads `-` whenever there is no
   pull-request information to be had (no `gh`, no GitHub remote, `gh` never logged in), and
@@ -723,8 +726,8 @@ plugin never degrades silently. While the config is invalid, the worktree guard 
   ones are listed instead — the safe half of that trade. Such a branch then keeps its ref for
   good: once the worktree is gone the lane is never listed again, so delete it yourself with
   the `update-ref` line `/wt … done` printed. The reaper never kills a process by pid, and its
-  units point at a COPY under `<config-dir>/middle-management-reaper/`, so re-run setup step 6
-  after a plugin update.
+  units point at a COPY under `<config-dir>/middle-management-reaper/`, which the refresh hook
+  renews after a plugin update.
 - **There is no idle rule.** Deciding that a lane is idle means reading request lines out of
   its server's log, and the plugin cannot know what those look like; a unit nobody uses is
   caught by `reaperMaxHours` instead — later, but without guessing.
