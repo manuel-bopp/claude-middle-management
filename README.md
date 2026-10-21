@@ -264,7 +264,8 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
 - `prReview` (optional, 0.12.0): the PR review runner of setup step 10: `repos` (`owner/name`),
   `authors` (the allowlist; empty = it does nothing), `model` (`opus`), `securityModel` (`fable`,
   for a diff under `plugins/*/hooks/` or with `guard` in a path), `approve` (`false`),
-  `reviewerName` (`Mike`), `maxRounds` (`4`). See [Contributing and releases](#contributing-and-releases).
+  `reviewerName` (`Mike`), `maxRounds` (`4`), `base` (`main`; a pull request into any other
+  branch is not reviewed). See [Contributing and releases](#contributing-and-releases).
 - No config file = roles **plus the staging guard**: blanket staging is blocked out of the box,
   because sessions share a checkout long before anyone configures one. The worktree part is what
   stays completely silent. Working solo? `surgicalStaging: false` turns the guard off.
