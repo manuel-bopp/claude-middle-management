@@ -50,21 +50,32 @@ COORD=$(jq -r '.sessionId // empty' "$SIDE" 2>/dev/null)
 # lose. Never silently: the held turn becomes a line in failures.log, which t3-watch.py sends to the
 # user ("report lost"), and the session is told once. 30 min bounds a post whose thread never came.
 # ponytail: told by start time, not by thread id; 120 s slack for the POST answer arriving late.
+# After a refused claim (status "refused", 5th column = the claimer) only the refused morning thread
+# itself stays held for the day: the user already got the REFUSED notice through notifyCommand, so
+# its turns are not lost silently, and they never wake the night coordinator. Everyone else reports.
 MST="$SDIR/morning-t3/status"
 if [ -f "$MST" ]; then
-  IFS=$'\t' read -r MD MS MAT _ < "$MST"
+  IFS=$'\t' read -r MD MS MAT _ MBY _ < "$MST"
   case "$MAT" in ''|*[!0-9]*) MAT="" ;; esac
+  if [ "$MD" = "$(date +%F)" ] && [ "$MS" = refused ] && [ -n "${MBY:-}" ] && [ "$MBY" = "$SID" ]; then
+    RDIR="$CFG_DIR/state/t3-report"; mkdir -p "$RDIR" 2>/dev/null
+    [ "$(cat "$RDIR/$SID.held" 2>/dev/null)" = "refused $MD" ] && exit 0
+    printf 'refused %s\n' "$MD" > "$RDIR/$SID.held" 2>/dev/null
+    echo '{"systemMessage":"middle-management: your claim --morning was refused, so your turns are NOT sent to the night coordinator (your user got the REFUSED notice). Wait for your user in this thread."}'
+    exit 0
+  fi
   if [ -n "$MAT" ] && [ "$MD" = "$(date +%F)" ] && [ "$MS" = posted ] && [ $(( $(date +%s) - MAT )) -lt 1800 ] \
      && [ "$(stat -c %Y "$SIDE" 2>/dev/null || echo 0)" -lt "$MAT" ]; then
     SAT=$(cat "$CFG_DIR"/sessions/*.json 2>/dev/null \
       | jq -r --arg id "$SID" 'select(.sessionId == $id) | .startedAt | numbers' 2>/dev/null | head -1)
     if [ -n "$SAT" ] && [ $(( ${SAT%.*} / 1000 )) -ge $(( MAT - 120 )) ]; then
       RDIR="$CFG_DIR/state/t3-report"; mkdir -p "$RDIR" 2>/dev/null
-      HFROM=$(cat "$CFG_DIR"/sessions/*.json 2>/dev/null | jq -r --arg id "$SID" 'select(.sessionId == $id) | .name | strings' 2>/dev/null | head -1)
-      printf '%s\t%s\t%s\tunknown\theld: the morning thread has not claimed the seat yet, so this turn was not sent to the night coordinator; read it in that session\n' \
-        "$(date -Is)" "${HFROM:-session ${SID:0:8}}" "$SID" >> "$RDIR/failures.log" 2>/dev/null
+      # once per session and post (failures.log line + systemMessage): one "report lost" notify, not one per turn
       [ "$(cat "$RDIR/$SID.held" 2>/dev/null)" = "$MAT" ] && exit 0
       printf '%s\n' "$MAT" > "$RDIR/$SID.held" 2>/dev/null
+      HFROM=$(cat "$CFG_DIR"/sessions/*.json 2>/dev/null | jq -r --arg id "$SID" 'select(.sessionId == $id) | .name | strings' 2>/dev/null | head -1)
+      printf '%s\t%s\t%s\tunknown\theld: the morning thread has not claimed the seat yet, so its turns are not sent to the night coordinator until it claims (at most 30 min); read them in that session\n' \
+        "$(date -Is)" "${HFROM:-session ${SID:0:8}}" "$SID" >> "$RDIR/failures.log" 2>/dev/null
       echo '{"systemMessage":"middle-management: this turn was NOT sent to the coordinator: the morning thread has not claimed the seat yet (it would wake the night coordinator). Your user is told through the watcher; claim first if you are the morning thread."}'
       exit 0
     fi

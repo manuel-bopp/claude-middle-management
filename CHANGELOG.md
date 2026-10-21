@@ -61,6 +61,11 @@ consumed only by that claimer's `t3-bind`, and is dropped by any other claim and
 twin was unreachable, and names a later-deadline manual run in its cancel notice. `review-loop`: the
 "nothing new" stop is never clean.
 
+**Review round 2.** A refused `claim --morning` names its session in the status line; only that
+morning thread stays held for the day, so a refusal never wakes the night coordinator. The trigger
+also tries the relay when the local twin answers 404/405. A lost marker race records no outcome;
+a held session logs one "report lost" line per post, not one per turn.
+
 ## 0.11.0 - 2026-10-20
 
 **T3 Code mode.** Under T3 Code (`T3CODE_HOME` set) a thread's process ends after 30 minutes idle,

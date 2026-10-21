@@ -469,8 +469,8 @@ messaged: waking it would make it re-pay its whole context for a seat it is abou
    whose URL sits in `morningTaskUrlFile`; without `morningTakeover.allowed` it posts nothing and
    alarms instead (the thread could only be refused) (default `~/.config/t3-threads/morning-task-url`, mode 600,
    never printed; the local twin of a relay URL first, at `t3Url`). HTTP 202 = started. Anything
-   else → exit 1 with a cause file (the relay is tried only when the local twin could not be
-   reached at all: a reached twin may already have started the thread) → `OnFailure=unit-failure-alarm@%n.service`. State:
+   else → exit 1 with a cause file (the relay is tried after the local twin only when the twin
+   could not be reached or answered 404/405: any other answer may already have started the thread) → `OnFailure=unit-failure-alarm@%n.service`. State:
    `<seat dir>/morning-t3/status` (`<date> <posted|waiting|cancelled|failed> <epoch> <pid>`).
 2. **The webhook task** opens the thread. A script cannot create T3 tasks, so a T3 thread creates
    it once: `schedule_task` with `{"type": "webhook"}` and `bindToCurrentThread: false` (each request
@@ -497,7 +497,9 @@ messaged: waking it would make it re-pay its whole context for a seat it is abou
    as a notify, the `Keepalive` retry is skipped. The Stop hook (`hooks/t3-report.sh`) does not send
    the turn text of a session started after the post into that thread; the held turn becomes a line
    in `failures.log`, which the watcher sends to you as "report lost", and the session is told once.
-   A refused claim notifies you through `notifyCommand` and ends the hold at once.
+   A refused claim notifies you through `notifyCommand` and ends the hold for every other session;
+   the refused morning thread itself stays held for the day (it is named in the status line), so a
+   refusal never wakes the night coordinator.
 5. **Watchdog** (`morning-t3.sh --check`, `orch-morning-watchdog.timer`, weekdays 08:15 by
    default). Quiet when today the seat marker was written (a coordinator claimed it) AND the ritual
    window was stamped (`<seat dir>/morning-ritual/window`, ritual step 7), or when the trigger

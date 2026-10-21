@@ -274,6 +274,7 @@ mstat() { mkdir -p "$H/.claude/state/morning-t3"; printf '%s\tposted\t%s\t1\n' "
 g_note() { jq --arg n "cat >> $H/notes" '. + {notifyCommand: $n}' "$H/.claude/middle-management.json" > "$TMP/x"; cp "$TMP/x" "$H/.claude/middle-management.json"; }
 g_home "5 minutes ago"; g_note; mstat
 OUT=$(as_s "$H" m1 "$H" claim --morning); is "a refused morning claim -> status refused" "$(cut -f2 "$H/.claude/state/morning-t3/status")" refused
+is "...names the refused claimer (5th column)" "$(cut -f5 "$H/.claude/state/morning-t3/status")" sess-m1
 has "...the user is told" "morning takeover REFUSED" "$(cat "$H/notes" 2>/dev/null)"
 g_home "3 hours ago"; g_note; mstat
 OUT=$(as_s "$H" m1 "$H" claim --morning); is "a successful morning claim -> status claimed" "$(cut -f2 "$H/.claude/state/morning-t3/status")" claimed

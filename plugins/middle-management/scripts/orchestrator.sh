@@ -261,14 +261,17 @@ backfill() {
 # trigger's status <seat dir>/morning-t3/status says "posted" while its thread has not claimed, and
 # hooks/t3-report.sh and scripts/t3-watch.py hold every wake into the night coordinator meanwhile.
 # Every exit of claim --morning ends that hold (claimed / refused); a refusal also reaches the user,
-# because the night coordinator keeps the seat and the morning thread sits there waiting.
+# because the night coordinator keeps the seat and the morning thread sits there waiting. The refused
+# claimer's sessionId goes into the 5th column: t3-report.sh keeps holding that one session's turns
+# (the user already has the REFUSED notice), so the refusal does not wake the night coordinator.
+# A lost race (RACE LOST) writes nothing: the winner's claim records the outcome.
 morning_outcome() {
   local rc=$? f d st state cmd msg
   f="$(dirname "$MARKER")/morning-t3/status"
   IFS=$'\t' read -r d st _ < "$f" 2>/dev/null || return 0
-  [ "$d" = "$(date +%F)" ] && [ "$st" = posted ] || return 0
+  [ "$d" = "$(date +%F)" ] && [ "$st" = posted ] && [ -z "${RACE_LOST:-}" ] || return 0
   if [ "$rc" -eq 0 ]; then state=claimed; else state=refused; fi
-  printf '%s\t%s\t%s\t%s\n' "$d" "$state" "$(date +%s)" "$$" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$d" "$state" "$(date +%s)" "$$" "$MY_ID" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f"
   [ "$state" = refused ] || return 0
   cmd=$(jq -r '.notifyCommand // ""' "$(bash "$DIR/config-check.sh" file)" 2>/dev/null)
   msg="[$(hostname -s 2>/dev/null || echo host)] morning takeover REFUSED in \"$MY_NAME\" (claim --morning, exit $rc): the night coordinator keeps the seat. The morning thread shows why."
@@ -458,6 +461,7 @@ case "${1:-status}" in
     fi
     take_marker; TOOK=$?
     if [ "$TOOK" -eq 3 ]; then
+      RACE_LOST=1
       echo "RACE LOST: another session claimed the seat while this one was deciding — the marker"
       echo "now names $(held_id), not this session (\"$MY_NAME\"). This session is NOT the coordinator."
       echo "Check with 'bash $SELF status' and only claim again if your user still wants it here."

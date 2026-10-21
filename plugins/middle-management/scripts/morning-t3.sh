@@ -195,20 +195,24 @@ fi
 # has the local twin <t3Url>/api/hooks/<task>/<token> (t3-wake.sh, proven 2026-10-20).
 BASE="$(cfg '.t3Url // ""')"; [ -n "$BASE" ] || BASE="http://127.0.0.1:${T3CODE_PORT:-8470}"
 LOCAL=""
+RELAY="${MM_MORNING_RELAY_PREFIX:-https://relay.t3.codes/v1/hooks/}"   # test seam: a local stand-in for the relay
 case $URL in
-  https://relay.t3.codes/v1/hooks/*/*/*) R=${URL#https://relay.t3.codes/v1/hooks/}; LOCAL="${BASE%/}/api/hooks/${R#*/}" ;;
+  "$RELAY"*/*/*) R=${URL#"$RELAY"}; LOCAL="${BASE%/}/api/hooks/${R#*/}" ;;
 esac
 BODY="$(jq -cn --arg d "$TODAY" '{from: "morning-t3", date: $d}')"
 post() {  # $1 = url; prints "<HTTP code> <connect seconds>"; the URL is in no argv (printf is a builtin)
   curl -sS --connect-timeout 5 -m "${MM_MORNING_POST_TIMEOUT:-20}" -o /dev/null -w '%{http_code} %{time_connect}' \
     -K <(printf 'url = "%s"\n' "$1") -H 'content-type: application/json' --data-binary @- <<<"$BODY" 2>/dev/null
 }
-# The relay only when the local twin could not even be reached: once it was connected, the request
-# may have started a thread already, and a second POST would start a second one.
+# The relay after the local twin only when the twin cannot have started a thread: it could not be
+# reached at all, or it answered 404/405 (no such route here; the twin path is not verified live).
+# Any other answer from a reached twin (5xx, a read timeout) may have started one already, and a
+# second POST would start a second thread.
 CODE=""; WHERE=configured
 if [ -n "$LOCAL" ]; then
   read -r CODE TC <<<"$(post "$LOCAL")"; WHERE=local
-  if [ "$CODE" != 202 ] && awk -v t="${TC:-0}" 'BEGIN { exit !(t + 0 == 0) }'; then LOCAL=""; fi
+  if [ "$CODE" = 404 ] || [ "$CODE" = 405 ] \
+     || { [ "$CODE" != 202 ] && awk -v t="${TC:-0}" 'BEGIN { exit !(t + 0 == 0) }'; }; then LOCAL=""; fi
 fi
 [ -z "$LOCAL" ] && { read -r CODE _ <<<"$(post "$URL")"; WHERE=configured; }
 [ "$CODE" = 202 ] || fail "morning thread NOT started" "the T3 webhook task answered HTTP ${CODE:-000} via the $WHERE URL (expected 202)" \

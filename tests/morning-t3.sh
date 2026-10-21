@@ -38,7 +38,8 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         b = self.rfile.read(int(self.headers.get("content-length", 0)))
         open(os.path.join(D, "hook.log"), "ab").write(self.path.encode() + b" " + b + b"\n")
-        try: code = int(open(os.path.join(D, "hook.mode")).read().strip())
+        f = "hook.mode.local" if self.path.startswith("/api/") and os.path.exists(os.path.join(D, "hook.mode.local")) else "hook.mode"
+        try: code = int(open(os.path.join(D, f)).read().strip())
         except OSError: code = 202
         self.send_response(code); self.send_header("content-length", "0"); self.end_headers()
     def log_message(self, *a): pass
@@ -75,7 +76,7 @@ setup() {  # fresh config dir; $1 = extra JSON for the config
   jq -n --arg n "printf '%s\\n---\\n' \"\$1\" >> $NOTE" --arg u "$C/morning-url" --arg t "http://127.0.0.1:$PORT" \
     "{notifyCommand:\$n, morningTaskUrlFile:\$u, t3Url:\$t, morningTakeover:{allowed:true, okBy:\"Alex, 2026-10-21\"}} + ${1:-{\}}" > "$C/middle-management.json"
   (umask 077; printf '%s\n' "$URL" > "$C/morning-url")
-  echo ok > "$TMP/probe.plan"; rm -f "$TMP/probe.n" "$TMP/probe.log" "$TMP/hook.log" "$TMP/hook.mode"
+  echo ok > "$TMP/probe.plan"; rm -f "$TMP/probe.n" "$TMP/probe.log" "$TMP/hook.log" "$TMP/hook.mode" "$TMP/hook.mode.local"
 }
 trig() {  # extra VAR=value args
   env PATH="$BIN:$PATH" HOME="$TMP/home" CLAUDE_CONFIG_DIR="$C" MM_MORNING_UNIT=orch-morning-t3.service \
@@ -117,6 +118,18 @@ OUT=$(trig); RC=$?; ALL="$ALL$OUT"
 is "local twin reached, HTTP 500 -> exit 1" "$RC" 1
 has "...names the local URL" "HTTP 500 via the local URL" "$(cause orch-morning-t3.service)"
 is "...one POST only (no relay retry, no second thread)" "$(grep -c "^/api/hooks/" "$TMP/hook.log")" 1
+# the local twin answers 404 (no such route here) or cannot be reached -> the relay URL (a local stand-in)
+RP="http://127.0.0.1:$PORT/relay/v1/hooks/"
+setup; (umask 077; printf '%senv-1/task-r/%s\n' "$RP" "$SECRET" > "$C/morning-url"); echo 404 > "$TMP/hook.mode.local"
+OUT=$(trig MM_MORNING_RELAY_PREFIX="$RP"); RC=$?; ALL="$ALL$OUT"
+is "local twin 404 -> relay -> exit 0" "$RC" 0
+is "...first the twin, then the relay" "$(grep -o '^/[a-z]*/' "$TMP/hook.log" | tr '\n' ' ')" "/api/ /relay/ "
+setup; (umask 077; printf '%senv-1/task-r/%s\n' "$RP" "$SECRET" > "$C/morning-url")
+CLOSED=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+jq --arg t "http://127.0.0.1:$CLOSED" '.t3Url = $t' "$C/middle-management.json" > "$C/x" && mv "$C/x" "$C/middle-management.json"
+OUT=$(trig MM_MORNING_RELAY_PREFIX="$RP"); RC=$?; ALL="$ALL$OUT"
+is "local twin unreachable -> relay -> exit 0" "$RC" 0
+is "...one POST, to the relay" "$(grep -o '^/[a-z]*/' "$TMP/hook.log" | tr '\n' ' ')" "/relay/ "
 # no takeover word -> alarm, no probe, no POST
 setup '{"morningTakeover":{"allowed":false}}'
 OUT=$(trig); RC=$?; ALL="$ALL$OUT"
@@ -231,6 +244,11 @@ stop sess-m; has "a held turn becomes a failures.log line (the watcher tells the
 printf '{"pid":3,"sessionId":"sess-w2","kind":"interactive","cwd":"/x","name":"late worker","startedAt":%s}\n' "$((NOWS * 1000))" > "$CD/sessions/3.json"
 printf '%s\trefused\t%s\t1\n' "$(date +%F)" "$NOWS" > "$CD/state/morning-t3/status"
 stop sess-w2; has "claim refused -> a worker started after the post reports again" "REFUSED: something" "$(cat "$TMP/hook.log" 2>/dev/null)"
+printf '%s\trefused\t%s\t1\tsess-m\n' "$(date +%F)" "$NOWS" > "$CD/state/morning-t3/status"; rm -f "$CD/state/t3-report/"sess-*
+stop sess-m; [ -e "$TMP/hook.log" ] && bad "the refused morning thread itself stays held (no wake into the night coordinator)" none "$(cat "$TMP/hook.log")" || ok "the refused morning thread itself stays held (no wake into the night coordinator)"
+OUT=$(jq -n '{session_id:"sess-m", last_assistant_message:"another turn"}' | HOME="$H" CLAUDE_CONFIG_DIR="" T3CODE_HOME="$H/.t3" CLAUDE_PLUGIN_ROOT="$P" T3CODE_PORT=1 bash "$P/hooks/t3-report.sh" 2>&1)
+is "...told once per day, then quiet" "$OUT" ""
+stop sess-w2; has "...every other session reports" "REFUSED: something" "$(cat "$TMP/hook.log" 2>/dev/null)"
 printf '%s\tclaimed\t%s\t1\n' "$(date +%F)" "$NOWS" > "$CD/state/morning-t3/status"; rm -f "$CD/state/t3-report/sess-w2"
 stop sess-w2; has "claimed (not bound yet) -> no hold" "REFUSED: something" "$(cat "$TMP/hook.log" 2>/dev/null)"
 printf '%s\tposted\t%s\t1\n' "$(date +%F)" "$((NOWS - 2400))" > "$CD/state/morning-t3/status"; rm -f "$CD/state/t3-report/sess-w2"
