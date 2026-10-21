@@ -82,7 +82,7 @@ APPROVE="$(cfg '.prReview.approve // false')"; WHO="$(cfg '.prReview.reviewerNam
 MAXR="$(cfg '.prReview.maxRounds // 4 | floor')"; ASK="$(cfg '.userName // "user"')"
 
 mkdir -p "$ST" || fail "cannot create $ST" "check the permissions of $CFG_DIR/state"
-exec 9>"$ST/.lock"
+exec 9>"$ST/.lock" || fail "cannot open $ST/.lock" "check the permissions of $ST"
 flock -n 9 || { echo "pr-review: another run holds $ST/.lock"; exit 0; }
 RUN="$(mktemp -d "${TMPDIR:-/tmp}/mm-pr-review.XXXXXX")" || fail "cannot create a scratch dir under ${TMPDIR:-/tmp}"
 trap 'rm -rf "$RUN"' EXIT
@@ -93,7 +93,8 @@ trap 'rm -rf "$RUN"' EXIT
 # escalated: maxRounds reached with findings (only removing the file resumes); merged: the merged sha.
 SF=""; R=""; N=""; SHA=""; URL=""
 sget() { jq -r "$1" "$SF" 2>/dev/null; }
-sput() { jq "$@" "$SF" > "$SF.tmp" && mv -f "$SF.tmp" "$SF"; }
+# A state write that fails ends the run loudly: unrecorded, the same head would be reviewed every tick.
+sput() { jq "$@" "$SF" > "$SF.tmp" && mv -f "$SF.tmp" "$SF" || fail "cannot write $SF" "free space and permissions of $ST"; }
 
 err() {  # $1 = what went wrong: nothing posted, nothing merged, the sha stays unreviewed
   local n
@@ -123,9 +124,9 @@ review() {  # $1 = one PR as JSON (an element of gh pr list)
   AUTHOR="$(jq -r '.author.login // ""' <<<"$pr")"; FORK="$(jq -r '.isCrossRepository' <<<"$pr")"
   TITLE="$(jq -r '.title // ""' <<<"$pr")"; BODY="$(jq -r '.body // ""' <<<"$pr")"
   HREF="$(jq -r '.headRefName // ""' <<<"$pr")"; BASE="$(jq -r '.baseRefName // ""' <<<"$pr")"
-  SF="$RD/$N.json"; [ -s "$SF" ] || printf '{}\n' > "$SF"
+  SF="$RD/$N.json"; [ -s "$SF" ] || printf '{}\n' > "$SF" || fail "cannot write $SF" "free space and permissions of $ST"
   if ! jq -e 'type == "object"' "$SF" >/dev/null 2>&1; then   # a broken file would re-review every tick
-    mv -f "$SF" "$SF.bad"; printf '{}\n' > "$SF"
+    { mv -f "$SF" "$SF.bad" && printf '{}\n' > "$SF"; } || fail "cannot replace the unreadable $SF" "free space and permissions of $ST"
     notify "[$HOST] PR review state of $R #$N was unreadable: moved to $SF.bad, the PR starts over at round 1
 $URL"
   fi
@@ -308,6 +309,6 @@ for R in "${REPOS[@]}"; do
   mapfile -t PRS < <(jq -c '.[] | select(.isDraft != true)' <<<"$LIST")
   for PR in "${PRS[@]}"; do review "$PR"; done
 done
-[ -n "$GHFAIL" ] && fail "$GHFAIL" "gh auth status (the unit runs as you), then: systemctl --user start mm-pr-review.service"
+[ -n "$GHFAIL" ] && fail "$GHFAIL${LOST:+; notifications not delivered: $LOST}" "gh auth status (the unit runs as you), then: systemctl --user start mm-pr-review.service"
 [ -n "$LOST" ] && fail "notifications not delivered: $LOST" "check notifyCommand and notifyFallbackCommand (/middle-management-setup)"
 echo "pr-review: done"

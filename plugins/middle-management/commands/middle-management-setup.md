@@ -705,8 +705,9 @@ systemctl --user list-timers mm-pr-review.timer --no-pager
 Then tell the user, in plain text: state per pull request lives in
 `<config dir>/state/pr-review/<owner>_<repo>/<number>.json`; a pull request that reached
 `maxRounds` with findings is not reviewed again until that file is removed (`rm` it once the
-findings are dealt with, and the next tick starts over at round 1); test and review time limits are
-`Environment=MM_PR_REVIEW_TESTS_MIN=` / `MM_PR_REVIEW_TIMEOUT_MIN=` lines in
-`~/.config/systemd/user/mm-pr-review.service` (defaults 15 / 20 minutes); the copy is refreshed at
+findings are dealt with, and the next tick starts over at round 1); test and review time limits and
+the per-tick budget are `Environment=MM_PR_REVIEW_TESTS_MIN=` / `MM_PR_REVIEW_TIMEOUT_MIN=` /
+`MM_PR_REVIEW_BUDGET_MIN=` lines in `~/.config/systemd/user/mm-pr-review.service` (defaults 15 / 20 /
+80 minutes); the copy is refreshed at
 the first session start after a plugin update (re-run this step only when the CHANGELOG says so).
 Disarm with `systemctl --user disable --now mm-pr-review.timer`; never run that here unasked.

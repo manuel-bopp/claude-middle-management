@@ -278,6 +278,12 @@ setup; jq '.[0].headRefOid = "nope"' <<<"$(pr 1 clean; cat "$FIX/prs.json")" > "
 OUT=$(run); is "a PR without a usable head sha -> exit 1" "$?" 1
 has "...the cause says so" "acme/tools #1: no usable head sha" "$(cause)"
 
+setup; pr 2 nobump; mkdir -p "$C/state/pr-review/acme_tools"; chmod 555 "$C/state/pr-review/acme_tools"
+OUT=$(run); is "the state cannot be written -> exit 1" "$?" 1
+has "...the cause says so" "cannot write $C/state/pr-review/acme_tools/2.json" "$(cause)"
+is "...nothing reviewed" "$(cat "$FIX/claude.n" 2>/dev/null)" ""
+chmod 755 "$C/state/pr-review/acme_tools"
+
 echo "== L: lost notify =="
 setup; jq '.notifyCommand = "exit 1"' "$C/middle-management.json" > "$C/x" && mv "$C/x" "$C/middle-management.json"
 pr 1 docs bob
