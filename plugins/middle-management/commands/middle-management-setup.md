@@ -211,8 +211,7 @@ repositories; the user names them.
     must exist, must differ from every other root (nesting is fine, the longest
     root wins); `name` = basename of the root unless the user picks one (letters,
     digits, `-`, `_`; not `default`; unique); `board` = absolute path, required;
-    offer to create a missing board file with a title line. Where the headless ritual
-    is installed, re-run step 7 afterwards so its copy gets `scope.py`. Explain the rule in
+    offer to create a missing board file with a title line. Explain the rule in
     two sentences: a session belongs to the scope of the directory it was started
     in (a linked worktree counts as the same subpath of its main checkout), every
     other session to the scope `default`; a scope gets a coordinator only when one

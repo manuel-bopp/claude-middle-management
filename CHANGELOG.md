@@ -40,6 +40,13 @@ ask `userName` and stop until the PR's state file is removed. Forks and other au
 reviewed" notice per head and are never reviewed or merged. New matrices `tests/refresh-copies.sh`,
 `tests/pr-review-watch.sh`.
 
+**Review fixes.** The stamp is written through its own tmp name (two sessions starting at once on a
+host without copy dirs reported a false failure). The runner keys its scratch dir by repo and number,
+does not version-gate a deleted plugin dir, moves an unreadable state file aside (notify) instead of
+re-reviewing every tick, reads `maxRounds` as a whole number, sends a PR without a usable number or
+head sha to the alarm, stamps a clean head reviewed only after the merge attempt (a tick killed in
+between reviews it again), and starts no new head after `MM_PR_REVIEW_BUDGET_MIN` (80) minutes.
+
 **Upgrade.** No setup re-run is needed for 0.12.0: no existing unit template changed, and the first
 session start on 0.12.0 refreshes every installed copy, also ones left by an older release. A host
 that skipped an older release whose entry asked for a setup re-run still owes that re-run once.

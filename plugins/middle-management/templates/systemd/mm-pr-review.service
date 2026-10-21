@@ -8,7 +8,8 @@
 # that finds gh, git, jq, claude, timeout and flock are written in here. gh uses the login of the user
 # the unit runs as.
 # TimeoutStartSec: per new head, the tests (MM_PR_REVIEW_TESTS_MIN, 15) plus the model review
-# (MM_PR_REVIEW_TIMEOUT_MIN, 20); a tick still running when the timer fires again is not started twice.
+# (MM_PR_REVIEW_TIMEOUT_MIN, 20); no new head starts after MM_PR_REVIEW_BUDGET_MIN (80), so one more
+# head still fits. A tick still running when the timer fires again is not started twice.
 [Unit]
 Description=middle-management: PR review runner tick
 OnFailure=unit-failure-alarm@%n.service

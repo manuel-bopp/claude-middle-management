@@ -9,7 +9,8 @@
 #      reviewer's tools, safe mode, cwd and prompt; the scratch dir is gone
 #   D  version gate   E  red tests   F  FINDINGS verdict   G  garbage verdict / failed call -> error,
 #      no post, retry, give up after 3   H  maxRounds -> escalation until the state file is removed
-#   I  approve: true   J  security model   K  post / merge failures   L  lost notify
+#   I  approve: true   J  security model   K  post / merge failures, a tick killed mid-merge, the time
+#      budget, an unreadable state file, a PR without a usable head sha   L  lost notify
 #   M  templates and config shape   Z  no em dash in the new files
 set -uo pipefail
 
@@ -67,7 +68,9 @@ case "$1 $2" in
                while [ $# -gt 0 ]; do case $1 in --body-file) body=$2; shift ;; --comment|--approve|--request-changes) kind=$1 ;; esac; shift; done
                [ -f "$FIX/review.fail" ] && { echo "HTTP 422: review refused" >&2; exit 1; }
                echo "$n $kind" >> "$FIX/reviews.log"; cp "$body" "$FIX/body.last" ;;
-  "pr merge")  printf '%s\n' "$*" >> "$FIX/merges.log"; [ -f "$FIX/merge.fail" ] && { echo "Pull request is not mergeable" >&2; exit 1; }; exit 0 ;;
+  "pr merge")  printf '%s\n' "$*" >> "$FIX/merges.log"
+               [ -f "$FIX/merge.kill" ] && { rm -f "$FIX/merge.kill"; kill -KILL "$PPID"; exit 1; }   # the tick dies here
+               [ -f "$FIX/merge.fail" ] && { echo "Pull request is not mergeable" >&2; exit 1; }; exit 0 ;;
   *) echo "unexpected: gh $*" >&2; exit 2 ;;
 esac
 STUB
@@ -92,7 +95,7 @@ setup() {  # fresh config dir and fixture logs; $1 = extra JSON merged into prRe
   C=$(mktemp -d -p "$TMP"); NOTE=$C/notified; mkdir -p "$C/state"
   jq -n --arg n "printf '%s\\n---\\n' \"\$1\" >> $NOTE" --argjson x "${1:-{\}}" \
     '{notifyCommand: $n, userName: "Manu", prReview: ({repos: ["acme/tools"], authors: ["alice"]} + $x)}' > "$C/middle-management.json"
-  rm -f "$FIX"/{gh.log,reviews.log,merges.log,body.last,claude.*,list.fail,review.fail,merge.fail}
+  rm -f "$FIX"/{gh.log,reviews.log,merges.log,body.last,claude.*,list.fail,review.fail,merge.fail,merge.kill}
   echo '[]' > "$FIX/prs.json"
 }
 pr() {  # $1 = number, $2 = branch, [$3 = author, $4 = fork, $5 = draft]: the open PR list
@@ -114,7 +117,7 @@ OUT=$(run); is "an empty allowlist -> exit 0" "$?" 0; has "...says so" "nothing 
 is "...gh never called" "$(cat "$FIX/gh.log" 2>/dev/null)" ""
 setup; pr 1 clean; touch "$FIX/list.fail"
 OUT=$(run); is "gh pr list fails -> exit 1" "$?" 1
-has "...the cause file names it" "gh pr list failed: acme/tools: HTTP 401" "$(cause)"
+has "...the cause file names it" "acme/tools: gh pr list failed: HTTP 401" "$(cause)"
 
 echo "== B: skips =="
 setup; pr 1 docs alice false true
@@ -229,6 +232,11 @@ OUT=$(run); is "state file removed -> reviewed again" "$(cat "$FIX/claude.n")" 3
 has "...from round 1" "round 1" "$(head -1 "$FIX/body.last")"
 has "...and merged when clean" "--match-head-commit $(sha clean)" "$(cat "$FIX/merges.log")"
 
+setup '{"maxRounds": 2.0}'; pr 2 nobump
+OUT=$(run); has "maxRounds 2.0 -> the round reads 2" "(round 1 of 2)" "$(notes)"
+pr 2 nobump2
+OUT=$(run); has "...and escalates" "PR needs Manu" "$(notes)"
+
 echo "== I: approve: true =="
 setup '{"approve": true}'; pr 1 clean
 OUT=$(run); is "CLEAN -> --approve" "$(cat "$FIX/reviews.log")" "1 --approve"
@@ -252,6 +260,23 @@ setup; pr 1 clean; touch "$FIX/merge.fail"
 OUT=$(run); has "clean but the merge fails -> told" "PR clean but NOT merged: acme/tools #1" "$(notes)"
 has "...with the reason" "not mergeable" "$(notes)"
 OUT=$(run); is "...not retried every tick" "$(wc -l < "$FIX/merges.log")" 1
+
+setup; pr 1 clean; touch "$FIX/merge.kill"
+OUT=$(run); is "the tick is killed during the merge -> nothing merged yet" "$(grep -c . "$FIX/merges.log")" 1
+lacks "...the clean head is not stamped reviewed" "reviewed" "$(state 1)"
+OUT=$(run); is "...the next tick reviews it again and merges" "$(wc -l < "$FIX/reviews.log")" 2
+has "...merged" "PR merged by Mike: acme/tools #1" "$(notes)"
+setup; pr 1 clean; OUT=$(run MM_PR_REVIEW_BUDGET_MIN=0)
+has "the time budget is used up -> the head waits for the next tick" "time budget used up" "$OUT"
+is "...not cloned" "$(count 'repo clone' "$FIX/gh.log")" 0
+setup; pr 1 clean; mkdir -p "$C/state/pr-review/acme_tools"; echo 'not json' > "$C/state/pr-review/acme_tools/1.json"
+OUT=$(run); has "an unreadable state file -> told, moved aside" "state of acme/tools #1 was unreadable" "$(notes)"
+is "...kept as .bad" "$(cat "$C/state/pr-review/acme_tools/1.json.bad")" "not json"
+is "...reviewed once" "$(wc -l < "$FIX/reviews.log")" 1
+OUT=$(run); is "...and not again" "$(wc -l < "$FIX/reviews.log")" 1
+setup; jq '.[0].headRefOid = "nope"' <<<"$(pr 1 clean; cat "$FIX/prs.json")" > "$FIX/prs.x" && mv "$FIX/prs.x" "$FIX/prs.json"
+OUT=$(run); is "a PR without a usable head sha -> exit 1" "$?" 1
+has "...the cause says so" "acme/tools #1: no usable head sha" "$(cause)"
 
 echo "== L: lost notify =="
 setup; jq '.notifyCommand = "exit 1"' "$C/middle-management.json" > "$C/x" && mv "$C/x" "$C/middle-management.json"

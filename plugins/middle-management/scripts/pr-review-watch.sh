@@ -29,7 +29,8 @@
 # The merge is decided HERE from the verdict line, the tests and the gate, never from PR text. Never
 # pushes, never edits the PR branch, never merges a fork or an author outside the allowlist.
 # Env (optional): MM_PR_REVIEW_UNIT (the unit name, for the cause file), MM_PR_REVIEW_TESTS_MIN (15),
-#   MM_PR_REVIEW_TIMEOUT_MIN (20, the model review), MM_PR_REVIEW_EFFORT (xhigh; empty = CLI default).
+#   MM_PR_REVIEW_TIMEOUT_MIN (20, the model review), MM_PR_REVIEW_EFFORT (xhigh; empty = CLI default),
+#   MM_PR_REVIEW_BUDGET_MIN (80: no new head is started after that many minutes of one tick).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -78,7 +79,7 @@ if [ "${#REPOS[@]}" -eq 0 ] || [ -z "$AUTHORS" ]; then
 fi
 MODEL="$(cfg '.prReview.model // "opus"')"; SECMODEL="$(cfg '.prReview.securityModel // "fable"')"
 APPROVE="$(cfg '.prReview.approve // false')"; WHO="$(cfg '.prReview.reviewerName // "Mike"')"
-MAXR="$(cfg '.prReview.maxRounds // 4')"; ASK="$(cfg '.userName // "user"')"
+MAXR="$(cfg '.prReview.maxRounds // 4 | floor')"; ASK="$(cfg '.userName // "user"')"
 
 mkdir -p "$ST" || fail "cannot create $ST" "check the permissions of $CFG_DIR/state"
 exec 9>"$ST/.lock"
@@ -116,12 +117,18 @@ review() {  # $1 = one PR as JSON (an element of gh pr list)
   local pr="$1" AUTHOR FORK TITLE BODY HREF BASE W CO CHANGED p pj new old VERS="" GATE=ok TESTS T M
   local CR RES LAST V TEXT ROUND OK=no KIND RERUN
   N="$(jq -r .number <<<"$pr")"; SHA="$(jq -r .headRefOid <<<"$pr")"; URL="$(jq -r '.url // ""' <<<"$pr")"
-  case "$N" in ''|*[!0-9]*) echo "pr-review: $R: a PR without a usable number, skipped" >&2; return ;; esac
-  [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "pr-review: $R #$N: no usable head sha, skipped" >&2; return; }
+  # A PR gh describes without a usable number or head sha is never reviewed: say so through the alarm.
+  case "$N" in ''|*[!0-9]*) GHFAIL="${GHFAIL:+$GHFAIL; }$R: a PR without a usable number"; return ;; esac
+  [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { GHFAIL="${GHFAIL:+$GHFAIL; }$R #$N: no usable head sha"; return; }
   AUTHOR="$(jq -r '.author.login // ""' <<<"$pr")"; FORK="$(jq -r '.isCrossRepository' <<<"$pr")"
   TITLE="$(jq -r '.title // ""' <<<"$pr")"; BODY="$(jq -r '.body // ""' <<<"$pr")"
   HREF="$(jq -r '.headRefName // ""' <<<"$pr")"; BASE="$(jq -r '.baseRefName // ""' <<<"$pr")"
   SF="$RD/$N.json"; [ -s "$SF" ] || printf '{}\n' > "$SF"
+  if ! jq -e 'type == "object"' "$SF" >/dev/null 2>&1; then   # a broken file would re-review every tick
+    mv -f "$SF" "$SF.bad"; printf '{}\n' > "$SF"
+    notify "[$HOST] PR review state of $R #$N was unreadable: moved to $SF.bad, the PR starts over at round 1
+$URL"
+  fi
 
   [ "$(sget '.escalated // false')" = true ] && { echo "pr-review: $R #$N waits for $ASK (rm $SF to resume)"; return; }
   if [ "$FORK" != false ] || ! grep -qxF -- "$AUTHOR" <<<"$AUTHORS"; then
@@ -135,6 +142,11 @@ $URL"
   fi
   [ "$(sget '.reviewed // ""')" = "$SHA" ] && return
   [ "$(sget '.gaveUp // ""')" = "$SHA" ] && return
+  # ponytail: a time budget instead of a queue: a head left over waits for the next tick, so a tick
+  # never runs into the unit's TimeoutStartSec (2h) in the middle of a merge.
+  if [ "$SECONDS" -ge $(( ${MM_PR_REVIEW_BUDGET_MIN:-80} * 60 )) ]; then
+    echo "pr-review: time budget used up, $R #$N waits for the next tick"; return
+  fi
   echo "pr-review: $R #$N head ${SHA:0:7}: reviewing"
 
   W="$RUN/$(printf '%s' "$R" | tr '/' '_')-$N"; CO="$W/repo"; mkdir -p "$W/home"   # per repo AND number
@@ -245,13 +257,13 @@ EOF
   if [ "$APPROVE" = true ]; then [ "$OK" = yes ] && KIND=--approve || KIND=--request-changes; fi
   gh pr review "$N" --repo "$R" "$KIND" --body-file "$W/body.md" > "$W/post.log" 2>&1 </dev/null \
     || { err "posting the review failed: $(tail -c 300 "$W/post.log")"; return; }
-  sput --arg s "$SHA" --argjson r "$ROUND" '.reviewed = $s | .round = $r | del(.errSha, .errors)'
 
-  # e. merge, or ask.
+  # e. merge, or ask. A clean head is stamped reviewed only AFTER the merge attempt: a tick killed in
+  # between reviews it again next time instead of skipping a clean, unmerged PR for good.
   if [ "$OK" = yes ]; then
     if gh pr merge "$N" --repo "$R" --merge --match-head-commit "$SHA" \
          --subject "Merge $HREF: $TITLE (#$N, reviewed by $WHO)" > "$W/merge.log" 2>&1 </dev/null; then
-      sput --arg s "$SHA" '.merged = $s'
+      sput --arg s "$SHA" --argjson r "$ROUND" '.reviewed = $s | .round = $r | .merged = $s | del(.errSha, .errors)'
       # the convention (README "Contributing and releases"): a line of the entry starts with it
       RERUN="$(git -C "$CO" diff "origin/$BASE...$SHA" -- CHANGELOG.md | grep -E '^\+[-*[:space:]]*Re-run setup step' \
                | sed 's/^+[-*[:space:]]*//' | cut -c1-300 | head -3)"
@@ -262,13 +274,17 @@ $URL
 Active on each host from the second session start after the merge, or /reload-plugins.${RERUN:+
 $RERUN}"
     else
+      sput --arg s "$SHA" --argjson r "$ROUND" '.reviewed = $s | .round = $r | del(.errSha, .errors)'
       notify "[$HOST] PR clean but NOT merged: $R #$N
 $TITLE
 $(tail -c 300 "$W/merge.log")
 Merge it by hand, or rm $SF so the next run reviews it again.
 $URL"
     fi
-  elif [ "$ROUND" -ge "$MAXR" ]; then
+    return
+  fi
+  sput --arg s "$SHA" --argjson r "$ROUND" '.reviewed = $s | .round = $r | del(.errSha, .errors)'
+  if [ "$ROUND" -ge "$MAXR" ]; then
     sput '.escalated = true'
     notify "[$HOST] PR needs $ASK: $R #$N still has findings after $ROUND review rounds
 $TITLE
@@ -286,12 +302,12 @@ for R in "${REPOS[@]}"; do
   LIST="$(gh pr list --repo "$R" --state open --limit 100 \
           --json number,title,body,url,headRefName,headRefOid,baseRefName,author,isCrossRepository,isDraft \
           2> "$RUN/list.err" </dev/null)" && jq -e 'type == "array"' <<<"$LIST" >/dev/null 2>&1 \
-    || { GHFAIL="${GHFAIL:+$GHFAIL; }$R: $(tail -c 300 "$RUN/list.err" | tr '\n' ' ')"; continue; }
+    || { GHFAIL="${GHFAIL:+$GHFAIL; }$R: gh pr list failed: $(tail -c 300 "$RUN/list.err" | tr '\n' ' ')"; continue; }
   RD="$ST/$(printf '%s' "$R" | tr '/' '_')"
   mkdir -p "$RD" || fail "cannot create $RD"
   mapfile -t PRS < <(jq -c '.[] | select(.isDraft != true)' <<<"$LIST")
   for PR in "${PRS[@]}"; do review "$PR"; done
 done
-[ -n "$GHFAIL" ] && fail "gh pr list failed: $GHFAIL" "gh auth status (the unit runs as you), then: systemctl --user start mm-pr-review.service"
+[ -n "$GHFAIL" ] && fail "$GHFAIL" "gh auth status (the unit runs as you), then: systemctl --user start mm-pr-review.service"
 [ -n "$LOST" ] && fail "notifications not delivered: $LOST" "check notifyCommand and notifyFallbackCommand (/middle-management-setup)"
 echo "pr-review: done"
