@@ -735,9 +735,10 @@ session log is the one file that is NOT per project: its skeleton sits beside th
    (`hooks/refresh-copies.sh`, see [Install](#install)). No unit is restarted, no running session is touched; a
    release that changed a unit template still needs its "re-run setup step N".
 
-**A central stock of your own (optional).** Shared infrastructure, tools and skills may be
+**A centrally maintained stock (optional).** Shared infrastructure, tools and skills may be
 maintained centrally by a maintainer. With `centralMaintainer` in the config, a session whose
-change belongs in one of its `repos` opens a pull request there (on a branch, never `main`), with
+change belongs in one of its `repos` pushes a branch there (never `main` itself) and opens a pull
+request from it, with
 `--reviewer <reviewer>` when that is set, names the maintainer in the pull request's text, and fixes
 what the maintainer finds; it never merges that pull request itself. Without the key the plugin
 says nothing about it.

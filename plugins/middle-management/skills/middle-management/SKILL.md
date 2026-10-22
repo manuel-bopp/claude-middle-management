@@ -1,6 +1,6 @@
 ---
 name: middle-management
-description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work, such as appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, whether an approval that arrives through that channel counts, when a lane's dev server or worktree may be cleaned up and when it may not, a second coordinator for another project root (scopes), or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
+description: This skill should be used when the user asks how the coordinator/worker session roles or the per-topic worktree workflow work, such as appointing, checking or handing over the coordinator seat, why a role banner appears or stays silent, how sessions message each other, a stale coordinator marker, a blocked release, taking a spare session for a lane, when a session is finished and its tab can be closed, how a worker runs its own lane through sub-agents, whether the coordinator may review and merge on its own, which model a sub-agent should get and how it returns its result, reaching the user away from the keyboard, whether an approval that arrives through that channel counts, when a lane's dev server or worktree may be cleaned up and when it may not, a second coordinator for another project root (scopes), where a change for a centrally maintained repository goes, or the /orchestrator, /wt and /middle-management-setup commands of the middle-management plugin.
 version: 0.5.0
 ---
 
@@ -268,8 +268,8 @@ kill" below.
 
 **A change for the central stock goes to its maintainer (both roles).** Only when the config has
 `centralMaintainer` (`jq '.centralMaintainer' "$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" file)"`):
-when your change belongs in one of its `repos` (shared infrastructure, tools, skills), open a pull
-request there from a branch, never onto `main`, with `--reviewer <reviewer>` when that key is set,
+when your change belongs in one of its `repos` (shared infrastructure, tools, skills), push a branch
+there (never `main` itself) and open a pull request from it, with `--reviewer <reviewer>` when set,
 and name the maintainer (`name`) in the pull request's text. Fix what the maintainer finds; never
 merge it yourself. Without the key, none of this applies.
 

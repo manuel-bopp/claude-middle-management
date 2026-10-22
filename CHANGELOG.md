@@ -18,11 +18,12 @@ Without the key the plugin says nothing about it.
 
 **Hosts that run the runner.** The refresh hook only walks the sets of `scripts/copy-sets.json`, so
 `<config dir>/middle-management-prreview/` and `mm-pr-review.timer` stay as they are and keep
-running the 0.12.1 copy, which reads `prReview` (setup keeps that key on a re-run). Once the
-maintainer's own runner replaces it: `systemctl --user disable --now mm-pr-review.timer`, check that
-`grep middle-management-prreview ~/.config/systemd/user/unit-failure-alarm@.service` finds nothing
-(otherwise point that line at another installed copy dir, every set carries the alarm script, and
-`systemctl --user daemon-reload`), then remove the dir.
+running the 0.12.1 copy, which reads `prReview` (setup keeps that key on a re-run). One check now:
+`grep middle-management-prreview ~/.config/systemd/user/unit-failure-alarm@.service`. A hit means
+every unit's alarm runs from that dir, which no refresh updates any more: re-run the install block
+of any other installed setup step (5-9), each rewrites the alarm unit to its own copy. Once the
+maintainer's own runner replaces it: `systemctl --user disable --now mm-pr-review.timer`, then
+remove the dir (and, when the grep still hits because no other step is installed, the alarm unit).
 
 ## 0.12.1 - 2026-10-22
 

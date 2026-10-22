@@ -97,10 +97,11 @@ validate() {
     # 0.13.0 (README "Contributing and releases"): who maintains the central stock. name and at least
     # one "owner/name" repo; reviewer is a GitHub login. No unknown-key rejection anywhere in this
     # filter, so an old prReview key (0.12.x) stays harmless.
-    and ((.centralMaintainer // {"name": "x", "repos": ["o/r"]}) | (type == "object")
+    # null checks, not `//`: that would let a `false` through as "absent".
+    and (.centralMaintainer | . == null or ((type == "object")
           and (.name | type == "string" and test("\\S"))
           and (.repos | type == "array" and length > 0 and all(type == "string" and test("\\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\z")))
-          and ((.reviewer // "x") | type == "string" and test("\\A[A-Za-z0-9][A-Za-z0-9-]*\\z")))
+          and (.reviewer | . == null or (type == "string" and test("\\A[A-Za-z0-9][A-Za-z0-9-]*\\z")))))
     # t3Url: the base URL of the T3 server (watcher, t3-token.sh); a plain http(s) URL, nothing else.
     and ((.t3Url // "http://x") | (type == "string" and test("\\Ahttps?://[^\\s\"]+\\z")))
     and ((.protectedCheckouts // []) | (type == "array") and all(

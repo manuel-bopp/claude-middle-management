@@ -1218,7 +1218,7 @@ for c in '"127.0.0.1:8470"' '"http://a b"' '5' '"http://x\"y"'; do
   [ "$(vcfg "{\"t3Url\":$c}")" = 1 ] && ok "S2 invalid t3Url: $c" || bad "S2 invalid t3Url: $c"
 done
 [ "$(vcfg '{"t3Url":"http://127.0.0.1:8470"}')" = 0 ] && ok "S2 t3Url http://127.0.0.1:8470 is valid" || bad "S2 t3Url valid"
-for c in '"x"' '{"repos":["o/r"]}' '{"name":" ","repos":["o/r"]}' '{"name":"M"}' '{"name":"M","repos":[]}' \
+for c in '"x"' 'false' '{"name":"M","repos":["o/r"],"reviewer":false}' '{"repos":["o/r"]}' '{"name":" ","repos":["o/r"]}' '{"name":"M"}' '{"name":"M","repos":[]}' \
          '{"name":"M","repos":["no-slash"]}' '{"name":"M","repos":["o/r"],"reviewer":"a b"}' '{"name":"M","repos":["o/r"],"reviewer":5}'; do
   [ "$(vcfg "{\"centralMaintainer\":$c}")" = 1 ] && ok "S2 invalid centralMaintainer: $c" || bad "S2 invalid centralMaintainer: $c"
 done
