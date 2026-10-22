@@ -4,7 +4,7 @@
 #   scripts/copy-set.sh (one set) and scripts/config-check.sh; reads scripts/copy-sets.json and
 #   .claude-plugin/plugin.json; runs the notifyCommand / notifyFallbackCommand config keys.
 #
-# The systemd units of setup steps 5-10 run COPIES under <config dir>/middle-management-*/, because
+# The systemd units of setup steps 5-9 run COPIES under <config dir>/middle-management-*/, because
 # the plugin's cache path is versioned. When this plugin's version differs from the stamp
 # <config dir>/state/plugin-version: under flock, every copy dir of scripts/copy-sets.json that EXISTS
 # (= that step is installed) gets its full set again (copy-set.sh: <file>.tmp + mv, a new inode, so a

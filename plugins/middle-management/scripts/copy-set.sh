@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # middle-management plugin: install one copy set of scripts/copy-sets.json into <config dir>/<set>/.
-# Consumers: commands/middle-management-setup.md steps 5-10 (via Bash), hooks/refresh-copies.sh,
+# Consumers: commands/middle-management-setup.md steps 5-9 (via Bash), hooks/refresh-copies.sh,
 #   tests/refresh-copies.sh. Calls config-check.sh (the config dir).
 #
 # Usage: copy-set.sh <set>      e.g. copy-set.sh middle-management-heartbeat

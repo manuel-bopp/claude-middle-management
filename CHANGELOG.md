@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.13.0 - 2026-10-22
+
+**The PR review runner left the plugin.** Reviewing and merging is up to each repository's
+maintainer; a generic plugin ships no reviewer of its own. Gone: `scripts/pr-review-watch.sh`,
+`templates/systemd/mm-pr-review.{service,timer}`, the copy set `middle-management-prreview`, setup
+step 10 and interview item 20 (now the central maintainer, below), the `prReview` validation and
+`tests/pr-review-watch.sh`. An old `prReview` key stays valid (`config-check.sh` rejects no unknown
+key) and does nothing in the plugin.
+
+**Central maintainer (optional).** New config key `centralMaintainer`: `name`, `repos` (`owner/name`,
+at least one) and `reviewer` (a GitHub login, optional), validated by `config-check.sh`. With it, a
+coordinator or worker whose change belongs in one of those repos opens a pull request there from a
+branch, with `--reviewer` when set, names the maintainer in its text, fixes what the maintainer
+finds and never merges it itself (skill `middle-management`, README "Contributing and releases").
+Without the key the plugin says nothing about it.
+
+**Hosts that run the runner.** The refresh hook only walks the sets of `scripts/copy-sets.json`, so
+`<config dir>/middle-management-prreview/` and `mm-pr-review.timer` stay as they are and keep
+running the 0.12.1 copy, which reads `prReview` (setup keeps that key on a re-run). One check now:
+`grep middle-management-prreview ~/.config/systemd/user/unit-failure-alarm@.service`. A hit means
+every unit's alarm runs from that dir, which no refresh updates any more: point it at another copy
+dir that `ls -d <config dir>/middle-management-*` shows (every set carries the alarm script; with
+none, create one with the plugin's `scripts/copy-set.sh middle-management-canary`), e.g.
+`sed -i 's|/middle-management-prreview/|/middle-management-canary/|' ~/.config/systemd/user/unit-failure-alarm@.service && systemctl --user daemon-reload`.
+Once the maintainer's own runner replaces it: `systemctl --user disable --now mm-pr-review.timer &&
+systemctl --user stop mm-pr-review.service; systemctl --user reset-failed mm-pr-review.service` (a
+tick stopped mid-run may alarm once), remove `~/.config/systemd/user/mm-pr-review.*`, the dir
+and `<config dir>/state/pr-review/`, then `systemctl --user daemon-reload`. Keep the alarm unit:
+other units may point `OnFailure=` at it.
+
 ## 0.12.1 - 2026-10-22
 
 **The review runner checks placement first.** Before correctness, the headless review asks whether
