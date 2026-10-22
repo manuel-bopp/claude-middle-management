@@ -334,7 +334,10 @@ OUT=$(run); has "placementGuide: its text reaches the prompt as trusted guidance
 has "...expanded once, never re-parsed" '$HOME stays literal' "$(cat "$FIX/claude.prompt")"
 setup '{"placementGuide": "/nonexistent/guide.md"}'; pr 1 docs
 OUT=$(run); is "an unreadable placementGuide -> no review" "$(cat "$FIX/claude.n" 2>/dev/null)" ""
-has "...error notify names it" "placementGuide /nonexistent/guide.md is not readable" "$(notes)"
+has "...error notify names it" "placementGuide /nonexistent/guide.md is not a readable file" "$(notes)"
+setup "{\"placementGuide\": \"$TMP\"}"; pr 1 docs
+OUT=$(run); is "a placementGuide that is a directory -> no review" "$(cat "$FIX/claude.n" 2>/dev/null)" ""
+has "...error notify names it" "placementGuide $TMP is not a readable file" "$(notes)"
 
 echo "== Z =="
 EM=$(printf '\xe2\x80\x94')   # the em dash, spelled as bytes so this file carries none

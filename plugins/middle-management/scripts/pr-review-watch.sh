@@ -209,7 +209,7 @@ $URL"
   VIS="${VIS:-of unknown visibility (treat it as public)}"
   GUIDETEXT=""
   if [ -n "$GUIDE" ]; then
-    [ -r "$GUIDE" ] || { err "placementGuide $GUIDE is not readable"; return; }
+    [ -f "$GUIDE" ] && [ -r "$GUIDE" ] || { err "placementGuide $GUIDE is not a readable file"; return; }
     GUIDETEXT="The user's own placement guide (trusted; from this host, not from the PR):
 $(head -c 20000 "$GUIDE")
 "
