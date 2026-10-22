@@ -266,6 +266,13 @@ resumed coordinator reads the RE-WAKE block at the top of the board (or the last
 in its own transcript) and works it before taking any new task — see "Recovery after a
 kill" below.
 
+**A change for the central stock goes to its maintainer (both roles).** Only when the config has
+`centralMaintainer` (`jq '.centralMaintainer' "$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh" file)"`):
+when your change belongs in one of its `repos` (shared infrastructure, tools, skills), open a pull
+request there from a branch, never onto `main`, with `--reviewer <reviewer>` when that key is set,
+and name the maintainer (`name`) in the pull request's text. Fix what the maintainer finds; never
+merge it yourself. Without the key, none of this applies.
+
 ## Open items
 
 A to-do that lives only in a transcript dies with the session, and a coordinator hand-over drops

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.13.0 - 2026-10-22
+
+**The PR review runner left the plugin.** Reviewing and merging is up to each repository's
+maintainer; a generic plugin ships no reviewer of its own. Gone: `scripts/pr-review-watch.sh`,
+`templates/systemd/mm-pr-review.{service,timer}`, the copy set `middle-management-prreview`, setup
+step 10 and interview item 20 (now the central maintainer, below), the `prReview` validation and
+`tests/pr-review-watch.sh`. An old `prReview` key stays valid (`config-check.sh` rejects no unknown
+key) and does nothing in the plugin.
+
+**Central maintainer (optional).** New config key `centralMaintainer`: `name`, `repos` (`owner/name`,
+at least one) and `reviewer` (a GitHub login, optional), validated by `config-check.sh`. With it, a
+coordinator or worker whose change belongs in one of those repos opens a pull request there from a
+branch, with `--reviewer` when set, names the maintainer in its text, fixes what the maintainer
+finds and never merges it itself (skill `middle-management`, README "Contributing and releases").
+Without the key the plugin says nothing about it.
+
+**Hosts that run the runner.** The refresh hook only walks the sets of `scripts/copy-sets.json`, so
+`<config dir>/middle-management-prreview/` and `mm-pr-review.timer` stay as they are and keep
+running the 0.12.1 copy, which reads `prReview` (setup keeps that key on a re-run). Once the
+maintainer's own runner replaces it: `systemctl --user disable --now mm-pr-review.timer`, check that
+`grep middle-management-prreview ~/.config/systemd/user/unit-failure-alarm@.service` finds nothing
+(otherwise point that line at another installed copy dir, every set carries the alarm script, and
+`systemctl --user daemon-reload`), then remove the dir.
+
 ## 0.12.1 - 2026-10-22
 
 **The review runner checks placement first.** Before correctness, the headless review asks whether

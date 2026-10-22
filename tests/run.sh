@@ -1218,6 +1218,15 @@ for c in '"127.0.0.1:8470"' '"http://a b"' '5' '"http://x\"y"'; do
   [ "$(vcfg "{\"t3Url\":$c}")" = 1 ] && ok "S2 invalid t3Url: $c" || bad "S2 invalid t3Url: $c"
 done
 [ "$(vcfg '{"t3Url":"http://127.0.0.1:8470"}')" = 0 ] && ok "S2 t3Url http://127.0.0.1:8470 is valid" || bad "S2 t3Url valid"
+for c in '"x"' '{"repos":["o/r"]}' '{"name":" ","repos":["o/r"]}' '{"name":"M"}' '{"name":"M","repos":[]}' \
+         '{"name":"M","repos":["no-slash"]}' '{"name":"M","repos":["o/r"],"reviewer":"a b"}' '{"name":"M","repos":["o/r"],"reviewer":5}'; do
+  [ "$(vcfg "{\"centralMaintainer\":$c}")" = 1 ] && ok "S2 invalid centralMaintainer: $c" || bad "S2 invalid centralMaintainer: $c"
+done
+for c in '{"centralMaintainer":{"name":"Infra team","repos":["acme/infra","acme/skills"],"reviewer":"infra-bot"}}' \
+         '{"centralMaintainer":{"name":"Infra team","repos":["acme/infra"]}}' \
+         '{"prReview":{"repos":["acme/x"],"authors":["a"],"maxRounds":"old"}}'; do
+  [ "$(vcfg "$c")" = 0 ] && ok "S2 valid: $c" || bad "S2 valid: $c"
+done
 
 # S3 the resolver: segment boundary, nesting, git worktree subpath, refused entries
 H="$(new_home)"; mkdir -p "$H/ff/sub" "$H/ffother"
@@ -1411,7 +1420,7 @@ TW_LINE="$(printf '%s\n' "$TW_OUT" | grep -E '^RESULT:' | tail -1)"
 say "  ${TW_LINE:-t3-watch matrix did not report}"
 [ "$TW_RC" -eq 0 ] || FAIL=$((FAIL+1))
 
-for M in t3-report t3-seat topics work-packages morning-t3 guard-canary prompt-hooks refresh-copies pr-review-watch; do
+for M in t3-report t3-seat topics work-packages morning-t3 guard-canary prompt-hooks refresh-copies; do
   say ""
   say "== $M (tests/$M.sh) =="
   M_OUT="$(bash "$ROOT/tests/$M.sh" 2>&1)"; M_RC=$?

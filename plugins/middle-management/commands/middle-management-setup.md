@@ -1,5 +1,5 @@
 ---
-description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user and its fallback; optionally install the stuck-coordinator heartbeat, the lane reaper, the headless morning ritual or the T3 morning coordinator, the T3 Code watcher, the guard canary and the PR review runner
+description: Show and edit the middle-management config — protected checkouts, staging protection, board path, the off-keyboard channel to the user and its fallback; optionally install the stuck-coordinator heartbeat, the lane reaper, the headless morning ritual or the T3 morning coordinator, the T3 Code watcher and the guard canary
 allowed-tools: ["Bash", "Read", "AskUserQuestion"]
 ---
 
@@ -53,17 +53,17 @@ Schema (nothing else is valid):
   "replyTimestamp": false,
   "intentCheck": false,
   "intentCheckVerbs": "",
-  "prReview": { "repos": ["owner/repo"], "authors": ["login"], "model": "opus",
-                "securityModel": "fable", "approve": false, "reviewerName": "Mike", "maxRounds": 4, "base": "main",
-                "placementGuide": "~/.claude/docs/infra-placement.md" }
+  "centralMaintainer": { "name": "Infra maintainer", "reviewer": "github-login", "repos": ["owner/infra"] }
 }
 ```
 
 `name`, `root` and `base` are required per entry; `install`, `serve` and
 `worktreeDir` are optional. `name`, `root`, `board` are required per scope entry.
-In `prReview`, `repos` and `authors` are required for the runner to do anything (an empty
-list = it reviews nothing); the other keys default as shown, except `placementGuide`: the
-example path is only an illustration, and by default there is no guide (set it only when that file exists). Every top-level key except `protectedCheckouts` is
+In `centralMaintainer`, `name` and at least one `repos` entry are required, `reviewer` is
+optional; the key itself has no default (absent = the plugin says nothing about a maintainer).
+A `prReview` key from 0.12.x is no longer part of this schema but stays valid: keep it as it is
+when you write the file back (the old review runner's copy, where a host still runs it, reads it).
+Every top-level key except `protectedCheckouts` is
 optional and has the default shown above; write only the ones the user decides
 on, and leave the rest out.
 
@@ -179,7 +179,7 @@ repositories; the user names them.
 9b. **Fallback alarm route.** Ask for a second command that reaches the user when the first one
     fails (another bot, a mail, a second chat), same contract. It becomes `notifyFallbackCommand`;
     `unit-failure-alarm.sh` runs it only when `notifyCommand` is missing or fails. Ask this BEFORE
-    steps 5-10: each of them rewrites the alarm unit, and an alarm that fires before the key exists
+    steps 5-9: each of them rewrites the alarm unit, and an alarm that fires before the key exists
     has no second route. Omit the key when there is none.
 
 10. **Session log.** Show the path step 1 resolved and ask only whether the user
@@ -279,18 +279,13 @@ repositories; the user names them.
     (where the team talks, which repos and branch pairs, board block sections, how the day plan
     reaches the phone). Names and paths of secret files only, never their values.
 
-20. **PR review runner** (README "Contributing and releases"; only on the one machine that reviews
-    and merges the pull requests of an infra repo). `prReview.repos`: the `owner/name` repos it
-    watches. `prReview.authors`: the GitHub logins whose pull requests it reviews and may merge
-    (the allowlist, required: a fork or anyone else gets one "not reviewed" notice and nothing
-    more). `model` (`opus`) and `securityModel` (`fable`, used when the diff touches
-    `plugins/*/hooks/**` or a path with `guard` in it), `reviewerName` (`Mike`), `maxRounds` (4,
-    then the PR waits for `userName`). `approve` stays `false` while the runner's `gh` login is the
-    PR authors' own account (GitHub refuses to approve your own PR; the verdict is then a review
-    comment); `true` once it has its own account. `placementGuide` (optional, no default): the path
-    of a local file that says which content belongs in which of the user's repositories. Offer it
-    when the user has more than one repository or a public one. The file must exist and be readable,
-    otherwise every review is an error. Then offer step 10.
+20. **Central maintainer (optional)** (README "Contributing and releases"). Ask whether shared
+    infrastructure, tools or skills on this machine are maintained centrally by someone else. If
+    so: `centralMaintainer.name` (how sessions name the maintainer in a pull request),
+    `centralMaintainer.repos` (the `owner/name` repositories of that central stock) and, optional,
+    `centralMaintainer.reviewer` (the maintainer's GitHub login, passed as `--reviewer`). A
+    session whose change belongs in one of those repos then opens a pull request there and leaves
+    the merge to the maintainer. Omit the key when nobody maintains a central stock.
 
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped
@@ -668,51 +663,3 @@ reaches them through the alarm (with its fallback route); `<config dir>/state/gu
 the end-to-end streams for a week; the copy is refreshed at the first session start after a plugin
 update (re-run this step only when the CHANGELOG says so). Disarm with
 `systemctl --user disable --now mm-guard-canary.timer`; never run that here unasked.
-
-## Step 10 — PR review runner (optional, Linux only)
-
-`scripts/pr-review-watch.sh` is a systemd **user** timer (every 15 minutes): for every open pull
-request of an allowlisted author in `prReview.repos` with a head it has not reviewed yet, it checks
-the version gate (a touched `plugins/<p>/` needs a higher `plugin.json` version than the base
-branch), runs `tests/run.sh`, runs a headless review with read-only tools, posts one review, and
-merges the PR when the verdict is `CLEAN`, the tests are green and the gate holds. Every merge, every
-round with findings and every error reaches the user through `notifyCommand`. Offer it only on the
-one machine that reviews an infra repo (README "Contributing and releases"); otherwise skip this
-step and say so.
-
-Preconditions: the four of step 5, plus `gh`, `git`, `claude`, `timeout` and `flock` on this PATH,
-`prReview.repos` and `prReview.authors` from step 2 item 20, and a `gh` login that can review and
-merge in those repos (the unit runs as this user and uses that login):
-
-```bash
-for c in gh git claude timeout flock; do command -v "$c" >/dev/null && echo "$c: ok" || echo "NO $c on PATH"; done
-gh auth status 2>&1 | head -3
-```
-
-Tell the user before installing: the first tick reviews every open pull request of an allowlisted
-author, and merges the clean ones. Then:
-
-```bash
-CHECK="${CLAUDE_PLUGIN_ROOT}/scripts/config-check.sh"
-CFG_DIR="$(bash "$CHECK" dir)"; PR="$CFG_DIR/middle-management-prreview"; UNITS="$HOME/.config/systemd/user"
-mkdir -p "$UNITS"
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/copy-set.sh" middle-management-prreview || exit 1
-for u in mm-pr-review.service mm-pr-review.timer; do
-  sed "s|__PRREVIEW_DIR__|$PR|g; s|__CONFIG_DIR__|$CFG_DIR|g; s|__PATH__|$PATH|g" \
-    "${CLAUDE_PLUGIN_ROOT}/templates/systemd/$u" > "$UNITS/$u"
-done
-sed "s|__HEARTBEAT_DIR__|$PR|g; s|__CONFIG_DIR__|$CFG_DIR|g" \
-  "${CLAUDE_PLUGIN_ROOT}/templates/systemd/unit-failure-alarm@.service" > "$UNITS/unit-failure-alarm@.service"
-systemctl --user daemon-reload && systemctl --user enable --now mm-pr-review.timer
-systemctl --user list-timers mm-pr-review.timer --no-pager
-```
-
-Then tell the user, in plain text: state per pull request lives in
-`<config dir>/state/pr-review/<owner>_<repo>/<number>.json`; a pull request that reached
-`maxRounds` with findings is not reviewed again until that file is removed (`rm` it once the
-findings are dealt with, and the next tick starts over at round 1); test and review time limits and
-the per-tick budget are `Environment=MM_PR_REVIEW_TESTS_MIN=` / `MM_PR_REVIEW_TIMEOUT_MIN=` /
-`MM_PR_REVIEW_BUDGET_MIN=` lines in `~/.config/systemd/user/mm-pr-review.service` (defaults 15 / 20 /
-80 minutes); the copy is refreshed at
-the first session start after a plugin update (re-run this step only when the CHANGELOG says so).
-Disarm with `systemctl --user disable --now mm-pr-review.timer`; never run that here unasked.
