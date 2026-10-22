@@ -62,7 +62,8 @@ Schema (nothing else is valid):
 `name`, `root` and `base` are required per entry; `install`, `serve` and
 `worktreeDir` are optional. `name`, `root`, `board` are required per scope entry.
 In `prReview`, `repos` and `authors` are required for the runner to do anything (an empty
-list = it reviews nothing); the other keys default as shown. Every top-level key except `protectedCheckouts` is
+list = it reviews nothing); the other keys default as shown, except `placementGuide`: the
+example path is only an illustration, and by default there is no guide (set it only when that file exists). Every top-level key except `protectedCheckouts` is
 optional and has the default shown above; write only the ones the user decides
 on, and leave the rest out.
 
@@ -286,7 +287,10 @@ repositories; the user names them.
     `plugins/*/hooks/**` or a path with `guard` in it), `reviewerName` (`Mike`), `maxRounds` (4,
     then the PR waits for `userName`). `approve` stays `false` while the runner's `gh` login is the
     PR authors' own account (GitHub refuses to approve your own PR; the verdict is then a review
-    comment); `true` once it has its own account. Then offer step 10.
+    comment); `true` once it has its own account. `placementGuide` (optional, no default): the path
+    of a local file that says which content belongs in which of the user's repositories. Offer it
+    when the user has more than one repository or a public one. The file must exist and be readable,
+    otherwise every review is an error. Then offer step 10.
 
 On a re-run, walk the existing entries with the user first: keep, edit or
 remove each one, then ask about additions. An entry the user removes is dropped
