@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.1 - 2026-10-22
+
+**The review runner checks placement first.** Before correctness, the headless review asks whether
+the change belongs in this repository and at this place, whether personal or user-specific content
+would go into a public repository, and whether the pull request says it waits for the user's own
+review. Any of these ends in the new verdict `VERDICT: ASK`: no merge, one review comment, one
+"needs <userName>" notice with the reason and the suggested place. That head counts as reviewed,
+and a new push starts over. The prompt names the repository's visibility (`gh repo view`; unknown
+is treated as public). New optional config key `prReview.placementGuide`: the path of a local file
+on the reviewing machine that says which content belongs in which repository. It is read there,
+never from the pull request, and goes into the prompt as the user's guidance. An unreadable guide
+is an error, so there is no review without it. Cause: #8 put one user's reply-style preferences into
+this public repository and was merged as CLEAN, although its text said the user would review it.
+
 ## 0.12.0 - 2026-10-21
 
 **Release path.** Changes go through a pull request on a protected `main`, with a version bump and

@@ -64,6 +64,7 @@ echo "$*" >> "$FIX/gh.log"
 case "$1 $2" in
   "pr list")   [ -f "$FIX/list.fail" ] && { echo "HTTP 401: Bad credentials" >&2; exit 1; }; cat "$FIX/prs.json" ;;
   "repo clone") git clone -q "$FIX/remote/$3.git" "$4" ;;
+  "repo view") echo public ;;
   "pr review") n=$3; shift 3; kind=""; body=""
                while [ $# -gt 0 ]; do case $1 in --body-file) body=$2; shift ;; --comment|--approve|--request-changes) kind=$1 ;; esac; shift; done
                [ -f "$FIX/review.fail" ] && { echo "HTTP 422: review refused" >&2; exit 1; }
@@ -83,6 +84,7 @@ a=""; p=""; for x in "$@"; do [ "$p" = --add-dir ] && a=$x; p=$x; done
 case "$(cat "$FIX/claude.mode" 2>/dev/null || echo clean)" in
   clean)    jq -n '{is_error: false, result: "none\n\nVERDICT: CLEAN\n"}' ;;
   findings) jq -n '{is_error: false, result: "- plugins/mm/x.sh:1 prints the wrong letter\nVERDICT: FINDINGS"}' ;;
+  ask)      jq -n '{is_error: false, result: "Personal preferences do not belong in a public plugin repo; place: acme/private docs/\nVERDICT: ASK"}' ;;
   garbage)  jq -n '{is_error: false, result: "Looks fine to me. VERDICT: CLEAN, probably"}' ;;
   fail)     echo "API Error: 500" >&2; exit 1 ;;
 esac
@@ -313,6 +315,26 @@ fi
 setup '{"repos": ["not-a-repo"]}'
 OUT=$(run); is "a malformed repo -> invalid config -> exit 1" "$?" 1; has "...says so" "missing or invalid" "$(cause)"
 lacks "nothing user-specific in the script" "/home/" "$(cat "$P/scripts/pr-review-watch.sh")"
+
+echo "== N: placement (ASK) =="
+setup; pr 1 docs; echo ask > "$FIX/claude.mode"
+OUT=$(run); is "ASK -> exit 0" "$?" 0
+is "...no merge" "$(cat "$FIX/merges.log" 2>/dev/null)" ""
+is "...one comment review" "$(cat "$FIX/reviews.log")" "1 --comment"
+has "...verdict says it asks the user" "**Verdict: ASK Manu" "$(cat "$FIX/body.last")"
+has "...needs-user notify" "PR needs Manu: acme/tools #1, Mike did not merge it" "$(notes)"
+has "...with the reason and the suggested place" "place: acme/private docs/" "$(notes)"
+has "...state: head reviewed" "$(sha docs)" "$(state 1)"
+OUT=$(run); is "...the same head is not asked again" "$(notes | grep -c 'PR needs Manu')" 1
+has "prompt: placement is checked first" "First check PLACEMENT" "$(cat "$FIX/claude.prompt")"
+has "...the repo's visibility is named" "acme/tools is public" "$(cat "$FIX/claude.prompt")"
+G=$TMP/guide.md; printf 'acme/tools: generic code only. Personal notes go to acme/private.\n$HOME stays literal\n' > "$G"
+setup "{\"placementGuide\": \"$G\"}"; pr 1 docs; rm -f "$FIX/claude.mode"
+OUT=$(run); has "placementGuide: its text reaches the prompt as trusted guidance" "Personal notes go to acme/private." "$(cat "$FIX/claude.prompt")"
+has "...expanded once, never re-parsed" '$HOME stays literal' "$(cat "$FIX/claude.prompt")"
+setup '{"placementGuide": "/nonexistent/guide.md"}'; pr 1 docs
+OUT=$(run); is "an unreadable placementGuide -> no review" "$(cat "$FIX/claude.n" 2>/dev/null)" ""
+has "...error notify names it" "placementGuide /nonexistent/guide.md is not readable" "$(notes)"
 
 echo "== Z =="
 EM=$(printf '\xe2\x80\x94')   # the em dash, spelled as bytes so this file carries none

@@ -54,7 +54,8 @@ Schema (nothing else is valid):
   "intentCheck": false,
   "intentCheckVerbs": "",
   "prReview": { "repos": ["owner/repo"], "authors": ["login"], "model": "opus",
-                "securityModel": "fable", "approve": false, "reviewerName": "Mike", "maxRounds": 4, "base": "main" }
+                "securityModel": "fable", "approve": false, "reviewerName": "Mike", "maxRounds": 4, "base": "main",
+                "placementGuide": "~/.claude/docs/infra-placement.md" }
 }
 ```
 
