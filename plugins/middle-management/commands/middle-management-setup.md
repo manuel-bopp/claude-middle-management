@@ -11,7 +11,7 @@ arms the worktree guard, the `/wt` helper, the blanket-staging guard and the
 off-keyboard channel the heartbeat, the unit-failure alarm and the coordinator
 all send through.
 
-Schema (setup writes no other key):
+Schema (setup adds no other key):
 
 ```json
 {
