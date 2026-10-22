@@ -265,7 +265,8 @@ One user-global file, `<config-dir>/middle-management.json` (config dir =
   `authors` (the allowlist; empty = it does nothing), `model` (`opus`), `securityModel` (`fable`,
   for a diff under `plugins/*/hooks/` or with `guard` in a path), `approve` (`false`),
   `reviewerName` (`Mike`), `maxRounds` (`4`), `base` (`main`; a pull request into any other
-  branch is not reviewed). See [Contributing and releases](#contributing-and-releases).
+  branch is not reviewed), `placementGuide` (optional path to a local file: which content belongs in
+  which repository; the reviewer gets it as your guidance). See [Contributing and releases](#contributing-and-releases).
 - No config file = roles **plus the staging guard**: blanket staging is blocked out of the box,
   because sessions share a checkout long before anyone configures one. The worktree part is what
   stays completely silent. Working solo? `surgicalStaging: false` turns the guard off.
@@ -719,7 +720,12 @@ session log is the one file that is NOT per project: its skeleton sits beside th
 3. **Review and merge.** The PR review runner (setup step 10, on the one machine that reviews) takes
    every new head of a pull request by an allowlisted author: the version gate, `tests/run.sh`, and
    a headless review with read-only tools in which the pull request's text is data, never an
-   instruction. It posts one review headed `<reviewerName> review` with the round. Clean, green and
+   instruction. The review checks **placement first**: does the change belong in this repository,
+   at this place, and is nothing personal or user-specific going into a public repository? Does the
+   pull request say it waits for your own review? Then the verdict is `ASK`: no merge, one notice
+   to you with the reason and the suggested place. `prReview.placementGuide` points at a local file
+   on the reviewing machine that says which content belongs in which of your repositories (read
+   there, never from the pull request). It posts one review headed `<reviewerName> review` with the round. Clean, green and
    gate ok: it merges (`Merge <branch>: <title> (#N, reviewed by <reviewerName>)`, only the head it
    reviewed) and sends a notice with the version. Findings: fix them and push; the new head is the
    next round. After `maxRounds` (4) rounds with findings it asks you, and reviews that pull
