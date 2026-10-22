@@ -25,7 +25,8 @@ dir that `ls -d <config dir>/middle-management-*` shows (every set carries the a
 none, create one with the plugin's `scripts/copy-set.sh middle-management-canary`), e.g.
 `sed -i 's|/middle-management-prreview/|/middle-management-canary/|' ~/.config/systemd/user/unit-failure-alarm@.service && systemctl --user daemon-reload`.
 Once the maintainer's own runner replaces it: `systemctl --user disable --now mm-pr-review.timer &&
-systemctl --user stop mm-pr-review.service`, remove `~/.config/systemd/user/mm-pr-review.*`, the dir
+systemctl --user stop mm-pr-review.service; systemctl --user reset-failed mm-pr-review.service` (a
+tick stopped mid-run may alarm once), remove `~/.config/systemd/user/mm-pr-review.*`, the dir
 and `<config dir>/state/pr-review/`, then `systemctl --user daemon-reload`. Keep the alarm unit:
 other units may point `OnFailure=` at it.
 
